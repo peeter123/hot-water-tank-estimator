@@ -1,0 +1,13 @@
+# yamllint settings for the YAML in this repository (services.yaml, GitHub workflows, OpenSpec config).
+extends: default
+ignore: |
+  .claude/
+rules:
+  line-length:
+    max: 120
+    allow-non-breakable-words: true
+  document-start: disable
+  truthy:
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1

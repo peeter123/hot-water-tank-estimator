@@ -15,101 +15,135 @@ SHALL create one device named after the entry title, and that device SHALL hold 
 - **WHEN** a user adds the integration twice, for an upstairs and a downstairs tank
 - **THEN** two devices exist, each with its own model and entities
 
-### Requirement: Config flow collects the sources
+### Requirement: Config flow collects the tank and its sources
 The config flow SHALL ask for:
 - the tank name and volume (20-2000 L);
-- the tank temperature sensor (required);
-- the total water meter (required);
-- the heat input: an energy counter, a heat power sensor and/or a heating-active binary sensor, with at least one
-  of the three required;
-- optional humidity sensors;
-- an optional cold water temperature sensor;
-- an optional setpoint entity.
+- the tank sensor and its height (20-80 %, default 50 %);
+- the total water meter;
+- at least one heat input: an energy counter, a heat power sensor or a heating-active binary sensor;
+- optionally: flow and return temperature sensors (as a pair), humidity sensors, and a cold water sensor.
+
+#### Scenario: Required fields
+- **WHEN** a user leaves the tank sensor or the water meter empty
+- **THEN** the step does not submit and marks the field as required
 
 #### Scenario: No heat information
 - **WHEN** a user submits the heat input step with no energy counter, no power sensor and no heating-active binary
   sensor
 - **THEN** the step shows an error that at least one is required
 
+#### Scenario: Only one of flow and return
+- **WHEN** a user picks a flow temperature sensor without a return temperature sensor
+- **THEN** the step shows an error that both or neither are needed
+
 #### Scenario: Unsuitable water meter
 - **WHEN** a user picks a water meter whose unit is not a volume unit
 - **THEN** the step shows an error naming the accepted units
 
+#### Scenario: Sensor height out of range
+- **WHEN** a user enters a sensor height of 90 %
+- **THEN** the step shows an error that the height must be 20-80 %
+
 ### Requirement: Options flow tunes the model without losing its state
-The options flow SHALL let the user change every tuning value:
-- mix, floor, full and maximum temperature;
-- cap margin, loss coefficient and ambient temperature;
-- other-draws share, shower flow, humidity rise and window, long-draw duration, session gap and maximum draw;
-- cold water curve mean, amplitude and coldest day;
-- the power threshold.
+The options flow SHALL let the user change:
+- every tuning value named in the defaults requirements below;
+- the optional source entities;
+- a lock for each learned parameter (see calibration);
+- the history days for the setup fit (1-30, default 30).
 
-It SHALL also let the user change the optional source entities. Saving SHALL keep the current tank average.
+Saving SHALL keep the current tank average, the charged temperature and the calibration state.
 
-#### Scenario: Change floor temperature
-- **WHEN** the tank average is 44 C and the user changes the floor temperature from 25 C to 22 C
-- **THEN** the tank average stays 44 C and the remaining litres are recalculated with 22 C
+#### Scenario: Change sensor height
+- **WHEN** T_avg is 44 C and the user changes the sensor height from 50 % to 65 %
+- **THEN** T_avg stays 44 C, and the next sensor bound uses 65 %
 
-### Requirement: Defaults for tuning values
-Every tuning value SHALL have a default, so that a fresh entry runs without opening the options. The defaults
-SHALL be those in the scenarios below. The design records where each one comes from.
+### Requirement: Temperature and shape defaults
+Every tuning value SHALL have a default, so that a fresh entry runs without opening the options. The defaults for
+temperatures and tank shape SHALL be those in the scenario below. The design records where each one comes from.
 
-#### Scenario: Temperature defaults
+#### Scenario: Fresh entry, temperatures and shape
 - **WHEN** a user finishes the config flow without opening the options
-- **THEN** the mix temperature is 38 C, the floor 25 C, the full temperature 55 C, the maximum 95 C, the cap margin
-  3 K and the ambient temperature 20 C
+- **THEN** the defaults are:
+  - sensor height 50 % and thermocline width 35 %;
+  - usable fraction 0.85;
+  - mix temperature 38 C and maximum temperature 95 C;
+  - sensor tolerance 1.5 K and sensor margin 2 K;
+  - ambient temperature 20 C;
+  - cold water curve mean 12.5 C, amplitude 5 K and coldest day 46.
 
-#### Scenario: Model coefficient defaults
-- **WHEN** a user finishes the config flow without opening the options
-- **THEN** the loss coefficient is 0.0037 per hour, the other-draws share 0.3, the shower flow 7.5 L/min and the
-  power threshold 100 W, and the cold water curve has mean 12.5 C, amplitude 5 K and coldest day 46
+### Requirement: Draw and heat defaults
+The defaults for draws, losses and heat input SHALL be those in the scenario below.
 
-#### Scenario: Draw detection defaults
+#### Scenario: Fresh entry, draws and heat
 - **WHEN** a user finishes the config flow without opening the options
-- **THEN** the humidity rise is 6 points, the humidity window 60 min, the long-draw duration 0 (off), the session
-  gap 60 s and the maximum draw per reading 100 L
+- **THEN** the defaults are:
+  - loss coefficient 0.004 per hour;
+  - other-draws hot share 0.2 and start-up energy 0 kWh;
+  - shower flow 7.5 L/min;
+  - humidity rise 6 points and humidity window 60 min;
+  - long-draw duration 0 (off) and reclassify window 3 min;
+  - session gap 60 s and maximum draw per reading 100 L;
+  - power threshold 100 W.
 
 ### Requirement: Entities and units
-Each tank SHALL provide:
-- sensors for tank average temperature (C), hot water remaining (L, volume storage), percent full (%), shower
-  minutes remaining (min) and cold water temperature (C);
-- a shower detected binary sensor.
+Each tank SHALL provide sensors (state class measurement) for:
+- tank water remaining (L);
+- shower water remaining (L);
+- percent charged (%);
+- shower minutes remaining (min);
+- charged temperature, tank average and cold water temperature (C).
 
-All sensors SHALL use state class measurement, and SHALL use translated names without emoji.
+It SHALL also provide a shower detected binary sensor, a "Shower ran cold" button and the calibration diagnostic
+sensors. Names SHALL be translated, without emoji.
 
 #### Scenario: Units shown
 - **WHEN** the entities are listed
-- **THEN** the remaining sensor is in litres, the percent sensor in %, the minutes sensor in min, and the
+- **THEN** both remaining sensors are in litres, percent charged in %, the minutes sensor in min, and the three
   temperatures in degrees Celsius
 
-### Requirement: Set tank average action
-The action `hot_water_tank_estimator.set_tank_average` SHALL take a target tank and an optional temperature. It
-SHALL set that tank's average to the given temperature, or to the tank sensor's value when no temperature is
-given, within the physical bounds.
+### Requirement: Set tank state action
+The action `hot_water_tank_estimator.set_tank_state` SHALL take a target tank and optionally a tank average and a
+charged temperature. With neither given, it SHALL charge the tank to the tank sensor's reading. With only a tank
+average given, the charged temperature SHALL stay as it is. The physical bounds SHALL be applied either way.
 
-#### Scenario: Anchor by hand
-- **WHEN** the action runs without a temperature while the tank sensor reads 52 C
-- **THEN** the tank average becomes 52 C
+#### Scenario: Charge by hand
+- **WHEN** the action runs with no temperatures while the tank sensor reads 52 C
+- **THEN** T_avg and T_ch become 52 C
 
-#### Scenario: No temperature and sensor unavailable
-- **WHEN** the action runs without a temperature while the tank sensor is unavailable
-- **THEN** the action fails with an error and the tank average is unchanged
+#### Scenario: Set the average only
+- **WHEN** the action runs with a tank average of 30 C while T_ch is 55 C
+- **THEN** T_avg becomes 30 C and T_ch stays 55 C
+
+#### Scenario: No temperatures and sensor unavailable
+- **WHEN** the action runs with no temperatures while the tank sensor is unavailable
+- **THEN** the action fails with an error and the state is unchanged
+
+### Requirement: Recalibrate action
+The action `hot_water_tank_estimator.recalibrate` SHALL take a target tank and an optional number of days (1-30).
+It SHALL rerun the setup fit from the calibration spec over that history. Locked parameters SHALL stay as they are.
+
+#### Scenario: Recalibrate after moving the sensor
+- **WHEN** the user changes the sensor height and runs recalibrate with 14 days
+- **THEN** the unlocked parameters are refitted from the last 14 days
 
 ### Requirement: State survives a restart
 After a Home Assistant restart or an entry reload, each tank SHALL restore:
-- its tank average;
+- T_avg and T_ch;
 - the last water meter reading and the last energy counter reading;
+- the heating-run state, including the start-up energy used;
+- the current draw session;
 - the humidity window history.
 
-On the first start, with nothing restored, the tank average SHALL start at the tank sensor's value. If that is
-unavailable, it SHALL start at the full temperature.
+On the first start, with nothing restored, the tank SHALL start charged at the tank sensor's reading. If that is
+unavailable, it SHALL start at 50 C.
 
 #### Scenario: Restart
-- **WHEN** Home Assistant restarts while the tank average is 41.2 C
-- **THEN** after the restart the tank average is 41.2 C
+- **WHEN** Home Assistant restarts while T_avg is 41.2 C and T_ch 56.0 C
+- **THEN** after the restart T_avg is 41.2 C and T_ch 56.0 C
 
 #### Scenario: First start
 - **WHEN** a new entry starts and the tank sensor reads 56 C
-- **THEN** the tank average is 56 C
+- **THEN** T_avg and T_ch are 56 C
 
 ### Requirement: Unavailable sources pause their part of the model
 When a source entity is unavailable or non-numeric, the integration SHALL skip the updates that depend on it and
@@ -124,13 +158,21 @@ reading, subject to the counter-reset and implausible-jump rules.
 - **WHEN** the energy counter drops from 151.5 kWh to 0.2 kWh
 - **THEN** no heat is applied and 0.2 kWh is the new starting point
 
+#### Scenario: Tank sensor flickers
+- **WHEN** the tank sensor is unavailable for 2 seconds
+- **THEN** no sensor bound is applied in that time, and the outputs keep updating from the model
+
 ### Requirement: Diagnostics
 The integration SHALL provide config entry diagnostics with:
 - the entry's options;
 - the current model state;
 - whether each source is available;
-- the most recent 50 model events, each with its time, kind, input change and resulting average.
+- the most recent 100 model events, each with its time, kind, input change, and T_avg and T_ch before and after;
+- the calibration state: the parameters in use with their sources, the stored intervals with their charge errors,
+  and the width estimates.
+
+Event kinds are draw, heat, charge, loss, sensor bound and calibration.
 
 #### Scenario: Download diagnostics
 - **WHEN** a user downloads diagnostics for a tank
-- **THEN** the file contains the tank average, the options and the recent events
+- **THEN** the file contains T_avg, T_ch, the options and the recent events

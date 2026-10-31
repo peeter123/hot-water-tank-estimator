@@ -2,8 +2,8 @@
 
 ## Purpose
 
-Decides how much of the water measured by a whole-house water meter came out of the hot water tank. This lets the
-tank model use a meter that also counts toilet flushes, cold taps and appliances.
+Decides which litres measured by a whole-house water meter are mixed shower or bath water and which are other
+draws. This lets the tank model use a meter that also counts toilet flushes, cold taps and appliances.
 
 ## ADDED Requirements
 
@@ -54,14 +54,6 @@ at least the configured rise (default 6 percentage points) above its own lowest 
 - **WHEN** a shower is detected, the window minimum is 61 %, the rise 6 points, and the humidity falls to 65 %
 - **THEN** the shower is still detected, and it ends once the humidity is below 64 %
 
-### Requirement: Shower detection is exposed
-The integration SHALL expose a binary sensor that is on while a shower or bath is detected, by humidity or by the
-long-draw rule. It SHALL be unavailable when neither detection method is configured.
-
-#### Scenario: Binary sensor follows detection
-- **WHEN** a shower is detected by humidity
-- **THEN** the shower detected binary sensor is on
-
 ### Requirement: Long draws count as a shower
 When the long-draw duration is set (default 0, off), a draw session that has lasted at least that many minutes
 SHALL count as a shower from that moment until the session ends. This is for homes without a bathroom humidity
@@ -71,19 +63,37 @@ sensor.
 - **WHEN** the long-draw duration is 3 minutes and a session has run for 3 minutes
 - **THEN** a shower is detected until the session ends
 
-### Requirement: Litres in a shower session count fully as hot
-Every litre drawn while a shower is detected SHALL count as hot water at the mix temperature. When detection
-starts during a session, the litres already drawn in that session SHALL be recounted as hot. Humidity rises about
-a minute after a shower starts, and the long-draw rule fires only after its duration.
+### Requirement: Shower detection is exposed
+The integration SHALL expose a binary sensor that is on while a shower or bath is detected, by humidity or by the
+long-draw rule. It SHALL be unavailable when neither detection method is configured.
 
-#### Scenario: Recount at detection
-- **WHEN** a session has drawn 7 litres at the other-draws share of 0.3 before a shower is detected
-- **THEN** the remaining 7 * 0.7 = 4.9 litres are added to the hot water drawn
+#### Scenario: Binary sensor follows detection
+- **WHEN** a shower is detected by humidity
+- **THEN** the shower detected binary sensor is on
 
-### Requirement: Other draws count at a configured share
-A litre drawn while no shower is detected SHALL count as the configured other-draws hot share of a litre (0-1,
-default 0.3). This covers hot taps mixed in with cold toilet flushes and appliances.
+### Requirement: Litres during a shower are mixed draws
+Every litre drawn while a shower or bath is detected SHALL be a mixed draw: water through a thermostatic mixer, both
+its hot and its cold part counted by the house meter. The tank model takes the mix energy for it (see tank-model).
+
+#### Scenario: Shower litre
+- **WHEN** 1 litre is drawn while a shower is detected
+- **THEN** it is passed to the tank model as 1 litre of mixed draw
+
+### Requirement: Litres just before detection are reclassified
+When detection starts during a session, the litres of that session drawn within the configured reclassify window
+before detection (default 3 minutes) SHALL be reclassified from other draws to mixed draws, and the tank model
+corrected by the difference. Humidity rises about a minute after a shower starts, and the long-draw rule fires only
+after its duration. The window keeps a slow trickle earlier in a long session from being reclassified.
+
+#### Scenario: Reclassify at detection
+- **WHEN** a session has drawn 7 litres in the 3 minutes before a shower is detected, and 40 litres earlier in a
+  slow trickle
+- **THEN** the 7 litres become mixed draws and the 40 litres stay other draws
+
+### Requirement: Other litres are other draws
+A litre drawn while no shower or bath is detected SHALL be another draw. The tank model takes the configured hot
+share of it (see tank-model).
 
 #### Scenario: Toilet flush or tap
-- **WHEN** 6 litres are drawn with no shower detected and the share is 0.3
-- **THEN** 1.8 litres are counted as hot
+- **WHEN** 6 litres are drawn with no shower detected
+- **THEN** they are passed to the tank model as 6 litres of other draws

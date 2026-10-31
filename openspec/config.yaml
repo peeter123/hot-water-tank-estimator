@@ -2,36 +2,135 @@ schema: spec-driven
 
 context: |
   A Home Assistant custom integration (HACS) that estimates how much hot water is left in a domestic hot water
-  (DHW) tank that has no flow meter on the tank itself. It combines a house water meter, the tank temperature
-  sensor, the heater's thermal energy counter and a bathroom humidity sensor into an energy balance of the tank.
-  Developed against one live installation (a 281 L tank on a ground source heat pump, an evening price block that
-  stops reheating), but meant to be published on GitHub for others to install, so every source entity, volume
+  (DHW) tank that has no flow meter on the tank itself. It keeps an energy balance of the tank from a house water
+  meter, the heater's energy counter, the tank temperature sensor (at a configurable height), the heater's flow and
+  return temperatures and a bathroom humidity sensor.
+  Developed against one live installation: a 281 L tank on a ground source heat pump, with an evening price block
+  that stops reheating. It is meant to be published on GitHub for others to install, so every source entity, volume
   and tuning value comes from the config flow; nothing about one installation is hard-coded.
-  This folder is its own git repo. A private Home Assistant config workspace elsewhere on the author's PC holds
-  the deploy script, which uploads custom_components/hot_water_tank_estimator/ to /config/custom_components/ on
-  the live host; a Python change needs a Home Assistant restart to load.
-  Nothing installation-specific (entity IDs, device serials, hostnames, dashboard IDs) may ship in code, tests,
-  fixtures or examples; installation notes and calibration data belong in the git-ignored private/ folder only
-  (private/installation.md). Test fixtures use made-up entity IDs.
-  The live installation must keep working throughout every change.
+
+  Vocabulary: a tank is "charged" when a heating run ends. The run has circulated the whole tank, so all of it sits
+  at the charged temperature, the mean of the heater's flow and return temperature at the end of the run, whether
+  or not that reaches the setpoint. Shower water is mixed: the house water meter counts the hot and the cold water
+  that a thermostatic mixer combines, so the model works with energy, never with "litres counted as hot".
+
+  Layout: this folder is its own git repo. Code in custom_components/hot_water_tank_estimator/ (model.py has no
+  Home Assistant imports), tests in tests/, tools in scripts/, public docs in docs/ (docs/README.md is the entry
+  point). A private Home Assistant config workspace elsewhere on the author's PC holds the deploy script, which
+  uploads custom_components/hot_water_tank_estimator/ to /config/custom_components/ on the live host; a Python
+  change needs a Home Assistant restart to load.
+
+  Private data: installation notes, calibration evidence, raw recorder history (the recorder keeps only 30 days)
+  and analysis scripts live in the git-ignored private/ folder (private/installation.md, private/history/,
+  private/analysis/). Nothing installation-specific (entity IDs, device serials, hostnames, dashboard IDs) may
+  enter tracked code, tests, fixtures, examples or docs; fixtures built from private history replace every entity
+  ID with a made-up one. Never read or print the Home Assistant token file (%USERPROFILE%\.ha_token); scripts read
+  it themselves.
+
+  Safety: changes on the live Home Assistant (deploy, restart, config entries, dashboards, automations) need the
+  user's explicit authorization in the task or the session, and use the home-assistant MCP server or the deploy
+  script, never hand-copied files. The live installation must keep working throughout every change. Never commit,
+  push, create a remote or tag a release without explicit authorization; the one standing exception is the
+  per-group commit in the implementation workflow below, which never extends to pushing.
+
+  Development rules: docs/development.md (created by the first change's group 1) holds the architecture rules and
+  the pinned tools (ruff and pytest-homeassistant-custom-component versions, run by scripts/lint.py, which also
+  checks Markdown line length, line endings and final newline). They apply to every file a change creates or edits.
   Plain text only in names, labels and UI strings: no emoji.
+
+  Documentation: docs/README.md is the entry point. After any new learning (backtest, live check, history), a change
+  updates the docs as the "Documentation" section of AGENTS.md says, in the same group.
+
+  Implementation workflow (binding, not advisory): the session that runs apply is the orchestrator. It never edits
+  implementation files itself (code, tests, scripts, docs written by tasks), not even for a spike or a one-line fix.
+  Every task is implemented, and every review finding fixed, by a subagent launched with the Agent tool using
+  subagent_type general-purpose and model "sonnet". Never use a fork for this: a fork always runs on the
+  orchestrator's model and ignores the model setting. One subagent per task group; never brief a subagent with more
+  than one group. Every task group ends with a review on Opus: an Agent-tool subagent with subagent_type
+  general-purpose and model "opus", whatever model the orchestrator runs on. It runs the group's validation
+  (python scripts/lint.py and the tests) and edits nothing.
+
+  Review loop. Round 1 is a fresh Opus review of the group's whole diff against its tasks, design and spec
+  scenarios. It reports every finding in that one report, ranked blocking, should-fix or nit, and lists decision
+  points (spec or design gaps, choices for the user) separately. Decision points are settled in the planning
+  artifacts, by the orchestrator or by the user, before any fix. A Sonnet subagent, preferably the resumed
+  implementer, then fixes the findings; it adds no behaviour beyond them, and a fix that needs new design is a
+  decision point. A fix that redesigns the model's update logic goes to an Opus subagent at effort high instead.
+  Round 2 and later resume the round 1 reviewer (SendMessage), or brief a new Opus reviewer with the previous report
+  and the fix diff. It checks that each finding is fixed and reviews only the changed hunks for regressions; it
+  raises anything outside the fix only if it is blocking, and applies no new standards. A review with no blocking or
+  should-fix finding is clean. Nits from the last round are fixed by a Sonnet subagent and checked by the
+  orchestrator (the diff and python scripts/lint.py) without another review. Formatting (line length, line endings,
+  final newline) is not a review finding; scripts/lint.py checks it. After round 3 the orchestrator stops and asks
+  the user. Before a change is archived, one fresh Opus review covers the whole change. A group is done only after a
+  clean review. The orchestrator may edit only planning artifacts (proposal, design, specs, tasks notes) and
+  workspace instructions.
+
+  Every task group gets its own commit. After the clean Opus review, the orchestrator commits that group alone: its
+  files and its tasks.md check-offs, staged by explicit path (never git add -A or git add .), leaving unrelated
+  working-tree changes unstaged. One commit per group: never batch groups, split a group across commits, amend an
+  earlier group's commit, or push. The message has an imperative subject line and a body that starts
+  "Group <n> of <change-id>:" and summarizes what the group delivered. This rule is the user's standing
+  authorization for exactly these commits.
+
 
 rules:
   proposal:
-    - State explicitly what is out of scope and which follow-up change covers it
+    - State explicitly what is out of scope and which follow-up change covers it.
+    - State which live Home Assistant changes the change makes and how each is verified and rolled back.
   design:
-    - Give every formula with its units and the reason for every anchor, clamp and default value
+    - Give every formula with its units and the reason for every anchor, bound and default value.
+    - >-
+      Back every default and model choice with evidence (private history, backtest or a published source), named
+      without installation-specific entity IDs.
+  specs:
+    - Use the vocabulary in context ("charged", mixed shower water, tank water litres versus shower litres).
   tasks:
-    - Include verification on the live installation (state check, trace or backtest), not only unit tests
-    - Include updating README.md and docs/model.md for every behaviour change
+    - >-
+      Organize tasks into numbered groups (## 1., ## 2., ...) that can each be implemented and reviewed in a fresh
+      session, relying only on the change artifacts and the repository.
+    - >-
+      Size each task group as one coherent commit that leaves the repository consistent (python scripts/lint.py and
+      the tests pass once they exist); do not add commit or review tasks, since the apply workflow reviews and commits
+      each group.
+    - Give every task its verification in its own checkbox text.
+    - >-
+      Include verification on the live installation (state check, trace, diagnostics or backtest) where behaviour
+      reaches it, not only unit tests, and mark each live step as requiring the user's explicit authorization.
+    - >-
+      Add a "User review" task wherever a result needs the user's decision, and record the decision with its date in
+      that task.
+    - >-
+      Each group updates README.md, docs/ and private/installation.md for what it changes; never collect docs into a
+      final group.
 
 operations:
   apply:
     guidance:
-      - Keep the quality hook green; fix what it reports before moving to the next task
-      - End every task with the check command (python scripts/check.py once it exists, which runs ruff check, ruff format --check and pytest), /code-review on the task's changes (fix confirmed findings) and a commit of the task; skip the commit when the task changed no files
-      - End every task group with /code-review on the group's changes (and /simplify for larger groups), fix confirmed findings, and only then tick the group's review task
-      - Run implementation sessions from this folder so the project hook and /opsx commands are loaded
-      - The session model coordinates and does not implement. Hand each task to a fresh Sonnet agent (Agent tool, general-purpose, model sonnet) whose prompt names the change, the task, the spec and design sections and files it touches, and the rules in this file (no emoji, nothing installation-specific, docs in sync). The agent implements, runs the check command, commits, and returns a short summary (files, check result, commit hash, open questions). Send confirmed review findings back to the same agent (SendMessage) to fix. Do not re-read the diff in the session unless the review or summary calls for it
-      - Changes on the live Home Assistant (deploy, restart, config entry, dashboard) are made through the home-assistant MCP server from the session, after the code they depend on is committed
-      - After a task group's review task is ticked, stop and suggest /clear before the next group; tasks.md carries the state
+      - Read AGENTS.md before editing.
+      - Check git status first and preserve unrelated working-tree changes and everything in private/.
+      - >-
+        Work one task group at a time, starting at the first group in tasks.md with unchecked tasks. tasks.md is the
+        only progress state carried between sessions.
+      - >-
+        Delegate all implementation to a subagent running the Sonnet model (Agent tool, subagent_type general-purpose,
+        model "sonnet"; never a fork). Never edit implementation files yourself; your role is to brief the subagent
+        and review its work. This is binding; see "Implementation workflow" in context.
+      - >-
+        Brief the subagent with the change id, the task group, the relevant proposal, design and spec excerpts,
+        docs/development.md (once it exists) and the safety and private-data rules above. Instruct it to check off
+        completed tasks in tasks.md, and a task only after python scripts/lint.py and the tests pass for the files it
+        touched.
+      - >-
+        Review only once the whole group is done, through a review subagent on Opus (subagent_type general-purpose,
+        model "opus", read-only) that reads the diff against the group's tasks and specs and runs the validation.
+        Follow the "Review loop" in context.
+      - >-
+        Live Home Assistant steps run from the orchestrator session through the home-assistant MCP server or the
+        deploy script, only after the user authorizes them, and only after the code they depend on passes review.
+      - >-
+        After the group passes review, commit it as its own commit (see "Implementation workflow" in context: explicit
+        paths only, the group's tasks.md check-offs included, no push).
+      - >-
+        After the commit, report a short summary with the commit hash and stop. Do not start the next group. Tell the
+        user to run /clear and re-run apply to continue with the next group.

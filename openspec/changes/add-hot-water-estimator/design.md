@@ -3,247 +3,383 @@
 ## Context
 
 See proposal.md (Why) for the motivation and the specs for the behaviour. This document records how the model was
-derived and why each choice was made.
+derived from data and why each choice was made.
 
-The repository is new: no code and no specs yet. The calibration evidence below comes from the development
-installation's Home Assistant history, from 21 to 31 October 2026. That installation has:
-- a 281 L effective tank (manufacturer figure) heated by a ground source heat pump;
-- one tank temperature sensor;
-- the heat pump's thermal DHW energy counter (kWh) and a DHW-demand binary sensor;
+The repository is new: no code and no specs yet. The evidence comes from the development installation's recorder
+history, 1-31 October 2026, exported to `private/history/2026-10-01_2026-10-31/` because the recorder keeps only
+30 days. The analysis scripts and their outputs are in `private/analysis/`.
+
+The installation has:
+- a 281 L effective tank (manufacturer figure);
+- a ground source heat pump that charges it through an external circuit, which circulates the whole tank;
+- one tank temperature sensor about halfway up;
+- the heat pump's thermal DHW energy counter (kWh), heat power, DHW-demand binary sensor, and production flow
+  ("out") and return ("in") temperatures;
 - a whole-house water meter (m3, 1 L resolution, readings every 5 s during flow);
-- one bathroom humidity sensor in the only room with a shower and a bath.
+- one bathroom humidity sensor, in the only room with a shower and a bath.
 
-An evening price block keeps the heat pump from reheating between 16:00 and 23:00.
+An evening price block keeps the heat pump from charging between 16:00 and 23:00.
 
 ### Evidence
 
-1. **Long shower, 29 October 18:40-19:14.**
-   - 239 L were drawn at 7-8 L/min with no reheating.
-   - The tank sensor fell from 54.0 to 50.0 C over the first 96 L, then roughly linearly: 40 C at 146 L, 30 C at
-     205 L, 23 C at 239 L. It settled at 21.9 C half an hour later.
-   - The user confirmed that the last shower was still warm at the end.
-2. **Recharge, 23:00-01:08.**
-   - The energy counter rose by 10.64 kWh. Heat capacity of 281 L is 281 * 1.163 Wh/(L*K) = 0.327 kWh/K.
-   - So the average rose by 32.6 K and ended at the 50.5 C the sensor showed. The tank average before the recharge
-     was therefore about 18 C, which is below the sensor's 22 C, as expected with cold water at the bottom.
-   - The energy balance closes within the uncertainty of the cold water temperature.
-3. **Cycle ends.**
-   - The night cycle stopped at 50.5 C and the next midday cycle reached 58.5 C (setpoint 58 C). A cycle does not
-     always end at the setpoint.
-   - After a cycle the sensor stays flat apart from slow loss, so the tank is evenly mixed then.
+1. **Charging.**
+   - 26 heating runs. Two kinds: midday runs (about 12:00) that end at 57-60 C, the setpoint, and recovery runs
+     after the block or in the morning that stop at 49-50.4 C.
+   - At each run's end, the highest mean of production flow and return over the last 2 minutes matched the tank
+     sensor within 1.3 K, for example 57.9 against 58.0 C and 50.3 against 50.5 C.
+   - Production return is water taken from the tank's bottom. Its 48.5 C at the end of a 50 C run shows the tank
+     is evenly mixed then. A run that stops below the setpoint still leaves an evenly mixed tank, so it is
+     "charged".
+   - Flow and return start falling up to 40 s before the demand sensor turns off, so the charged temperature is
+     the highest mean in the last 2 minutes, not the last reading.
+2. **Energy closure between runs** (25 intervals).
+   - For each pair of consecutive runs, the tank average at the start of the next run follows from that run's
+     energy, and the charged temperature at the end of the previous run is known. The difference must equal loss
+     plus draws.
+   - A grid fit gives:
+     - other-draws hot share 0.2;
+     - loss coefficient 0.004 per hour (fixed from evidence 4);
+     - start-up energy 1.8 kWh per run that does not reach the tank (circuit and heat exchanger warm-up);
+     - volume 281 L, with the heat capacity factor fitted at 1.0.
+   - Mean absolute error 1.9 K, worst 6.7 K. That interval was 47 hours with no shower, where small draws were
+     overestimated.
+   - Without the start-up energy the best error is 2.6 K. Recovery runs that follow a night with few draws then
+     need a share above 1.
+3. **Showers.**
+   - 13 sessions with a humidity rise of 6 points or more. Peaks were 77-93 % from baselines of 51-64 %; draws
+     without a shower never rose more than 2 points.
+   - Eight emptied the tank past the sensor: sessions of 240-361 L, often several showers in a row. The sensor fell
+     to 22-28 C within an hour.
+   - Five did not move the sensor at all: 60-150 L. On 14 October a 141 L shower at 7.3 L/min left it at
+     57.5 -> 57.1 C, a cold fraction of about 0.31.
+   - The tank is sharply stratified, and the sensor only reacts once the cold layer reaches it.
 4. **Standing loss.**
-   - With no draws overnight the sensor fell 0.14 K/h at about 37 K above room temperature, so k is about
-     0.0037 per hour.
-5. **Humidity.**
-   - The bathroom sensor rose from 61 to 72 % within a minute of the shower starting, peaked at 92 % and took about
-     45 minutes to fall back near its baseline.
-   - Other days show the same 25-30 point peaks.
-6. **Small draws.**
-   - A day of toilet flushes and taps (about 100 L) moved the sensor no more than standing loss alone.
+   - 28 quiet windows of 5-10 hours with no draw and no heating. The sensor fell 0.08-0.24 K/h, giving k from
+     0.0027 to 0.0083 per hour, with a median of about 0.0042.
+   - The high values follow evenings with draws, when the cold layer was already near the sensor.
+5. **Long shower 29 October.**
+   - 240 L at 6.7 L/min starting at 54 C. The sensor fell from 54 to 50 C over the first 96 L, then to 40 C at
+     146 L, 30 C at 205 L and 23 C at the end. It settled at 21.9 C.
+   - The user confirmed that the last shower was still warm.
+   - The recovery run's energy, less the start-up energy, puts the average at about 23 C. Against a charged
+     temperature of about 55 C, that is a cold fraction of about 0.78 with the outlet still warm.
+6. **Sensor height and thermocline width** (from evidence 3 and 5).
+   - The 14 October shower did not move the sensor at a cold fraction of about 0.31, so with h = 0.5,
+     `h - w / 2 >= 0.31` and w is at most about 0.38.
+   - On 29 October the sensor reached 50 C (s = 0.89) at a cold fraction of about 0.35, which gives w of about
+     0.38. It reached 40 C at about 0.46, which gives about 0.28.
+   - So w is about 0.35 with the sensor at mid height.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- An estimate that is right at the moments that matter: during and after showers while reheating is blocked.
-- An estimate that cannot drift over days, because it is corrected by measurements every heating cycle and
-  whenever the sensor shows the tank emptying.
-- Every parameter is explained and has a default backed by data, so a new user only needs to tune one or two.
-- The model is testable without Home Assistant.
+- An estimate that is right at the moments that matter: during and after showers while charging is blocked.
+- No drift over days: every heating run charges the model, and the sensor bounds it in between.
+- Every installation fits its own parameters (D11), so the development installation's values are only starting
+  defaults. A new user enters the tank volume and sensor height. Calibration does the rest, and the diagnostic
+  sensors show how well it fits.
+- The model is testable without Home Assistant, and replayable on recorded history.
 
 **Non-Goals:**
-- Resolving the temperature layers inside the tank. One average with a floor temperature is enough for this
-  question.
-- Exact physics of mixing at the thermocline. The floor temperature absorbs it.
+- More layers than hot and cold, or the physics of mixing inside the thermocline. The width and the usable
+  fraction absorb them.
 - Predicting future use.
 
 ## Decisions
 
-### D1: The state is the tank's average temperature
+### D1: Two layers, kept as an average and a charged temperature
 
-All changes to the tank are energy flows: draws, heat input and loss. The tank's heat content above 0 C is
-`V * 1.163 * T_avg` Wh, so tracking `T_avg` is the same as tracking the energy. Three reasons to prefer
-temperature over litres:
-- the unit can be checked directly against the sensor;
-- it does not depend on the cold water temperature, which changes with the season;
-- heat input converts to it without knowing how full the tank is.
+A charged tank is all at T_ch. Every draw replaces tank water with cold water from below, and a sharp thermocline
+keeps the two apart (evidence 3). So the tank is a hot layer at T_ch above a cold layer at T_cold, with cold
+fraction `f = (T_ch - T_avg) / (T_ch - T_cold)`.
 
-Litres remaining are derived from it only for display.
+Keeping T_avg (energy: `V * 1.163 * T_avg` Wh above 0 C) and T_ch gives three things:
+- the energy balance works on T_avg alone;
+- the sensor's height can be compared with f;
+- the outputs can say how much tank water is still hot, not just how much energy is left.
 
-- Alternative, litres of hot water as the state: needs a "hot" temperature for every litre, double-counts when the
-  heating stops at a partial charge, and becomes wrong as the cold water warms through the year.
-
-### D2: Energy balance plus sensor corrections, not a sensor-only curve
-
-- Draws: `dT = -dV_hot * (T_draw - T_cold) / V` in K, with dV in L and V in L. A thermostatic shower mixer takes
-  the energy for `dV_mix * (T_mix - T_cold)` out of the tank whatever the tank temperature is.
-  `T_draw = min(T_mix, T_avg)`, because a tank colder than the mix temperature delivers less energy per litre.
-- Heat: `dT = dE * 1000 / (1.163 * V)` in K, with dE in kWh. 1.163 Wh/(L*K) is the volumetric heat capacity of
-  water near 20-60 C. The real value is about 1.5 % lower at 60 C, which is well inside the other uncertainties.
-- Power input is integrated with the left Riemann sum between readings: `dE = P * dt`, P in W, dt in h. A gap
-  while unavailable counts as zero.
-
-**Corrections from the sensor:**
-- **Anchor when heating stops:** `T_avg = T_sensor`. Evidence 2 and 3: the tank is evenly mixed after heating, so
-  the sensor reads the average. This also makes up for any heat input error, such as a counter that includes
-  pipe losses.
-- **Cap while not heating:** `T_avg = min(T_avg, T_sensor + margin)`. Evidence 1 and 6: a sensor low in the tank
-  misses small draws and the first part of a long one, so it may read *higher* than the true average. That is why
-  the model never raises itself to the sensor outside heating. Once the sensor falls, the cold layer has reached
-  it and the average cannot be much above it:
-  - At 146 L into the shower the model said 41.3 C and the sensor 40 C.
-  - At 239 L the pure model said about 33 C, while the recharge energy implies about 18-26 C.
-  - With the cap margin at 3 K, the cap gives 26 C.
-  - The 3 K default allows for the 1.4 K the sensor read below the model at 146 L, plus sensor noise. It still
-    pulls the model down to a value consistent with the recharge energy by the end of the shower.
-- **Bounds:** `T_cold <= T_avg <= T_max`. These keep a long chain of misclassified draws or a bad counter from
-  producing impossible values. `T_max` defaults to 95 C, which is safe for any tank with a resistive heater.
-
-**Alternatives:**
-- A curve from sensor temperature to litres remaining, fitted to evidence 1. It is simple, but flat over the first
-  100 L, so it shows a full tank for the first third of a shower. It also depends on where the sensor sits in each
-  tank, so it does not generalise.
-- An automation with input_number helpers, the first plan in the author's config workspace. It works for one house
-  but cannot be shared, needs about 10 helpers per tank, and spreads the logic over Jinja templates that are hard
-  to test. Rejected in favour of an integration.
-- A Kalman filter that blends sensor and model. It needs a measurement model of where the sensor sits. That is
-  more parameters than the anchor-and-cap rules, for no clear gain at this resolution.
-
-### D3: Heating detection falls back through three sources
-
-1. A heating-active binary sensor gives exact cycle edges for the anchor.
-2. Otherwise, heat power above a threshold (default 100 W, which is above standby readings and well below any
-   heating power).
-3. Otherwise, a 10-minute window after the last energy counter increase. Counters update at least every few
-   minutes while heating, so 10 minutes rides through gaps without delaying the anchor much.
-
-With no heat input source at all, only a binary sensor, the model rises to the sensor while heating. A tank cannot
-heat without the sensor rising eventually, so this keeps the model from only ever going down.
-
-### D4: Draw classification by humidity rise, with a recount per session
-
-- Litres come from the whole-house meter. `w = 1` for litres drawn while a shower is detected, and
-  `w = other_share` otherwise.
-- Detection uses a rise of at least 6 points over the window minimum of the last 60 minutes. Evidence 5: an 11
-  point jump within a minute, while normal daily swings stay within 2-3 points.
-- Hysteresis is half the rise. Detection ends once the humidity has fallen most of the way back, which at the
-  development installation is about 45 minutes after the shower. A tap used in that time counts as hot, which errs
-  on the safe side.
-- Humidity lags the start of the shower by up to a minute, so when detection starts the litres already drawn in the
-  current session are recounted to `w = 1`. Sessions are increases no more than 60 s apart. At 1 L resolution and
-  the lowest realistic shower flow (about 2.5 L/min), increases are at most 24 s apart.
-- The long-draw rule, off by default, is for homes without a humidity sensor: a session longer than N minutes is a
-  shower and is recounted the same way. It is off by default because watering a garden would also trigger it.
-- Other share is 0.3. Toilet flushes (cold, about 6 L) are the most frequent draws, and hand washing and kitchen
-  taps mix hot and cold. The anchor and cap reset whatever error this leaves. The backtest compares the model with
-  the sensor at each cycle end, so this value can be tuned.
-- Jumps over 100 L in one reading are ignored. No household draws that much in 5-15 s. A jump that large is a
-  meter catching up after being offline, and applying it all at once would empty the model.
+Both cool with standing loss. T_ch changes only through loss, charging, heating (where `T_ch >= T_avg`), and a
+sensor reading above it.
 
 Alternatives:
-- A bathroom flow meter or a temperature probe on the hot pipe would be best, but few homes have one. They can be
-  added later as optional sources.
-- The rate of humidity rise (derivative) was rejected. It is near zero during a long shower once the room
-  saturates, so detection would stop in the middle of the shower.
+- **One average temperature with a floor temperature** (the first draft of this change). It could not use the
+  sensor's height, so the sensor only became useful once it fell, and the floor had no physical meaning per tank.
+- **Litres of hot water as the state.** It needs a temperature per litre, double-counts partial charges, and drifts
+  as the cold water warms through the year.
 
-### D5: Outputs use a usable floor temperature
+### D2: Draws are energy
 
-- `litres = V * (T_avg - T_floor) / (T_mix - T_cold)`.
-- In a fully mixed tank the shower turns cold when the outlet reaches T_mix, which would make `T_floor = T_mix`.
-- In a perfectly layered tank the hot top layer lasts until the whole tank is cold, which would make
-  `T_floor = T_cold`. Real tanks fall between the two.
-- Evidence 1: the shower was still warm with the average at about 26 C, so on that tank `T_floor` is at most about
-  26 C.
-- The default is 25 C. That is close to the evidence and slightly conservative, because a tank with a worse
-  thermocline than the development tank runs cold earlier, and showing too much is worse than showing too little.
-- The README explains how to lower it once a shower is known to have run cold at a reported remaining above zero.
-- Percent uses `T_full` as 100 %. This is the setpoint entity when one is given, because users think of a full
-  tank as one at its setpoint, and otherwise 55 C.
-- Minutes uses a typical shower flow of 7.5 L/min, from evidence 1 (7-8 L/min).
+- **Mixed draw:** the house meter counts the hot and cold litres a thermostatic mixer combines. The energy taken is
+  `dV * 1.163 * (T_mix - T_cold)` Wh, so `dT_avg = -dV * (T_mix - T_cold) / V` in K, with dV and V in L.
+  - The tank water that leaves is `dV * (T_mix - T_cold) / (T_ch - T_cold)`, about 56 % at 57 C, 38 C and 14 C.
+  - When `T_ch <= T_mix`, the mixer takes only tank water and the drop is `dV * (T_ch - T_cold) / V`.
+- **Other draw:** `dT_avg = -share * dV * (T_ch - T_cold) / V`. A share of the litres leaves the tank at T_ch,
+  the rest is cold water that bypasses it.
+  - The default share 0.2 comes from the fit in evidence 2: hot taps for hands and the kitchen, among toilet
+    flushes and appliances.
+- `1.163 Wh/(L*K)` is the volumetric heat capacity of water near 20-60 C. The real value is about 1.5 % lower at
+  60 C, which is well inside the other uncertainties.
 
-### D6: Seasonal cold water curve
+### D3: Heat input, start-up energy and heating detection
+
+- Energy counter: `dT_avg = dE * 1000 / (1.163 * V)` in K, with dE in kWh. Power: `dE = P * dt` (left Riemann sum,
+  P in W, dt in h). Gaps count as zero.
+- **Start-up energy:** the first S kWh of each run are not applied (default 0).
+  - Evidence 2 fits 1.8 kWh on the development installation: energy the counter reports but the circuit and heat
+    exchanger keep.
+  - It only changes the estimate during a run, because the charge at the end resets it. It matters when a run is
+    cut short, such as by a price block that starts mid-run.
+  - The default is 0 because the value depends on the plumbing. Calibration (D11) learns it per tank.
+- **Heating detection**, in this order:
+  1. a heating-active binary sensor gives exact run edges;
+  2. otherwise, heat power above 100 W, which is above standby readings and below any heating power;
+  3. otherwise, 10 minutes after the last counter increase. Counters update at least every few minutes while
+     heating.
+- With only a binary sensor, T_avg and T_ch follow the sensor upward while heating, because a heating tank's sensor
+  eventually rises.
+
+### D4: Charging at run end
+
+- At the end of a run, set `T_avg = T_ch = T_charge`. Evidence 1: the tank is evenly mixed then.
+- `T_charge` is the highest mean of flow and return over the last 2 minutes. Taking the highest mean skips the drop
+  of up to 40 s before the demand sensor turns off.
+- Without flow and return sensors, `T_charge` is the tank sensor. It agreed within 1.3 K on the development
+  installation, but the heater's own temperatures do not depend on where the sensor sits.
+- This charge makes errors in heat input (counter overhead, losses during the run) irrelevant at every run end.
+
+### D5: Sensor height turns the tank sensor into a measurement
+
+The sensor sits at height h, a fraction of the tank from the bottom (configurable 20-80 %, default 50 %). The
+thermocline is w wide. While heating is not
+active, with tolerance `delta` (default 1.5 K) and margin m (default 2 K):
+
+| Sensor reading | Meaning | Rule |
+|---|---|---|
+| `T_s >= T_ch - delta` | Cold layer still below the sensor, so `f <= h - w/2` | Lower bound: `T_avg >= T_ch - (h - w/2) * (T_ch - T_cold)` |
+| In between | Thermocline at the sensor. Linear reading: `s = (T_s - T_cold) / (T_ch - T_cold)`, `f_s = h + w/2 - s * w`, `T_s_avg = T_ch - f_s * (T_ch - T_cold)` | Upper cap: `T_avg <= T_s_avg + m` |
+| `T_s <= T_cold + delta` | Cold layer past the sensor, so `f >= h + w/2` | Upper cap: `T_avg <= T_ch - (h + w/2) * (T_ch - T_cold)` |
+| `T_s > T_ch + delta` | Heat the model did not see | `T_ch = T_s` |
+
+`h - w/2` and `h + w/2` are limited to 0-1.
+
+- **The lower bound** corrects overcounted small draws and keeps the model from emptying while the sensor still reads
+  hot. Evidence 3: a 141 L shower at a cold fraction of about 0.31 left the sensor unchanged, which is within
+  `h - w/2 = 0.325`.
+- **The in-between reading is only an upper cap.** Checked against the 29 October drain (evidence 5, T_ch about 54 C,
+  w = 0.35):
+
+  | Drawn | Sensor | Linear reading | Energy model (after the 27 h of draws before it) |
+  |---|---|---|---|
+  | 96 L | 50 C | 39.6 C | 39.8 C |
+  | 146 L | 40 C | 36.1 C | 35.5 C |
+  | 205 L | 30 C | 32.5 C | 30.4 C |
+  | 240 L | 23 C | 30.1 C | 27.4 C |
+
+  The recovery run's energy puts the end at about 23 C. The linear reading fits the start of the drain and then
+  reads too warm, because the thermocline widens during a long draw. Raising the model towards it would show water
+  that is not there. Used as a cap, it only pulls the model down when draws went uncounted, such as a shower that
+  was not detected.
+- **The margin** lets the energy balance smooth sensor noise and steps of 0.1 K. 2 K is about the sensor's change
+  for 20 L of shower in the thermocline.
+- **The default `w = 0.35`** comes from evidence 6. The tolerance of 1.5 K covers the slow loss of the top layer
+  between charges.
+- **Range of h:** outside 20-80 % the sensor would see only one layer for most of the cycle.
+- Alternatives:
+  - A two-sided bound around the linear reading. It is wrong late in a long drain (table above).
+  - A fixed "sensor plus margin" cap (the first draft). It did not know where the sensor was, and it could not
+    raise an overdrawn model.
+  - A Kalman filter. It needs noise models for parameters that the bounds above handle well enough.
+
+### D6: Draw classification
+
+- Litres come from the whole-house meter. A litre is a **mixed draw** while a shower or bath is detected, and an
+  **other draw** otherwise.
+- Detection uses a rise of at least 6 points over the 60-minute minimum. Evidence 3: shower rises are 13-40 points,
+  other draws stay within 2. Hysteresis is half the rise, so detection lasts until the room has dried most of the
+  way. A tap used in that time counts as mixed, which errs on the side of showing less.
+- **Reclassify window:** humidity lags the start of a shower by up to a minute. At detection, the session's litres
+  from the last 3 minutes become mixed draws. The window, not the whole session, matters because evidence 3 has a
+  session of 270 minutes where a slow night trickle (0.8 L/min) merged with a shower. Reclassifying all of it would
+  have taken 209 L of mix energy.
+- Sessions are increases no more than 60 s apart. At 1 L resolution and the lowest realistic shower flow (about
+  2.5 L/min), increases are at most 24 s apart.
+- The long-draw rule is off by default, for homes without a humidity sensor. It would also fire on garden watering.
+- Jumps over 100 L in one reading are ignored. No household draws that much in 5-15 s, so such a jump is a meter
+  catching up after being offline.
+
+### D7: Outputs
+
+- **Tank water remaining:** `V * (u - f)` litres at T_ch, at least 0. u is the usable fraction, the cold fraction
+  at which the outlet runs cold. It covers the thermocline and the outlet position.
+  - The default 0.85 is just above evidence 5, where the shower was still warm at about 0.78, and below 1, the limit
+    for an ideal tank.
+  - A tank with a worse thermocline runs cold earlier, so users lower u after a shower that ran cold.
+- **Shower water remaining:** tank water times `(T_ch - T_cold) / (T_mix - T_cold)`. This is the energy identity
+  from D2 read backwards.
+- **Percent charged:** `(u - f) / u * 100`, 100 % right after any charge. Charged is by convention whatever the
+  heater reached, so percent compares with the last charge, not with the setpoint. The litres show the absolute
+  amount.
+- **Shower minutes:** shower litres divided by 7.5 L/min, the median shower flow in evidence 3 and 5 (6.3-7.6
+  L/min for single showers).
+- **Mix temperature:** 38 C, the user's thermostatic setting and a common default.
+
+### D8: Seasonal cold water curve
 
 - `T_cold = mean - amplitude * cos(2 * pi * (doy - coldest_day) / 365)`.
 - Defaults: 12.5 C mean, 5 K amplitude, coldest on day 46 (mid February). This follows published Dutch
   drinking-water temperatures (about 7-8 C in February, 17-18 C in August): ground temperature lags the air by
   about six weeks.
-- Users elsewhere set their own values, or give a sensor.
-- A 2 K error in T_cold changes the remaining litres by about 8 %, and anchors absorb it, so a sensor is optional.
+- Users elsewhere set their own values or give a sensor.
+- A 2 K error in T_cold changes the shower litres by about 8 %, and every charge absorbs it.
 
-### D7: Home Assistant structure
+### D9: Home Assistant structure
 
-- `model.py` is a pure Python class with the formulas from D2-D6. It takes timestamps and numbers and returns
-  events. It has no Home Assistant imports, so unit tests and the backtest script run it directly.
-- `__init__.py` sets up the entry, keeps one `TankEstimator` runtime object in `entry.runtime_data`, and registers
-  the action.
-- The estimator subscribes with `async_track_state_change_event` to:
-  - the water meter;
-  - the energy counter or power sensor;
-  - the heating binary sensor;
-  - the tank sensor;
-  - the humidity sensors;
-  - the cold water sensor.
+- `model.py` is a pure Python class with the formulas in D1-D8. It takes timestamps and numbers and returns events,
+  and has no Home Assistant imports. Tests, the backtest and the replay fixtures run it directly.
+- `__init__.py` keeps one `TankEstimator` per entry in `entry.runtime_data` and registers the action.
+- The estimator subscribes with `async_track_state_change_event` to every configured source: the water meter, the
+  energy counter or power sensor, the heating binary sensor, the flow and return sensors, the tank sensor, the
+  humidity sensors and the cold water sensor.
+  - Flow and return are kept as a 2-minute ring of readings for D4.
+  - A 5-minute `async_track_time_interval` runs loss and the sensor bounds.
+  - Events instead of polling keep each litre and each heat step exact.
+- Entities subscribe to the estimator through a dispatcher signal. There is no coordinator because nothing is
+  polled.
+- The tank average sensor is a `RestoreSensor`. Its extra stored data holds the full model state from the
+  integration-setup spec.
+- Config flow steps:
+  1. tank: name, volume, tank sensor and height;
+  2. water meter;
+  3. heat input, with flow and return;
+  4. shower detection;
+  5. cold water.
 
-  It also runs a 5-minute `async_track_time_interval` for loss and cap. Listening to events instead of polling
-  keeps each litre and each heat step exact.
-- Entities subscribe to the estimator through a dispatcher signal and render from its state. There is no
-  coordinator because nothing is polled.
-- The tank average sensor is a `RestoreSensor`. Its extra stored data holds:
-  - the last valid meter reading and the last valid energy reading;
-  - the session state;
-  - the humidity samples of the last window, at most one per minute per sensor.
+  Selectors are filtered by domain and device class. The options flow holds every tuning value plus the optional
+  sources. An options update reloads the entry, and the state survives through the restore data.
+- Diagnostics: options, state, source availability and a ring of the last 100 events.
+- Translations go in `strings.json` and `translations/en.json`, plain text.
 
-  All of these are needed to apply changes correctly after a restart.
-- The config flow has steps: tank (name, volume, tank sensor), water meter, heat input, shower detection, cold
-  water and setpoint. Entity selectors are filtered by domain and device class. The options flow holds every
-  tuning value plus the optional sources, and an options update reloads the entry. The model state survives the
-  reload through the restore data, so the options requirement holds.
-- Diagnostics: options, state, source availability and a ring buffer of the last 50 events (time, kind, input
-  change, T_avg before and after).
-- Translations go in `strings.json` and `translations/en.json`, with plain text names.
+### D10: Test data from recorded history
 
-### D8: Backtest script
+- `scripts/history.py` exports recorder history over the REST API. The token comes from a file and the entity IDs
+  and time range from arguments. The output is a JSON file per role.
+- `scripts/anonymise.py` turns an export window into a fixture with made-up entity IDs and only the roles the
+  model uses.
+- The replay fixtures, with the evidence they cover:
 
-`scripts/backtest.py` fetches the recorder history of the configured source entities over the websocket API for a
-date range. The token is read from a file and the entity IDs come from command-line arguments, so nothing is
-installation-specific. It replays the history through `model.py` and prints:
-- the model against the sensor at every anchor (the error just before the anchor);
-- the model and remaining litres through each detected shower;
-- a summary that suggests the other share and floor that minimise the anchor error.
+| Fixture | Window | Evidence |
+|---|---|---|
+| `long_shower` | 29 October 18:00 to 30 October 02:00 | 240 L to 22 C, still warm, recovery run to 50 C |
+| `shower_unseen` | 14 October 12:00 to 15 October 13:40 | Midday charge, 141 L shower the sensor does not see, next run |
+| `back_to_back` | 22 October 13:00 to 23 October 01:00 | 88 + 200 L sessions, the block, recovery run |
+| `night_trickle` | 25 October 13:00 to 26 October 09:00 | 270-minute trickle with a shower, morning run |
+| `quiet_days` | 23 October 13:00 to 25 October 12:30 | 47 h of small draws only, the worst closure interval |
+| `week` | 23 October 11:30 to 30 October 13:30 | 8 runs and 7 closures, showers, quiet nights; tests the setup fit |
+| `month` | 1-31 October | Every run, shower and quiet night; used by the backtest, not by unit tests |
 
-The replay test fixture is a trimmed, anonymised copy of evidence 1 and 2.
+The first six are trimmed to the roles in use and kept in `tests/fixtures/`. `month` stays in `private/` because
+of its size and is only used by the backtest.
+
+- `scripts/backtest.py` replays a history export through `model.py` and `calibration.py`, the same code as the
+  setup fit, and prints:
+  - the charge error at every closure;
+  - the outputs through every shower;
+  - the fitted parameters;
+  - the error with the fitted parameters against the defaults.
+
+  It is the developer's view of what an entry's setup fit does.
+
+### D11: Self-calibration
+
+The values fitted in evidence 2-6 belong to one house. How much of the tap water is hot, the start-up energy of the
+plumbing, the insulation and the thermocline all differ per installation. So each entry fits its own, the same way
+the evidence was produced, and the shipped defaults are only where it starts.
+
+- **The closure equation.** At every run end the run's energy tells the true average at the start of the run
+  (calibration spec). Between charges the energy balance without the sensor bounds gives:
+
+  ```text
+  T_ch_prev - T_true_start = loss_sum * k + other_sum * share + mixed_sum
+  T_true_start = T_charge - (E_run - S) / C
+  ```
+
+  where:
+  - `loss_sum` is the sum of `(T - T_ambient) * dt`;
+  - `other_sum` is the sum of `dV * (T_ch - T_cold) / V` over other draws;
+  - `mixed_sum` is the mixed-draw drop;
+  - C = 1.163 * V / 1000 kWh/K.
+
+  This is linear in k, share and S. A weighted least-squares fit over the stored intervals (forgetting factor 0.95,
+  at least 5 intervals, each update limited to a quarter of the bound range) gives all three. With 25 intervals on
+  the development installation, this fit gave share 0.2, S 1.8 kWh and an error of 1.9 K. The step limit and the
+  minimum count keep one odd interval (a guest's bath, a leaking tap) from throwing the values off.
+- **Loss from quiet windows.** Evidence 4 shows that quiet nights give k directly from the sensor while it still
+  reads the hot layer. This also covers installations without a heat measurement, where there are no closures.
+- **Width from the first sensor drop.** The cold fraction of the energy balance at the moment the sensor first
+  leaves the charged temperature is `h - w/2`. Evidence 3 and 6 place that at about 0.31-0.35.
+- **Usable fraction from the user.** Only a person can tell that a shower ran cold, so a button does it and also
+  empties the model. A follow-up can detect it from shower flow or bathroom temperature (proposal).
+- **Setup fit.** A new entry replays up to 30 days of the recorder's history of its sources. The recorder keeps
+  about 10 days by default, and 30 on the development installation. It uses the same model and fitter code as
+  live learning and the backtest, so an entry is calibrated on its first day instead of after a few weeks.
+  - The replay reads history through the recorder's executor (`get_instance(hass).async_add_executor_job` with
+    `history.state_changes_during_period` per entity). It then runs the replay in the executor too, because a month
+    is about 80 000 states and a few seconds of CPU.
+- **Precedence:** option value, then the setup fit, then live learning, unless locked. Locks are for users who know
+  better, and for tests.
+- **Excluded closures:**
+  - runs shorter than 15 minutes, because a short run does not mix the tank;
+  - intervals in which a source was unavailable for more than 10 % of the time;
+  - intervals in which the "Shower ran cold" button reset the model.
+- **Visibility:** the diagnostic sensors show each parameter with its source, the samples and the charge errors. A
+  rising mean charge error points at a wrong sensor height or a changed household. It is the first thing the README
+  tells users to check.
+- **Code:** `calibration.py` is pure Python next to `model.py`: the interval sums, the fitter and the width
+  estimator. Persistence uses a `Store` per entry, separate from the restore data, so learned values survive the
+  entity being renamed or re-added.
+
+Alternatives:
+- **Shipping the development installation's values as defaults with only manual tuning** (the first draft). It
+  only works for houses like the author's.
+- **A recursive least-squares filter instead of refitting the stored intervals.** It is cheaper, but harder to
+  bound, inspect and replay. With at most a few hundred intervals a refit is instant.
 
 ## Risks / Trade-offs
 
-- [The sensor sits high in some tanks, not low] -> The cap still holds: the sensor reads at least the average
-  near the top. The anchor is unaffected. Only the early-shower lag differs, and that makes the model more accurate,
-  not less.
-- [Several bathrooms, or showers in a room without a humidity sensor] -> Several humidity sensors are allowed. The
-  long-draw rule covers rooms without one. Showers that are not detected count at the other share, and the cap
-  corrects the error once the sensor falls.
-- [Garden watering in summer counts at the other share] -> At most 0.3 of the volume is wrongly counted, the cap
-  corrects it, and the next cycle anchor resets it.
-- [A humidity rise without a shower (cooking, humid weather)] -> No meter increase means no effect. If water runs
-  meanwhile, it errs towards showing less hot water.
-- [The water meter misses low flows] -> Small trickles are lost, which errs towards showing more water. The cap
-  catches large errors.
-- [A recount after a reload mid-shower] -> The session state is restored, so a recount still applies.
-- [A floor temperature set too low shows water that is not there] -> The default is conservative, and the README
-  explains how to tune it.
+- **The sensor height is guessed wrong.** The bounds then move the model to wrong cold fractions. The README
+  explains how to read the height from the data sheet. The backtest's charge errors show a wrong height as a
+  consistent bias, and the margin limits the damage of any single reading.
+- **Several bathrooms, or showers in a room without a humidity sensor.** Several humidity sensors are allowed, and
+  the long-draw rule covers rooms without one. A shower that is not detected counts at the other share, and the
+  first sensor bound corrects it once the cold layer reaches the sensor.
+- **Garden watering in summer.** It counts at the other share (0.2 of its litres), the bounds correct it, and the
+  next charge resets it.
+- **Humidity rises without a shower** (cooking, humid weather). With no meter increase there is no effect. If water
+  runs meanwhile, the estimate errs towards showing less.
+- **The water meter misses low flows.** Small trickles are lost, which errs towards showing more water. The bounds
+  catch large errors.
+- **A tank heated by an internal coil without circulation** is not evenly mixed at the end of a run, so the charge
+  rule is wrong for it. This is out of scope (proposal), and the README says so.
+- **Learning drifts on unusual weeks** (guests, holidays). The step limit, the forgetting factor and the minimum
+  count slow it down. The error sensors make drift visible, and locks and `recalibrate` undo it.
+- **A run cut short mid-charge.** The charge rule still applies, using the flow and return at that moment. The
+  tank is then not uniform, so the error shows at the next sensor bound. The backtest in task group 4 checks the
+  price-block cut-offs.
 
 ## Migration Plan
 
-There is no existing integration to migrate from. Rollout on the development installation:
+There is no existing integration to migrate from. Rollout on the development installation, each step with the
+user's authorization:
 1. Deploy the integration folder over SSH (the author's workspace deploy script gets a mapping) and restart.
 2. Add the config entry with that installation's entities (listed in the git-ignored `private/installation.md`)
-   and the defaults.
-3. Compare with the sensor for a week through diagnostics and the backtest. Tune the options.
+   and the tuned options from the backtest.
+3. Compare with the charge errors and sensor bounds in the diagnostics for a week, and tune.
 4. Add a dashboard block.
 
 Rollback: remove the config entry and the folder. Nothing else depends on it.
 
 ## Open Questions
 
-- Whether to exclude dishwasher and washing machine fills with their own water sensors, where the appliance
-  integration reports them. This can be added as optional "cold appliance" water sensors later without changing the
-  model.
+- Whether to exclude dishwasher and washing machine fills, where the appliance integration reports them, with
+  optional "cold appliance" water sensors. This can be added later without changing the model.
 - Which display name and icon the HACS brands repository should get. This can wait until after the first release.

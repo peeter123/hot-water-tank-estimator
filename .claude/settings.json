@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/check_on_edit.py\"",
+            "timeout": 180,
+            "statusMessage": "Formatting and checking the edited file..."
+          }
+        ]
+      }
+    ]
+  }
+}

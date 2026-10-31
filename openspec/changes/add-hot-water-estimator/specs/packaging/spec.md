@@ -21,11 +21,12 @@ The repository SHALL be installable as a HACS custom repository of type integrat
 ### Requirement: README explains install, setup, model and tuning
 The README SHALL cover:
 - what the integration estimates and what it needs;
+- how to find the tank sensor's height from the tank's data sheet;
 - installation through HACS and by hand;
 - each config and options field;
 - each entity;
 - a short explanation of the model, linking to `docs/model.md`;
-- how to tune the floor temperature and the other-draws share;
+- how to tune the usable fraction, thermocline width and other-draws share, with the backtest;
 - example dashboard YAML using stock cards;
 - its known limitations.
 
@@ -35,9 +36,9 @@ The README SHALL cover:
   predicted
 
 ### Requirement: Model documentation
-`docs/model.md` SHALL give:
+`docs/README.md` SHALL be the entry point to the docs. `docs/model.md` SHALL give:
 - every formula with its units;
-- the reason for each anchor, cap and default value;
+- the reason for each charge rule, sensor bound and default value;
 - how draws are classified;
 - the backtest script's usage.
 
@@ -47,9 +48,31 @@ It SHALL contain no installation-specific entity IDs.
 - **WHEN** a reader wants to know how the remaining litres are computed
 - **THEN** `docs/model.md` gives the formula, the meaning of each symbol and its unit
 
+### Requirement: One lint and test entry point
+`scripts/lint.py` SHALL be the single local check. It uses only the Python standard library and runs pinned tools:
+- ruff check and format with Home Assistant core's rule set;
+- a Markdown check (line length 120, LF endings, final newline);
+- codespell and yamllint;
+- the pytest suite.
+
+It SHALL exit 0 when clean, 1 on findings and 2 when a tool cannot run, and `--fix` SHALL apply the ruff and
+Markdown fixes first.
+
+#### Scenario: Markdown with CRLF
+- **WHEN** a Markdown file has CRLF line endings
+- **THEN** `python scripts/lint.py` exits 1 naming the file, and `python scripts/lint.py --fix` repairs it
+
+### Requirement: Quality scale
+The integration SHALL keep a `quality_scale.yaml` that records each Home Assistant Integration Quality Scale rule as
+done, todo or exempt (with a reason). The first release SHALL meet every Silver rule that applies, plus the Gold
+rules for diagnostics, entity and icon translations, entity categories, device classes and reconfiguration.
+
+#### Scenario: Release check
+- **WHEN** version 0.1.0 is tagged
+- **THEN** `quality_scale.yaml` has no applicable Bronze or Silver rule marked todo, and hassfest accepts it
+
 ### Requirement: Automated checks
-GitHub Actions SHALL run hassfest, HACS validation, `ruff check`, `ruff format --check` and the pytest suite on
-every push and pull request.
+GitHub Actions SHALL run hassfest, HACS validation and `python scripts/lint.py` on every push and pull request.
 
 #### Scenario: Pull request with a lint error
 - **WHEN** a pull request introduces a ruff error

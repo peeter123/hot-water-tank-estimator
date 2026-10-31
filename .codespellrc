@@ -1,0 +1,3 @@
+[codespell]
+skip = ./.git,./private,./.claude,*.json
+ignore-words-list = hass

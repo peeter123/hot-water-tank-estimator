@@ -1,184 +1,256 @@
 # Tasks
 
-## 1. Project scaffold
+Read these before each group:
+- `AGENTS.md`, `openspec/config.yaml`, and `docs/development.md` once group 1 has created it;
+- this change's proposal and design;
+- its specs: `specs/tank-model/spec.md`, `specs/draw-classification/spec.md`, `specs/calibration/spec.md`,
+  `specs/integration-setup/spec.md` and `specs/packaging/spec.md`.
 
-- [ ] 1.1 Add `pyproject.toml`:
-  - project metadata and Python 3.13;
-  - ruff config (line length 120, rules E, F, I, UP, B, SIM, RUF);
-  - pytest config (`asyncio_mode = auto`, testpaths `tests`).
+Each group runs in a fresh session and is committed on its own by the apply workflow. So each group must leave
+`python scripts/lint.py` (once it exists) and the tests passing.
 
-  Add `requirements_test.txt` with `pytest-homeassistant-custom-component` (pinned to a release for the current
-  Home Assistant) and `ruff`. Verify: `python -m venv .venv`, install, then `ruff --version` and
-  `pytest --version` both run.
-- [ ] 1.2 Add `scripts/check.py`, which runs `ruff check`, `ruff format --check` and `pytest -q` in turn and exits
-  non-zero on the first failure. Update `openspec/config.yaml` to name it as the check command. Verify:
-  `python scripts/check.py` passes on the empty project (pytest "no tests" counts as a pass).
-- [ ] 1.3 Add the quality hook: `.claude/settings.json` with a PostToolUse hook on Edit/Write/MultiEdit that runs
-  `scripts/check_on_edit.py`. The hook runs ruff fix and format on an edited `.py` file, then the tests for its
-  module, and prints failures, following the pattern of hrv-ventilation's `scripts/check-on-edit.mjs`. Verify:
-  editing a file with a lint error makes the hook report it.
+Applies to every group:
+- Nothing installation-specific enters a tracked file. Entity IDs, history and calibration results of the
+  development installation stay in `private/`. Fixtures use made-up entity IDs such as `sensor.tank_temperature`.
+- Never read or print `%USERPROFILE%\.ha_token`. Scripts read it themselves.
+- Live Home Assistant steps (deploy, restart, config entry, dashboard) run only in the tasks that name them, after
+  the user authorizes them in the session, through the home-assistant MCP server or the config workspace's
+  `scripts/deploy.ps1`.
+- Documentation follows the "Documentation" section of `AGENTS.md`, in the same group as the change it describes.
+  There are no line-number citations, and superseded text is removed.
+- Numbers in tests come from the spec scenarios. A test named after a scenario checks that scenario's numbers.
+
+## 1. Tooling and scaffold (no model code)
+
+- [x] 1.1 Add `pyproject.toml` with project metadata, Python 3.14.2 or later, Home Assistant core's ruff rule set
+  (ruff 0.17.3) and the pytest config. Add `.yamllint` and `.codespellrc`. Done during planning on 2026-10-31, with
+  the user's request to bring in the linter and quality rules. Verify: `python scripts/lint.py` exits 0.
+- [ ] 1.2 Add `requirements_test.txt` with an exact pin of `pytest-homeassistant-custom-component` (the release
+  matching the newest Home Assistant it supports) and an empty `tests/__init__.py`. Verify:
+  `uv run --no-project --with-requirements requirements_test.txt pytest --version` prints the pinned pytest, and
+  `python scripts/lint.py` runs the (empty) suite and exits 0.
+- [x] 1.3 Add `scripts/lint.py`, `scripts/md_format.py` (from esphome-zehnder-comfoair) and the edit hook
+  `scripts/check_on_edit.py` with `.claude/settings.json`. Done during planning on 2026-10-31. Verified then:
+  - lint exits 0 on the repository;
+  - the hook repairs a CRLF Markdown file;
+  - it reports an undefined name in a Python file with exit code 2.
 - [ ] 1.4 Add a minimal integration that loads:
   - `custom_components/hot_water_tank_estimator/manifest.json` (fields per the packaging spec, version 0.0.1);
-  - `__init__.py` with an empty `async_setup_entry` and `async_unload_entry`;
+  - `__init__.py` with empty setup and unload;
   - `const.py` with `DOMAIN`;
   - `hacs.json`.
 
-  Verify: a pytest smoke test imports the package and checks that `manifest.json` has the required keys.
-- [ ] 1.5 Review group 1: `/code-review` on the group's changes, fix confirmed findings, commit.
+  Verify: `tests/test_manifest.py` checks the manifest keys, and `python scripts/lint.py` exits 0.
+- [x] 1.5 Write `docs/development.md` (tools, rules, quality scale, tests, private data) and `docs/README.md`. Done
+  during planning on 2026-10-31. Verify: both pass the Markdown check.
+- [ ] 1.6 Add `quality_scale.yaml` to the integration, with every rule of the Integration Quality Scale as todo or
+  exempt (with a reason), per `docs/development.md`. Verify: hassfest accepts it (locally through its Docker image,
+  or in CI once 7.3 exists).
 
-## 2. Tank model (pure Python)
+## 2. Tank model and draw classification (pure Python)
 
-- [ ] 2.1 Implement `model.py` with the tank-model spec, without Home Assistant imports:
-  - state;
-  - draw, energy and power heat updates;
-  - heating detection fallbacks (D3);
-  - anchor, follow-up without heat input, standing loss, cap, bounds;
+- [ ] 2.1 Implement the tank-model spec in `model.py`:
+  - state (T_avg, T_ch, f);
+  - mixed and other draws;
+  - energy and power heat with start-up energy;
+  - heating detection (D3);
+  - charging at run end with the 2-minute flow and return ring (D4);
+  - binary-only follow-up;
+  - standing loss on both temperatures;
+  - the sensor rules (D5: lower bound, thermocline cap, cold cap, raise of T_ch);
+  - physical bounds;
   - the cold water curve or sensor;
-  - outputs (litres, percent, minutes);
+  - outputs (tank litres, shower litres, percent charged, minutes);
   - a bounded event log.
 
-  Verify: `tests/test_model.py` has one test per tank-model scenario, with the numbers from the spec, all passing.
-- [ ] 2.2 Implement draw classification in `model.py` with the draw-classification spec:
+  Verify: `tests/test_model.py` has one test per tank-model scenario, all passing.
+- [ ] 2.2 Implement the draw-classification spec in `model.py`:
   - meter deltas with unit conversion;
   - resets and implausible jumps;
   - sessions;
-  - humidity window minimum with hysteresis;
+  - the humidity window minimum with hysteresis;
   - the long-draw rule;
-  - the recount at detection;
-  - the other share.
+  - the reclassify window;
+  - mixed and other draws.
 
-  Verify: `tests/test_classification.py` has one test per draw-classification scenario, all passing.
-- [ ] 2.3 Add serialisation of the model state (to and from a plain dict) for restore. Verify: a round-trip test
-  restores a mid-shower session and the humidity window, and the next reading gives the same result as an
-  unrestored model.
-- [ ] 2.4 Build the replay fixture:
-  - Add `scripts/history.py`, a websocket history fetch with the token from a file and entity IDs as arguments,
-    reused by the backtest later.
-  - Use it to export the development installation's evidence-1 and evidence-2 windows (entity IDs are in
-    `private/installation.md`) into `tests/fixtures/long_shower.json`, with every entity ID replaced by a made-up
-    one.
+  Verify: `tests/test_classification.py` has one test per scenario, all passing.
+- [ ] 2.3 Add serialisation of the full model state to and from a plain dict: both temperatures, meter and energy
+  readings, run state, session, humidity window and flow/return ring. Verify: a round-trip test restores a
+  mid-shower, mid-run state, and the next readings give the same results as an unrestored model.
+- [ ] 2.4 Write `docs/model.md` from design D1-D8: every formula with symbols and units, the reason for each charge
+  rule, sensor bound and default, and the draw classification. Do not include installation-specific IDs. Verify:
+  the Markdown check passes, and each formula appears in `model.py` with the same symbols, checked by the group
+  review.
 
-  Verify: `git grep` on the fixture finds no real entity ID, and `tests/test_replay.py` checks that:
-  - the model stays above the floor until at least 200 L into the shower;
-  - remaining reaches 0-40 L by the end of the shower;
-  - the anchor at the end of the recharge differs from the sensor by no more than 3 K.
-- [ ] 2.5 Write `docs/model.md`: every formula with symbols and units, the reason for each anchor, cap and default
-  (from design D1-D6, with no installation-specific IDs), and how draws are classified. Verify: each formula in
-  the doc matches the code, checked by the review in 2.6.
-- [ ] 2.6 Review group 2: `/code-review` and `/simplify` on the group's changes, fix confirmed findings, commit.
+## 3. Test data from recorded history
 
-## 3. Home Assistant integration
+- [ ] 3.1 Add `scripts/history.py`: a REST history export with the token read from a file (never printed), entity
+  IDs per role and the time range as arguments, and JSON per role as output, in the format of the files in
+  `private/history/`. Add `scripts/anonymise.py`, which cuts a window from an export into a fixture with made-up
+  entity IDs and only the roles the model uses. Verify: running anonymise on
+  `private/history/2026-10-01_2026-10-31/` for a 1-hour window gives a fixture in which `git grep` finds no real
+  entity ID.
+- [ ] 3.2 Build the six fixtures of design D10 (`long_shower`, `shower_unseen`, `back_to_back`, `night_trickle`,
+  `quiet_days`, `week`) into `tests/fixtures/`, using the role mapping in `private/installation.md`. Verify: the
+  fixtures are each under 500 kB, and a scan for every entity ID in `private/installation.md` finds none of them.
+- [ ] 3.3 Add `tests/test_replay.py`, which replays each fixture with the default options and checks:
+  - `long_shower`: shower water stays above 0 until at least 200 L into the session; tank water is 0-60 L at its
+    end; the charge at the end of the recovery run is within 3 K of the model before the charge, once the
+    start-up energy of 1.8 kWh is set in the options.
+  - `shower_unseen`: the lower sensor bound holds T_avg at or above `T_ch - 0.325 * (T_ch - T_cold)` through the
+    141 L shower, and shower water stays above 150 L.
+  - `back_to_back`: shower detection reclassifies litres from the start of both sessions, and the cold cap or the
+    thermocline cap acts during the second session.
+  - `night_trickle`: the reclassify window keeps the trickle before the shower as other draws.
+  - `quiet_days`: no output falls more than 10 % in a night without draws.
 
-- [ ] 3.1 Implement the config flow (D7 steps) with entity selectors filtered by domain and device class, and the
-  validation from the integration-setup spec:
-  - volume range;
+  Verify: the tests pass. Record the replayed numbers in `private/installation.md` under "Replay results" with the
+  date.
+- [ ] 3.4 **User review.** Show the user the replay numbers from 3.3 (litres and charge errors per fixture), and
+  ask whether the outputs match what they remember of those evenings. Record their answer with its date in this
+  task and in `private/installation.md`. Verify: the decision is recorded.
+
+## 4. Calibration (pure Python, plus the backtest)
+
+- [ ] 4.1 Implement the closure sums and the fitter in `calibration.py`, per the calibration spec and design D11:
+  - interval sums from the energy balance without sensor bounds;
+  - the true start average;
+  - weighted least squares with forgetting factor 0.95;
+  - at least 5 intervals before applying;
+  - the step limit;
+  - bounds and locks;
+  - the excluded closures.
+
+  Verify: `tests/test_calibration.py` covers each calibration scenario. A synthetic test generates intervals from
+  known parameters and recovers them within 5 %.
+- [ ] 4.2 Implement quiet-window loss learning and the first-drop width estimator. Verify: tests for the quiet-night
+  scenario and the sensor-drop scenario, and a test that a window with a draw is skipped.
+- [ ] 4.3 Implement the setup-fit replay as a pure function: history in, parameters and calibration state out,
+  shared with the backtest. Verify: on the `week` fixture it returns 7 closures, share 0.1-0.3, start-up energy
+  1.0-2.6 kWh, k 0.002-0.007, and a mean absolute charge error of 2.5 K or less.
+- [ ] 4.4 Add `scripts/backtest.py` per design D10. It runs on any history export with options from arguments or
+  JSON, and prints the charge errors, the showers, the fitted parameters and the error with fitted against default
+  parameters. Verify: on the `week` fixture its fitted parameters equal those of 4.3.
+- [ ] 4.5 Run the backtest on `private/history/2026-10-01_2026-10-31/`, and record the fit and the errors in
+  `private/installation.md` under "Backtest results" with the date. Verify: the mean absolute charge error with
+  the fitted parameters is 2.5 K or less.
+- [ ] 4.6 **User review.** Show the user the fitted parameters and the error against the shipped defaults. Ask
+  whether to change any shipped default; the defaults are meant to be generic, not this tank's fit. If one changes,
+  update the defaults scenarios in the integration-setup spec, design D2-D7, `const.py` and `docs/model.md`
+  together. Record the decision with its date. Verify: the decision is recorded, and the lint and tests pass.
+- [ ] 4.7 Document calibration in `docs/model.md`: the closure equation, learning, bounds and locks, the setup fit
+  and the backtest's usage. Verify: the documented backtest command runs as written on the `week` fixture.
+
+## 5. Home Assistant integration
+
+- [ ] 5.1 Config flow (design D9 steps), with selectors filtered by domain and device class, and the validation in
+  the integration-setup spec:
+  - volume;
+  - sensor height 20-80 %;
   - at least one heat source;
-  - volume unit on the water meter.
+  - flow and return as a pair;
+  - a volume unit on the water meter.
 
-  Verify: `tests/test_config_flow.py` covers a successful entry and each validation error.
-- [ ] 3.2 Implement the options flow with every tuning value, its default and the optional sources. An options
-  update reloads the entry. Verify: a test changes the floor temperature and checks that the tank average is
-  unchanged after the reload, and the remaining litres are recalculated.
-- [ ] 3.3 Implement the estimator runtime:
+  Verify: `tests/test_config_flow.py` covers a successful entry and each error scenario.
+- [ ] 5.2 Options flow with every tuning value and its default, the optional sources, a lock per learned parameter
+  and the history days. An update reloads the entry. Verify: a test changes the sensor height, and T_avg, T_ch and
+  the calibration state are unchanged after the reload.
+- [ ] 5.3 Estimator runtime:
   - `entry.runtime_data`;
-  - state change listeners for every configured source;
+  - state listeners for every configured source;
+  - the flow and return ring;
   - the 5-minute interval;
-  - a dispatcher signal to the entities;
-  - the first-start value (sensor, else full temperature).
+  - the dispatcher signal;
+  - the first start, charged at the sensor reading, or 50 C if it is unavailable.
 
-  Verify: tests drive `hass.states.async_set` on made-up source entities through a short shower and a heating
-  cycle, and check the entity states.
-- [ ] 3.4 Implement the entities with names from translations, units, device and state classes, all on one device
-  per entry:
-  - sensors for tank average (RestoreSensor with extra stored data), remaining, percent, minutes and cold water;
-  - the shower detected binary sensor.
+  Verify: tests drive `hass.states.async_set` on made-up sources through a shower and a heating run, and check the
+  entity states against the model.
+- [ ] 5.4 Calibration in the runtime:
+  - a `Store` per entry;
+  - the setup fit on entry creation, reading the recorder through its executor and replaying in the executor;
+  - closure learning at each charge;
+  - quiet-window and width learning;
+  - the "Shower ran cold" button.
 
-  Verify: a restart test (`async_mock_restore_state_cache`) restores the tank average, the meter reading and the
-  session, and a test checks that the binary sensor is unavailable without detection methods.
-- [ ] 3.5 Implement the `set_tank_average` action (`services.yaml`, translated fields), with and without a
-  temperature. Verify: tests for both scenarios in the spec, including the error when the sensor is unavailable.
-- [ ] 3.6 Handle unavailable sources and counter resets per the integration-setup spec. Verify: tests for a water
-  meter that is offline briefly, an energy counter reset, and a tank sensor that is unavailable at anchor time.
-- [ ] 3.7 Implement diagnostics: options, state, source availability and the last 50 events. Verify: a diagnostics
-  test checks the keys.
-- [ ] 3.8 Write `strings.json` and `translations/en.json` (plain text, no emoji). Write the README sections on
-  configuration fields, options and entities. Verify: hassfest passes locally, or in CI once 7.2 exists, and every
-  config and options field appears in the README.
-- [ ] 3.9 Review group 3: `/code-review` and `/simplify` on the group's changes, fix confirmed findings, commit.
+  Verify: a test with the recorder test fixture loads the `week` fixture as history, creates an entry, and checks
+  that the samples sensor reads 7 and the parameters match 4.3. A button test checks the cold-shower scenario.
+- [ ] 5.5 Entities, each with translated names, units and device and state classes, on one device per entry:
+  - the seven sensors from the integration-setup spec, with the tank average sensor as a RestoreSensor holding the
+    model state;
+  - the shower detected binary sensor;
+  - the button;
+  - the diagnostic-category calibration sensors with their `source` attribute.
 
-## 4. Backtest and tuning
+  Verify: a restart test (`mock_restore_cache_with_extra_data`) restores the model, and a test checks that the
+  binary sensor is unavailable without detection methods.
+- [ ] 5.6 Actions `set_tank_state` and `recalibrate` (`services.yaml`, translated fields). Verify: tests for each
+  scenario in the integration-setup spec, including the error when the sensor is unavailable, and that locked
+  parameters survive a recalibration.
+- [ ] 5.7 Handling of unavailable sources and counter resets per the integration-setup spec. Verify: tests for the
+  water meter that goes offline briefly, the energy counter reset and the tank sensor that flickers.
+- [ ] 5.8 Diagnostics: options, state, source availability, the last 100 events and the calibration state. Verify:
+  a diagnostics test checks the keys.
+- [ ] 5.9 Write `strings.json` and `translations/en.json` (plain text), and the README sections on configuration,
+  options, entities, calibration and the diagnostic sensors. Verify: every config and options field and every
+  entity appears in the README, and hassfest passes locally (`uvx` or the Docker image) or in CI once 7.3 exists.
 
-- [ ] 4.1 Implement `scripts/backtest.py`: fetch history through `scripts/history.py`, replay it through
-  `model.py` with options from command-line arguments or a JSON file, and print:
-  - the error before each anchor;
-  - each shower with the litres before and after;
-  - a grid search over the other share and the floor that minimises the anchor error.
+## 6. Rollout on the development installation (each task needs the user's authorization)
 
-  Verify: running it on the test fixture prints the expected anchor error.
-- [ ] 4.2 Run the backtest on the development installation's last 10 days. Record the results and the chosen
-  values in `private/installation.md`. If a default should change, update the defaults scenarios in the
-  integration-setup spec, design D4/D5, `const.py`, the README and `docs/model.md` together. Verify: the backtest
-  output with the chosen values shows a mean absolute anchor error of 3 K or less.
-- [ ] 4.3 Document the backtest's usage in `docs/model.md` and the README's tuning section. Verify: the documented
-  command runs as written against the fixture.
-- [ ] 4.4 Review group 4: `/code-review` on the group's changes, fix confirmed findings, commit.
+- [ ] 6.1 In the config workspace `<config-workspace>`, add a `$Mappings` entry to `scripts/deploy.ps1`
+  for `custom_components/hot_water_tank_estimator/` -> `custom_components/hot_water_tank_estimator/`, and document
+  it in its `docs/deploy.md`. With authorization: deploy and restart Home Assistant. Verify: the deploy hook reports
+  the upload, and the integration appears in the list of integrations that can be added.
+- [ ] 6.2 With authorization, add the config entry with the entities and sensor height from
+  `private/installation.md`. Verify, through the home-assistant MCP server:
+  - every entity exists;
+  - the setup fit reports at least 20 samples from the recorder's 30 days;
+  - its parameters agree with 4.5 within the 4.3 ranges;
+  - T_avg is within 3 K of the tank sensor while the sensor reads the hot layer.
 
-## 5. Rollout on the development installation
-
-- [ ] 5.1 In the author's Home Assistant config workspace, add a `$Mappings` entry to `scripts/deploy.ps1` for
-  `custom_components/hot_water_tank_estimator/` -> `custom_components/hot_water_tank_estimator/`, and document it
-  in that workspace's `docs/deploy.md`. Deploy, then restart Home Assistant. Verify: the deploy hook reports the
-  upload, and "Hot Water Tank Estimator" appears among the integrations that can be added.
-- [ ] 5.2 Add the config entry with the entities from `private/installation.md` and the tuned options. Verify:
-  - all six entities exist and the tank average is within 3 K of the tank sensor (state check through the
-    home-assistant MCP server);
-  - the next water draw shows up in the diagnostics events.
-- [ ] 5.3 Live check over the next shower and heating cycle:
-  - shower detected turns on within 2 minutes of the shower starting;
-  - remaining drops by about 0.6 times the shower volume;
-  - at the end of the cycle the anchor event shows an error of 3 K or less.
+  Record the result in `private/installation.md`.
+- [ ] 6.3 Live check over the next shower and the next heating run:
+  - shower detected turns on within 2 minutes;
+  - shower water drops by about the shower's litres;
+  - the charge event's error is 3 K or less;
+  - the samples sensor goes up by one.
 
   Record the result in `private/installation.md`. Verify: the diagnostics download shows these events.
-- [ ] 5.4 Review group 5: check that nothing installation-specific was committed to this repo
-  (no real entity ID such as one from `private/installation.md` appears in `git grep`; product names in
-  the README are fine), then commit.
+- [ ] 6.4 With authorization, add a "Hot Water" block next to the DHW Price Block section of the heating dashboard:
+  - tiles for tank water, shower water, percent charged and shower minutes;
+  - a 24 h history graph of the tank average, the charged temperature, the tank sensor and shower detected.
 
-## 6. Dashboard on the development installation
-
-- [ ] 6.1 In the development installation's heating dashboard, add a "Hot Water" block next to the DHW Price
-  Block section:
-  - tiles for remaining (L), percent and shower minutes;
-  - a 24 h history graph of the tank average, the tank sensor and shower detected.
-
-  Edit with a targeted dashboard transform, not a full rewrite. Document it in the config workspace's
-  `docs/dhw-price-block.md` and in `private/installation.md`. Verify: a dashboard search for the new entities
-  returns the cards, and their states render (or a Puppet screenshot if the dashboard is reachable there).
-- [ ] 6.2 Add stock-card dashboard example YAML to the README, with made-up entity IDs. Verify: the README
-  example uses only core cards and only `hot_water_tank_estimator` entity names.
-- [ ] 6.3 Review group 6: `/code-review` on the group's changes, fix confirmed findings, commit.
+  Edit it with a targeted dashboard transform. Document it in the config workspace's `docs/dhw-price-block.md`,
+  update its `CLAUDE.md` note from "planned" to "live", and update `private/installation.md`. Verify: a dashboard
+  search for the new entities finds the cards.
+- [ ] 6.5 Add stock-card dashboard example YAML to the README, with made-up entity IDs. Verify: the example uses
+  only core cards and `hot_water_tank_estimator` entity names.
 
 ## 7. Packaging and release
 
 - [ ] 7.1 Complete the README:
   - purpose and requirements;
   - HACS and manual install;
-  - configuration and options (from 3.8);
+  - finding the sensor height;
+  - configuration and options;
   - entities;
-  - model summary linking `docs/model.md`;
-  - tuning (from 4.3);
-  - dashboard example (from 6.2);
+  - calibration and how to read its diagnostic sensors;
+  - a model summary linking `docs/model.md`;
+  - the dashboard example;
   - limitations (from design Risks).
 
   Verify: every README requirement in the packaging spec has its section.
-- [ ] 7.2 Add GitHub Actions: `validate.yml` (hassfest and the HACS action) and `tests.yml` (ruff check, ruff format
-  check, pytest) on push and pull request. Verify: the workflows pass on GitHub after the repository is published.
-  Ask the user before creating the GitHub repository and pushing.
-- [ ] 7.3 Set the manifest version to 0.1.0, tag `v0.1.0` and create a GitHub release with notes. Verify: HACS
-  shows version 0.1.0 when the repository is added as a custom repository on the development installation.
-- [ ] 7.4 Review group 7: `/code-review` on the group's changes, fix confirmed findings, commit.
+- [ ] 7.2 Bring `quality_scale.yaml` up to date: every applicable Bronze and Silver rule, plus the Gold rules in
+  the packaging spec, marked done with the code that meets them. Verify: no applicable Bronze or Silver rule is
+  todo, and hassfest accepts the file.
+- [ ] 7.3 Add GitHub Actions: `validate.yml` (hassfest and the HACS action) and `lint.yml` (`python scripts/lint.py`
+  with uv set up) on push and pull request. Verify: the workflow files pass `uvx check-jsonschema` against the
+  GitHub workflow schema.
+- [ ] 7.4 **User review.** Ask the user to authorize creating the GitHub repository, pushing, tagging `v0.1.0` and
+  publishing a release. Record the decision with its date. With authorization: set the manifest version to 0.1.0,
+  push, tag and release. Verify: the workflows pass on GitHub, and HACS on the development installation shows
+  version 0.1.0 when the repository is added as a custom repository.
 
 ## Workflow follow-up
 
-- Sync the delta specs into `openspec/specs/` and archive the change once every group is reviewed
-  (`/opsx:archive`).
-- Update the author's config workspace `CLAUDE.md` project note from "planned" to "live".
+- One fresh Opus review of the whole change before archiving (`openspec/config.yaml`, Review loop).
+- Sync the delta specs into `openspec/specs/` and archive the change (`/opsx:archive`).
