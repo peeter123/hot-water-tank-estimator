@@ -1,0 +1,37 @@
+schema: spec-driven
+
+context: |
+  A Home Assistant custom integration (HACS) that estimates how much hot water is left in a domestic hot water
+  (DHW) tank that has no flow meter on the tank itself. It combines a house water meter, the tank temperature
+  sensor, the heater's thermal energy counter and a bathroom humidity sensor into an energy balance of the tank.
+  Developed against one live installation (a 281 L tank on a ground source heat pump, an evening price block that
+  stops reheating), but meant to be published on GitHub for others to install, so every source entity, volume
+  and tuning value comes from the config flow; nothing about one installation is hard-coded.
+  This folder is its own git repo. A private Home Assistant config workspace elsewhere on the author's PC holds
+  the deploy script, which uploads custom_components/hot_water_tank_estimator/ to /config/custom_components/ on
+  the live host; a Python change needs a Home Assistant restart to load.
+  Nothing installation-specific (entity IDs, device serials, hostnames, dashboard IDs) may ship in code, tests,
+  fixtures or examples; installation notes and calibration data belong in the git-ignored private/ folder only
+  (private/installation.md). Test fixtures use made-up entity IDs.
+  The live installation must keep working throughout every change.
+  Plain text only in names, labels and UI strings: no emoji.
+
+rules:
+  proposal:
+    - State explicitly what is out of scope and which follow-up change covers it
+  design:
+    - Give every formula with its units and the reason for every anchor, clamp and default value
+  tasks:
+    - Include verification on the live installation (state check, trace or backtest), not only unit tests
+    - Include updating README.md and docs/model.md for every behaviour change
+
+operations:
+  apply:
+    guidance:
+      - Keep the quality hook green; fix what it reports before moving to the next task
+      - End every task with the check command (python scripts/check.py once it exists, which runs ruff check, ruff format --check and pytest), /code-review on the task's changes (fix confirmed findings) and a commit of the task; skip the commit when the task changed no files
+      - End every task group with /code-review on the group's changes (and /simplify for larger groups), fix confirmed findings, and only then tick the group's review task
+      - Run implementation sessions from this folder so the project hook and /opsx commands are loaded
+      - The session model coordinates and does not implement. Hand each task to a fresh Sonnet agent (Agent tool, general-purpose, model sonnet) whose prompt names the change, the task, the spec and design sections and files it touches, and the rules in this file (no emoji, nothing installation-specific, docs in sync). The agent implements, runs the check command, commits, and returns a short summary (files, check result, commit hash, open questions). Send confirmed review findings back to the same agent (SendMessage) to fix. Do not re-read the diff in the session unless the review or summary calls for it
+      - Changes on the live Home Assistant (deploy, restart, config entry, dashboard) are made through the home-assistant MCP server from the session, after the code they depend on is committed
+      - After a task group's review task is ticked, stop and suggest /clear before the next group; tasks.md carries the state
