@@ -69,7 +69,8 @@ rules for diagnostics, entity and icon translations, entity categories, device c
 
 #### Scenario: Release check
 - **WHEN** version 0.1.0 is tagged
-- **THEN** `quality_scale.yaml` has no applicable Bronze or Silver rule marked todo, and hassfest accepts it
+- **THEN** `quality_scale.yaml` has no applicable Bronze or Silver rule marked todo, the quality scale test finds
+  every rule of hassfest's rule list with a valid status, and hassfest passes
 
 ### Requirement: Automated checks
 GitHub Actions SHALL run hassfest, HACS validation and `python scripts/lint.py` on every push and pull request.

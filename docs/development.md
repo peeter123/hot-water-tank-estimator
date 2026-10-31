@@ -6,12 +6,32 @@ They apply to every file a change creates or edits.
 ## Lint commands
 
 `scripts/lint.py` is the single entry point. It uses only the Python standard library and runs every tool through
-`uvx` or `uv run` at an exact version, never from `PATH`, so it needs no venv; it does need
-[uv](https://docs.astral.sh/uv/). Exit status: `0` clean, `1` findings, `2` a tool could not be run.
+`uvx` or `uv run` at an exact version, never from `PATH` (Docker, where used, comes from `PATH` and runs a pinned
+image), so it needs no venv; it does need [uv](https://docs.astral.sh/uv/). Exit status: `0` clean, `1` findings,
+`2` a tool could not be run.
 
 ```sh
 python scripts/lint.py          # ruff check, ruff format --check, Markdown format, codespell, yamllint, pytest
 python scripts/lint.py --fix    # apply ruff fixes, ruff format and Markdown line-ending fixes, then check
+```
+
+Home Assistant does not run on native Windows, so the pytest step depends on the platform (`pytest_command` in
+`scripts/lint.py`, shared with the edit hook):
+- Linux and macOS: pytest runs directly through `uv run`.
+- Windows with a running Docker engine (Docker Desktop's Linux engine needs WSL): the same command runs in the
+  `ghcr.io/astral-sh/uv:0.13.1-python3.14-trixie-slim` container, with the repository mounted and a `hwte-uv-cache`
+  volume for the uv cache.
+- Windows without Docker: pytest runs natively with the Home Assistant plugin disabled and prints a warning. Pure
+  Python tests pass; tests that need Home Assistant fail, so lint exits 1.
+
+After Docker becomes available, run `python scripts/lint.py` once to warm the uv cache volume: the first container
+run can exceed the edit hook's timeout.
+
+hassfest (manifest and integration checks) runs through Docker, locally and in CI, not in `scripts/lint.py`. Run it
+from PowerShell, or prefix it with `MSYS_NO_PATHCONV=1` in Git Bash:
+
+```sh
+docker run --rm -v "$PWD:/github/workspace" ghcr.io/home-assistant/hassfest
 ```
 
 The Claude Code hook in `.claude/settings.json` runs `scripts/check_on_edit.py` after every Edit or Write. It
@@ -34,8 +54,10 @@ core integrations:
 | codespell | 2.4.3 | same |
 | yamllint | 1.38.0 | same |
 | Python | 3.14.2 or later | core `pyproject.toml` `requires-python` |
-| pytest-homeassistant-custom-component | pinned in `requirements_test.txt` | must match a current Home Assistant release |
+| uv image (Windows with Docker) | `ghcr.io/astral-sh/uv:0.13.1-python3.14-trixie-slim` | `scripts/lint.py` |
+| pytest-homeassistant-custom-component | 0.13.375 | `requirements_test.txt`; targets Home Assistant 2026.10.4 |
 
+- `.python-version` (3.14) makes `uv run` pick a Python that Home Assistant supports, not the newest installed one.
 - The ruff `[tool.ruff.lint]` section in `pyproject.toml` is a copy of core's: selected and ignored rules, banned
   APIs, isort settings, mccabe complexity 25 and the Google docstring convention. Only paths are adapted:
   first-party `custom_components`, and `scripts/*` may print.
@@ -72,15 +94,18 @@ core integrations:
 ## Quality scale
 
 Home Assistant's Integration Quality Scale is the checklist for integration code. The integration keeps a
-`quality_scale.yaml` with the status of each rule (`done`, `todo` or `exempt` with a comment), which hassfest
-validates. The target for the first release is Silver, plus these Gold rules that apply to a calculated helper:
+`quality_scale.yaml` with the status of each rule (`done`, `todo` or `exempt` with a comment). hassfest does
+not validate this file for custom integrations, so `tests/test_quality_scale.py` checks it against a copy of
+hassfest's rule list. The target for the first release is Silver, plus these Gold rules that apply to a calculated
+helper:
 - diagnostics;
 - entity translations and icon translations;
 - entity categories and device classes;
 - reconfiguration through the options flow;
 - documentation of the data and the known limitations.
 
-Rules about devices, discovery, network connections and authentication are `exempt`, with the reason.
+Rules about discovery, network connections and authentication are `exempt`, with the reason. The integration has one
+device per entry, so only the rules about devices appearing or disappearing at runtime are `exempt`.
 
 ## Tests
 

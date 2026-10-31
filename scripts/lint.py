@@ -6,12 +6,13 @@ Usage (from anywhere, no venv, Python standard library only):
     python scripts/lint.py          check: ruff, Markdown format, codespell, yamllint, pytest
     python scripts/lint.py --fix    apply the ruff and Markdown fixes first, then check
 
-Every tool runs through `uvx` or `uv run` at an exact version, never from PATH. The ruff
+Every tool runs through `uvx` or `uv run` at an exact version, never from PATH (Docker, where used, comes from PATH and runs a pinned image). The ruff
 rules are Home Assistant core's (pyproject.toml). Exit status: 0 clean, 1 findings, 2 a
 tool could not be run. See docs/development.md.
 """
 
 import argparse
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -27,6 +28,13 @@ YAMLLINT_VERSION = "1.38.0"
 ROOT = Path(__file__).resolve().parent.parent
 MARKDOWN_EXCLUDE = (".claude/", "openspec/changes/archive/")
 TEST_REQUIREMENTS = ROOT / "requirements_test.txt"
+# Linux image with uv and Python 3.14, used to run the tests on Windows through Docker.
+DOCKER_IMAGE = "ghcr.io/astral-sh/uv:0.13.1-python3.14-trixie-slim"
+DOCKER_CACHE_VOLUME = "hwte-uv-cache"
+# docker run exit codes meaning docker itself failed, not the tests.
+DOCKER_FAILURE_CODES = (125, 126, 127)
+# pytest11 entry point of pytest-homeassistant-custom-component; it imports homeassistant.
+HA_PLUGIN = "homeassistant"
 
 
 class ToolError(Exception):
@@ -40,6 +48,80 @@ def run(args: list[str]) -> int:
         return subprocess.run(args, cwd=ROOT, check=False).returncode
     except OSError as error:
         raise ToolError(f"{args[0]}: {error}") from error
+
+
+def docker_available() -> bool:
+    """Whether a Docker engine answers, checked quickly."""
+    try:
+        return (
+            subprocess.run(
+                ["docker", "info"],
+                capture_output=True,
+                timeout=15,
+                check=False,
+            ).returncode
+            == 0
+        )
+    except OSError:
+        return False
+    except subprocess.TimeoutExpired:
+        return False
+
+
+def pytest_command(*pytest_args: str) -> list[str]:
+    """The command that runs pytest with the given arguments, chosen by platform.
+
+    Home Assistant does not run on native Windows. There the tests run in a Linux
+    container when a Docker engine is reachable. Without one, they run natively with the
+    Home Assistant plugin disabled, so pure-Python tests pass and tests that need Home
+    Assistant fail (a loud warning says so).
+    """
+    uv_run = [
+        "uv",
+        "run",
+        "--no-project",
+        "--with-requirements",
+        "requirements_test.txt",
+        "pytest",
+    ]
+    if os.name != "nt":
+        return [*uv_run, *pytest_args]
+    if docker_available():
+        return [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{ROOT}:/src",
+            "-v",
+            f"{DOCKER_CACHE_VOLUME}:/root/.cache/uv",
+            "-e",
+            "UV_LINK_MODE=copy",
+            "-w",
+            "/src",
+            DOCKER_IMAGE,
+            *uv_run,
+            "-p",
+            "no:cacheprovider",
+            *pytest_args,
+        ]
+    print(
+        "WARNING: no Docker engine and native Windows: running pytest with the Home "
+        "Assistant plugin disabled. Tests that need Home Assistant cannot run here and "
+        "will fail. Start Docker Desktop (it needs WSL) to run the full suite in a Linux container.",
+        file=sys.stderr,
+        flush=True,
+    )
+    return [*uv_run, "-p", f"no:{HA_PLUGIN}", *pytest_args]
+
+
+def run_pytest() -> int:
+    """Run the test suite and return pytest's exit code; a failing docker is a ToolError."""
+    cmd = pytest_command("-q")
+    code = run(cmd)
+    if cmd[0] == "docker" and code in DOCKER_FAILURE_CODES:
+        raise ToolError(f"docker run failed with exit code {code}")
+    return code
 
 
 def tracked(*patterns: str) -> list[str]:
@@ -108,17 +190,7 @@ def main() -> int:
                 != 0
             )
         if TEST_REQUIREMENTS.is_file() and (ROOT / "tests").is_dir():
-            code = run(
-                [
-                    "uv",
-                    "run",
-                    "--no-project",
-                    "--with-requirements",
-                    str(TEST_REQUIREMENTS),
-                    "pytest",
-                    "-q",
-                ]
-            )
+            code = run_pytest()
             status |= code not in (0, 5)  # 5: no tests collected yet
     except ToolError as error:
         print(error, file=sys.stderr)

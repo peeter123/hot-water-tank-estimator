@@ -1,0 +1,13 @@
+{
+  "domain": "hot_water_tank_estimator",
+  "name": "Hot Water Tank Estimator",
+  "codeowners": ["@peeter123"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/peeter123/hot-water-tank-estimator",
+  "integration_type": "helper",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/peeter123/hot-water-tank-estimator/issues",
+  "requirements": [],
+  "version": "0.0.1"
+}

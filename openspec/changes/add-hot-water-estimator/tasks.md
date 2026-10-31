@@ -25,7 +25,7 @@ Applies to every group:
 - [x] 1.1 Add `pyproject.toml` with project metadata, Python 3.14.2 or later, Home Assistant core's ruff rule set
   (ruff 0.17.3) and the pytest config. Add `.yamllint` and `.codespellrc`. Done during planning on 2026-10-31, with
   the user's request to bring in the linter and quality rules. Verify: `python scripts/lint.py` exits 0.
-- [ ] 1.2 Add `requirements_test.txt` with an exact pin of `pytest-homeassistant-custom-component` (the release
+- [x] 1.2 Add `requirements_test.txt` with an exact pin of `pytest-homeassistant-custom-component` (the release
   matching the newest Home Assistant it supports) and an empty `tests/__init__.py`. Verify:
   `uv run --no-project --with-requirements requirements_test.txt pytest --version` prints the pinned pytest, and
   `python scripts/lint.py` runs the (empty) suite and exits 0.
@@ -34,7 +34,7 @@ Applies to every group:
   - lint exits 0 on the repository;
   - the hook repairs a CRLF Markdown file;
   - it reports an undefined name in a Python file with exit code 2.
-- [ ] 1.4 Add a minimal integration that loads:
+- [x] 1.4 Add a minimal integration that loads:
   - `custom_components/hot_water_tank_estimator/manifest.json` (fields per the packaging spec, version 0.0.1);
   - `__init__.py` with empty setup and unload;
   - `const.py` with `DOMAIN`;
@@ -43,9 +43,11 @@ Applies to every group:
   Verify: `tests/test_manifest.py` checks the manifest keys, and `python scripts/lint.py` exits 0.
 - [x] 1.5 Write `docs/development.md` (tools, rules, quality scale, tests, private data) and `docs/README.md`. Done
   during planning on 2026-10-31. Verify: both pass the Markdown check.
-- [ ] 1.6 Add `quality_scale.yaml` to the integration, with every rule of the Integration Quality Scale as todo or
-  exempt (with a reason), per `docs/development.md`. Verify: hassfest accepts it (locally through its Docker image,
-  or in CI once 7.3 exists).
+- [x] 1.6 Add `quality_scale.yaml` to the integration, with every rule of the Integration Quality Scale as todo or
+  exempt (with a reason), per `docs/development.md`. hassfest does not validate this file for custom integrations,
+  so add `tests/test_quality_scale.py` with a copy of hassfest's rule list (and the date it was copied). Verify:
+  the test checks that the file has exactly those rules, each `done`, `todo`, or `exempt` with a comment, and it
+  passes. hassfest itself runs in CI from 7.3.
 
 ## 2. Tank model and draw classification (pure Python)
 
@@ -240,8 +242,9 @@ Applies to every group:
 
   Verify: every README requirement in the packaging spec has its section.
 - [ ] 7.2 Bring `quality_scale.yaml` up to date: every applicable Bronze and Silver rule, plus the Gold rules in
-  the packaging spec, marked done with the code that meets them. Verify: no applicable Bronze or Silver rule is
-  todo, and hassfest accepts the file.
+  the packaging spec, marked done with the code that meets them. Settle the `brands` rule and the minimum Home
+  Assistant version in `hacs.json`. Verify: no applicable Bronze or Silver rule is todo,
+  `tests/test_quality_scale.py` passes, and hassfest passes.
 - [ ] 7.3 Add GitHub Actions: `validate.yml` (hassfest and the HACS action) and `lint.yml` (`python scripts/lint.py`
   with uv set up) on push and pull request. Verify: the workflow files pass `uvx check-jsonschema` against the
   GitHub workflow schema.

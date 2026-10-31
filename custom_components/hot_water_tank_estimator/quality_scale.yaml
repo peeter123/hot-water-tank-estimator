@@ -1,0 +1,163 @@
+rules:
+  action-setup:
+    status: todo
+    comment: Not implemented yet; the integration will register set_tank_state and recalibrate.
+  appropriate-polling:
+    status: exempt
+    comment: Nothing is polled; state changes and a timer drive the estimate.
+  brands:
+    status: todo
+    comment: Brand images are decided before the first release.
+  common-modules:
+    status: todo
+    comment: Not implemented yet.
+  config-flow:
+    status: todo
+    comment: Not implemented yet.
+  config-flow-test-coverage:
+    status: todo
+    comment: Not implemented yet.
+  dependency-transparency:
+    status: exempt
+    comment: There are no runtime requirements.
+  docs-actions:
+    status: todo
+    comment: Not implemented yet; the integration will register set_tank_state and recalibrate.
+  docs-conditions:
+    status: exempt
+    comment: The integration provides no conditions.
+  docs-high-level-description:
+    status: todo
+    comment: Not implemented yet.
+  docs-installation-instructions:
+    status: todo
+    comment: Not implemented yet.
+  docs-removal-instructions:
+    status: todo
+    comment: Not implemented yet.
+  docs-triggers:
+    status: exempt
+    comment: The integration provides no triggers.
+  entity-event-setup:
+    status: todo
+    comment: Not implemented yet.
+  entity-unique-id:
+    status: todo
+    comment: Not implemented yet.
+  has-entity-name:
+    status: todo
+    comment: Not implemented yet.
+  runtime-data:
+    status: todo
+    comment: Not implemented yet.
+  test-before-configure:
+    status: exempt
+    comment: No connection is made to a device or service.
+  test-before-setup:
+    status: exempt
+    comment: No connection is made to a device or service.
+  unique-config-entry:
+    status: todo
+    comment: Not implemented yet.
+  action-exceptions:
+    status: todo
+    comment: Not implemented yet; the integration will register set_tank_state and recalibrate.
+  config-entry-unloading:
+    status: todo
+    comment: Not implemented yet.
+  docs-configuration-parameters:
+    status: todo
+    comment: Not implemented yet.
+  docs-installation-parameters:
+    status: todo
+    comment: Not implemented yet.
+  entity-unavailable:
+    status: todo
+    comment: Not implemented yet.
+  integration-owner:
+    status: done
+    comment: Codeowners are set in the manifest.
+  log-when-unavailable:
+    status: exempt
+    comment: Entities are computed locally, not fetched from a device or service.
+  parallel-updates:
+    status: exempt
+    comment: Entities are computed locally and never poll or call a device.
+  reauthentication-flow:
+    status: exempt
+    comment: There is no authentication.
+  test-coverage:
+    status: todo
+    comment: Not implemented yet.
+  devices:
+    status: todo
+    comment: Not implemented yet; one device per entry.
+  diagnostics:
+    status: todo
+    comment: Not implemented yet.
+  discovery:
+    status: exempt
+    comment: A calculated helper has nothing to discover on the network.
+  discovery-update-info:
+    status: exempt
+    comment: A calculated helper has nothing to discover on the network.
+  docs-data-update:
+    status: todo
+    comment: Not implemented yet.
+  docs-examples:
+    status: todo
+    comment: Not implemented yet.
+  docs-known-limitations:
+    status: todo
+    comment: Not implemented yet.
+  docs-supported-devices:
+    status: exempt
+    comment: A calculated helper supports no devices; it reads existing entities.
+  docs-supported-functions:
+    status: todo
+    comment: Not implemented yet.
+  docs-troubleshooting:
+    status: todo
+    comment: Not implemented yet.
+  docs-use-cases:
+    status: todo
+    comment: Not implemented yet.
+  dynamic-devices:
+    status: exempt
+    comment: One device per entry, created and removed with the entry; no devices appear or disappear at runtime.
+  entity-category:
+    status: todo
+    comment: Not implemented yet.
+  entity-device-class:
+    status: todo
+    comment: Not implemented yet.
+  entity-disabled-by-default:
+    status: todo
+    comment: Not implemented yet.
+  entity-translations:
+    status: todo
+    comment: Not implemented yet.
+  exception-translations:
+    status: todo
+    comment: Not implemented yet.
+  icon-translations:
+    status: todo
+    comment: Not implemented yet.
+  reconfiguration-flow:
+    status: todo
+    comment: Not implemented yet.
+  repair-issues:
+    status: todo
+    comment: Not implemented yet.
+  stale-devices:
+    status: exempt
+    comment: One device per entry, created and removed with the entry; no devices appear or disappear at runtime.
+  async-dependency:
+    status: exempt
+    comment: There are no runtime requirements.
+  inject-websession:
+    status: exempt
+    comment: The integration makes no web requests.
+  strict-typing:
+    status: todo
+    comment: Not implemented yet.
