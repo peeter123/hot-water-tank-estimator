@@ -1,0 +1,23 @@
+# Remote test runner: a long-running container that accepts files over SSH and runs pytest and hassfest.
+# Usage: set AUTHORIZED_KEYS to one or more SSH public keys (one per line), then run in this folder:
+#   docker compose up -d --build
+# The build context is the repository root, so requirements_test.txt can be copied into the image.
+name: hwte-test-runner
+
+services:
+  test-runner:
+    build:
+      context: ../..
+      dockerfile: docker/test-runner/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "2222:2222"
+    environment:
+      AUTHORIZED_KEYS: ${AUTHORIZED_KEYS:?set AUTHORIZED_KEYS}
+    volumes:
+      - hostkeys:/etc/ssh/hostkeys
+      - work:/work
+
+volumes:
+  hostkeys:
+  work:

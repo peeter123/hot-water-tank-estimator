@@ -15,24 +15,43 @@ python scripts/lint.py          # ruff check, ruff format --check, Markdown form
 python scripts/lint.py --fix    # apply ruff fixes, ruff format and Markdown line-ending fixes, then check
 ```
 
-Home Assistant does not run on native Windows, so the pytest step depends on the platform (`pytest_command` in
-`scripts/lint.py`, shared with the edit hook):
-- Linux and macOS: pytest runs directly through `uv run`.
-- Windows with a running Docker engine (Docker Desktop's Linux engine needs WSL): the same command runs in the
-  `ghcr.io/astral-sh/uv:0.13.1-python3.14-trixie-slim` container, with the repository mounted and a `hwte-uv-cache`
-  volume for the uv cache.
-- Windows without Docker: pytest runs natively with the Home Assistant plugin disabled and prints a warning. Pure
-  Python tests pass; tests that need Home Assistant fail, so lint exits 1.
+Home Assistant does not run on native Windows, so the pytest step uses the first of these that applies
+(`pytest_command` in `scripts/lint.py`, shared with the edit hook; the choice is printed):
+1. The remote test runner, when the git-ignored file `private/test-runner.json` exists. Set `HWTE_TEST_RUNNER=off`
+   to skip it.
+2. Windows with a running local Docker engine: the same command runs in the
+   `ghcr.io/astral-sh/uv:0.13.1-python3.14-trixie-slim` container, with the repository mounted and a `hwte-uv-cache`
+   volume for the uv cache. Run `python scripts/lint.py` once after Docker becomes available to warm that cache: the
+   first container run can exceed the edit hook's timeout.
+3. Linux and macOS: pytest runs directly through `uv run`.
+4. Windows without Docker: pytest runs natively with the Home Assistant plugin disabled and prints a warning. Pure
+   Python tests pass; tests that need Home Assistant fail, so lint exits 1.
 
-After Docker becomes available, run `python scripts/lint.py` once to warm the uv cache volume: the first container
-run can exceed the edit hook's timeout.
+A runner that cannot be used (no connection, bad config) is a tool failure: `remote_test.py` exits 255, as ssh does,
+and lint exits `2`. pytest's own exit code 2 (collection errors) stays a finding.
 
-hassfest (manifest and integration checks) runs through Docker, locally and in CI, not in `scripts/lint.py`. Run it
-from PowerShell, or prefix it with `MSYS_NO_PATHCONV=1` in Git Bash:
+## Remote test runner
+
+`docker/test-runner/` builds a long-running container for a Docker host such as a NAS. It runs `sshd` (key login only,
+port 2222, non-root user `runner`) and holds the pinned test requirements in `/opt/venv`. hassfest runs from Home
+Assistant core at the tag of the `homeassistant` version in the test venv, in a separate venv (`/opt/hassfest-venv`)
+built from the test venv's frozen package set plus the extras hassfest needs (installed as wheels only), so its
+dependencies never change the test environment. `docker/test-runner/README.md` explains deployment and the config
+file.
+
+`scripts/remote_test.py` (standard library only) copies the files `git ls-files` lists (never `private/` or `.git`)
+into a folder of its own in the container over SSH, runs the command there, removes the folder afterwards, and returns
+the command's exit code. Folders left by an interrupted run are removed after a day:
 
 ```sh
-docker run --rm -v "$PWD:/github/workspace" ghcr.io/home-assistant/hassfest
+python scripts/remote_test.py pytest [args]    # default -q
+python scripts/remote_test.py hassfest
+python scripts/remote_test.py shell "cmd; cmd" # the string runs in the remote shell, in the synced folder
+python scripts/lint.py --hassfest              # lint plus hassfest on the runner
 ```
+
+Rebuild the container (`docker compose up -d --build`) after a change to `requirements_test.txt` or the
+Dockerfile.
 
 The Claude Code hook in `.claude/settings.json` runs `scripts/check_on_edit.py` after every Edit or Write. It
 handles each file type differently:
@@ -54,7 +73,8 @@ core integrations:
 | codespell | 2.4.3 | same |
 | yamllint | 1.38.0 | same |
 | Python | 3.14.2 or later | core `pyproject.toml` `requires-python` |
-| uv image (Windows with Docker) | `ghcr.io/astral-sh/uv:0.13.1-python3.14-trixie-slim` | `scripts/lint.py` |
+| hassfest core tag | derived from `requirements_test.txt` | the `homeassistant` version in the test venv |
+| uv image (local Docker and the remote test runner) | `ghcr.io/astral-sh/uv:0.13.1-python3.14-trixie-slim` | `scripts/lint.py` |
 | pytest-homeassistant-custom-component | 0.13.375 | `requirements_test.txt`; targets Home Assistant 2026.10.4 |
 
 - `.python-version` (3.14) makes `uv run` pick a Python that Home Assistant supports, not the newest installed one.

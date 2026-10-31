@@ -49,7 +49,7 @@ Applies to every group:
   the test checks that the file has exactly those rules, each `done`, `todo`, or `exempt` with a comment, and it
   passes. hassfest itself runs in CI from 7.3.
 
-- [ ] 1.7 Remote test runner, added on 2026-10-31 at the user's request instead of WSL, which conflicts with VMware on
+- [x] 1.7 Remote test runner, added on 2026-10-31 at the user's request instead of WSL, which conflicts with VMware on
   the development PC. Native Windows cannot load Home Assistant's test plugin.
   - `docker/test-runner/` holds a Dockerfile and a `compose.yaml` for a long-running container on a Docker host such
     as a NAS:
@@ -62,7 +62,8 @@ Applies to every group:
   - The runner's address and key path come from a git-ignored file in `private/`, so no hostname enters a tracked
     file.
   - `scripts/lint.py` and the edit hook use the runner when it is configured, and fall back to the native
-    run otherwise.
+    run otherwise. `python scripts/lint.py --hassfest` also runs hassfest on the runner, until CI (7.3) runs it.
+  - Concurrent runs, such as an edit hook during a review's lint, each sync into their own folder on the runner.
   - `docs/development.md` describes the setup.
 
   Verify: on the user's runner, the suite passes through `python scripts/lint.py`, and hassfest passes.

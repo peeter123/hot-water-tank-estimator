@@ -41,11 +41,18 @@ def check_python(path: Path) -> list[str]:
         problems.append(output)
     test = ROOT / "tests" / f"test_{path.stem}.py"
     if test.is_file() and lint.TEST_REQUIREMENTS.is_file():
-        cmd = lint.pytest_command("-q", test.relative_to(ROOT).as_posix())
+        try:
+            cmd = lint.pytest_command("-q", test.relative_to(ROOT).as_posix())
+        except lint.ToolError as error:
+            return [*problems, f"tool failure: {error}"]
         code, output = capture(cmd)
         if cmd[0] == "docker" and code in lint.DOCKER_FAILURE_CODES:
             problems.append(
                 f"tool failure: docker run failed with exit code {code}\n{output[-4000:]}"
+            )
+        elif lint.is_remote(cmd) and code == lint.remote_test.RUNNER_FAILED:
+            problems.append(
+                f"tool failure: the remote test runner could not be used\n{output[-4000:]}"
             )
         elif code:
             problems.append(output[-4000:])

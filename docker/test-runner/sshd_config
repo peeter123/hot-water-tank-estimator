@@ -1,0 +1,13 @@
+# Key-only login for the single user "runner".
+Port 2222
+HostKey /etc/ssh/hostkeys/ssh_host_ed25519_key
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+PermitRootLogin no
+AllowUsers runner
+UsePAM no
+X11Forwarding no
+DisableForwarding yes
+AuthorizedKeysFile .ssh/authorized_keys
+PidFile none

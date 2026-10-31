@@ -1,0 +1,4 @@
+# Keep the build context minimal: only what docker/test-runner/Dockerfile copies.
+*
+!requirements_test.txt
+!docker/
