@@ -49,9 +49,27 @@ Applies to every group:
   the test checks that the file has exactly those rules, each `done`, `todo`, or `exempt` with a comment, and it
   passes. hassfest itself runs in CI from 7.3.
 
+- [ ] 1.7 Remote test runner, added on 2026-10-31 at the user's request instead of WSL, which conflicts with VMware on
+  the development PC. Native Windows cannot load Home Assistant's test plugin.
+  - `docker/test-runner/` holds a Dockerfile and a `compose.yaml` for a long-running container on a Docker host such
+    as a NAS:
+    - the pinned uv and Python 3.14 image, with `requirements_test.txt` installed;
+    - `sshd` on a published port, key-only, as a non-root user;
+    - the authorized key passed in through the compose environment;
+    - hassfest for the pinned Home Assistant version.
+  - `scripts/remote_test.py` (standard library) syncs the files `git ls-files` lists, never `private/` or `.git`,
+    into the container over SSH. It then runs pytest, or hassfest, there and returns their exit code.
+  - The runner's address and key path come from a git-ignored file in `private/`, so no hostname enters a tracked
+    file.
+  - `scripts/lint.py` and the edit hook use the runner when it is configured, and fall back to the native
+    run otherwise.
+  - `docs/development.md` describes the setup.
+
+  Verify: on the user's runner, the suite passes through `python scripts/lint.py`, and hassfest passes.
+
 ## 2. Tank model and draw classification (pure Python)
 
-- [ ] 2.1 Implement the tank-model spec in `model.py`:
+- [x] 2.1 Implement the tank-model spec in `model.py`:
   - state (T_avg, T_ch, f);
   - mixed and other draws;
   - energy and power heat with start-up energy;
@@ -66,7 +84,7 @@ Applies to every group:
   - a bounded event log.
 
   Verify: `tests/test_model.py` has one test per tank-model scenario, all passing.
-- [ ] 2.2 Implement the draw-classification spec in `model.py`:
+- [x] 2.2 Implement the draw-classification spec in `model.py`:
   - meter deltas with unit conversion;
   - resets and implausible jumps;
   - sessions;
@@ -76,10 +94,10 @@ Applies to every group:
   - mixed and other draws.
 
   Verify: `tests/test_classification.py` has one test per scenario, all passing.
-- [ ] 2.3 Add serialisation of the full model state to and from a plain dict: both temperatures, meter and energy
+- [x] 2.3 Add serialisation of the full model state to and from a plain dict: both temperatures, meter and energy
   readings, run state, session, humidity window and flow/return ring. Verify: a round-trip test restores a
   mid-shower, mid-run state, and the next readings give the same results as an unrestored model.
-- [ ] 2.4 Write `docs/model.md` from design D1-D8: every formula with symbols and units, the reason for each charge
+- [x] 2.4 Write `docs/model.md` from design D1-D8: every formula with symbols and units, the reason for each charge
   rule, sensor bound and default, and the draw classification. Do not include installation-specific IDs. Verify:
   the Markdown check passes, and each formula appears in `model.py` with the same symbols, checked by the group
   review.
@@ -121,11 +139,23 @@ Applies to every group:
   - at least 5 intervals before applying;
   - the step limit;
   - bounds and locks;
-  - the excluded closures.
+  - the excluded closures;
+  - counter increases within 10 minutes after a run end count towards that run's energy (D11, counter lag). The
+    model of group 2 drops them, so extend its charge event or interval data for this;
+  - draws and loss during a run belong in its closure:
+    `T_true_start = T_charge - (E_run - S) / C + mixed_run + share * other_run + k * loss_run`. Group 2's model
+    leaves the in-run sums out, so extend its charge event, and update D11 and the calibration spec to match;
+  - per-source unavailable time within each interval, for the 10 % exclusion.
+
+  Pure-module imports: the package `__init__.py` imports Home Assistant, so the backtest and the setup fit either
+  run in the test environment (`uv run --no-project --with-requirements requirements_test.txt`) or load `model.py`,
+  `classification.py` and `calibration.py` without the package `__init__`. Choose one and document it.
 
   Verify: `tests/test_calibration.py` covers each calibration scenario. A synthetic test generates intervals from
   known parameters and recovers them within 5 %.
-- [ ] 4.2 Implement quiet-window loss learning and the first-drop width estimator. Verify: tests for the quiet-night
+- [ ] 4.2 Implement quiet-window loss learning and the first-drop width estimator. The width estimator needs the
+  cold fraction of the balance without sensor bounds at the first drop; the model keeps it in private fields, so
+  expose it. Verify: tests for the quiet-night
   scenario and the sensor-drop scenario, and a test that a window with a draw is skipped.
 - [ ] 4.3 Implement the setup-fit replay as a pure function: history in, parameters and calibration state out,
   shared with the backtest. Verify: on the `week` fixture it returns 7 closures, share 0.1-0.3, start-up energy

@@ -78,9 +78,9 @@ core integrations:
 
 ## Architecture rules
 
-- `custom_components/hot_water_tank_estimator/model.py` and `calibration.py` are pure Python: standard library
-  only, no Home Assistant imports, and no I/O. They take timestamps and numbers and return state and events. Tests,
-  the setup fit and `scripts/backtest.py` all run the same code.
+- `model.py`, `classification.py` and `calibration.py` in `custom_components/hot_water_tank_estimator/` are pure
+  Python: standard library only, no Home Assistant imports, and no I/O. They take timestamps and numbers and return
+  state and events. Tests, the setup fit and `scripts/backtest.py` all run the same code.
 - One `TankEstimator` per config entry, kept in `entry.runtime_data`. It owns the subscriptions
   (`async_track_state_change_event`, a 5-minute `async_track_time_interval`) and the model. Entities read from it
   through a dispatcher signal. There is no coordinator, because nothing is polled.

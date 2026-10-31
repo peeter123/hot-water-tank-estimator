@@ -66,11 +66,29 @@ Heating SHALL count as active:
 - while the heat power is above the configured threshold; otherwise
 - for 10 minutes after the last energy counter increase.
 
-A heating run SHALL end when heating stops counting as active.
+The first of these that is configured decides. While it is unavailable, heating SHALL keep its last state; once it
+has been unavailable for 15 minutes, the next configured one decides until it returns.
+
+A heating run SHALL end when heating stops counting as active. When the counter timeout ends it, the run SHALL end
+at the last counter increase, because circulation stopped then. Draws and standing loss between that end and the
+moment it is found SHALL be applied to the charged tank, and they belong to the interval that starts at the end.
 
 #### Scenario: Binary sensor drives the run
 - **WHEN** a heating-active binary sensor is configured and turns from on to off
 - **THEN** the heating run ends at that moment
+
+#### Scenario: Binary sensor flickers during a run
+- **WHEN** a heating-active binary sensor is on, becomes unavailable for 2 seconds, and returns on
+- **THEN** the run continues without a charge, and its start-up energy is not counted again
+
+#### Scenario: Counter timeout
+- **WHEN** only an energy counter is configured, and its last increase of a run is at 12:30
+- **THEN** at 12:40 the run is found to have ended, and it ends at 12:30 with the charge window 12:28-12:30
+
+#### Scenario: Shower before the counter timeout finds the end
+- **WHEN** only an energy counter is configured on a 281 L tank, the run's last increase is at 12:30 and the charge
+  is 54.0 C, and 60 L of mixed draw at T_mix 38 C and T_cold 14 C follow before the end is found
+- **THEN** T_avg is 54.0 - 60 * 24 / 281 = 48.9 C, less standing loss, and T_ch 54.0 C less standing loss
 
 ### Requirement: A tank is charged at the end of a heating run
 When a heating run ends, T_avg and T_ch SHALL both be set to the charged temperature. When flow and return
@@ -131,7 +149,8 @@ sensor. The cold fraction SHALL then be at least `h + w / 2`, limited to 0-1, so
 While heating is not active, when the sensor reads between those two cases, the thermocline has reached it. T_avg
 SHALL then be at most `T_s_avg + margin`, where:
 - `s = (T_sensor - T_cold) / (T_ch - T_cold)`;
-- cold fraction `f_s = h + w / 2 - s * w`;
+- `f_lo = h - w / 2` and `f_hi = h + w / 2`, each limited to 0-1;
+- cold fraction `f_s = f_hi - s * (f_hi - f_lo)`, which is `h + w / 2 - s * w` when neither is limited;
 - sensor average `T_s_avg = T_ch - f_s * (T_ch - T_cold)`.
 
 The model SHALL NOT be raised towards T_s_avg, because the thermocline widens during long draws and the linear
@@ -148,11 +167,12 @@ reading then overstates the hot water left.
 
 ### Requirement: Sensor above the charged temperature raises it
 While heating is not active, if the tank sensor reads more than `T_ch + tolerance`, T_ch SHALL be raised to the
-sensor reading. This covers heat the model does not see, such as a backup heater without a meter.
+sensor reading, and T_avg SHALL rise by the same step. This covers heat the model does not see, such as a backup
+heater without a meter. Raising T_avg with it keeps `T_ch - T_avg`, so the outputs do not fall when heat arrives.
 
 #### Scenario: Unmetered heat
-- **WHEN** heating is off, the tolerance is 1.5 K, T_ch is 50 C and the sensor reads 55 C
-- **THEN** T_ch becomes 55 C
+- **WHEN** heating is off, the tolerance is 1.5 K, T_ch is 50 C, T_avg 45 C and the sensor reads 55 C
+- **THEN** T_ch becomes 55 C and T_avg 50 C
 
 ### Requirement: The temperatures stay within physical bounds
 After every update, the model SHALL keep `T_cold <= T_avg <= T_ch <= T_max`, where T_max is the configured maximum

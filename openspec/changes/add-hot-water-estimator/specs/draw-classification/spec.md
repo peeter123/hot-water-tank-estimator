@@ -9,8 +9,9 @@ draws. This lets the tank model use a meter that also counts toilet flushes, col
 
 ### Requirement: Litres drawn come from a total water meter
 The litres drawn SHALL be the increase of the configured total water meter between two readings, converted to
-litres from the meter's unit (m3, L, gal or ft3). A decrease, or a non-numeric reading, SHALL NOT count as a draw.
-The next valid reading SHALL become the new starting point.
+litres from the meter's unit (m3, L, gal or ft3). A decrease SHALL NOT count as a draw, and the decreased reading
+SHALL become the new starting point. A non-numeric or unavailable reading SHALL be skipped: the next valid reading
+counts from the last valid one (see integration-setup, unavailable sources).
 
 #### Scenario: Meter in cubic metres
 - **WHEN** the meter goes from 347.504 m3 to 347.505 m3
@@ -44,7 +45,9 @@ most the configured session gap (default 60 seconds). A longer gap SHALL start a
 ### Requirement: Shower detection from bathroom humidity
 When one or more humidity sensors are configured, a shower or bath SHALL count as detected while any of them reads
 at least the configured rise (default 6 percentage points) above its own lowest value of the configured window
-(default 60 minutes). Detection SHALL end once every sensor is below its window minimum plus half the rise.
+(default 60 minutes). Detection SHALL end once every sensor that
+reached the rise is below its window minimum plus half the rise. A sensor that never reached the rise does not hold
+detection.
 
 #### Scenario: Shower starts
 - **WHEN** the lowest bathroom humidity of the last 60 minutes is 61 % and the sensor now reads 72 %

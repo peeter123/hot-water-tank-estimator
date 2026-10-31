@@ -134,7 +134,12 @@ Alternatives:
   1. a heating-active binary sensor gives exact run edges;
   2. otherwise, heat power above 100 W, which is above standby readings and below any heating power;
   3. otherwise, 10 minutes after the last counter increase. Counters update at least every few minutes while
-     heating.
+     heating. The timeout only finds the end: the run ends at the last increase, because after it the heater may
+     circulate space heating water or stand still, and its flow and return no longer show the tank.
+
+  The first configured detector decides. Sources go unavailable for seconds around restarts and reloads, so an
+  unavailable detector holds the heating state instead of handing over at once, which would end or start a run and
+  charge the tank to a wrong temperature. After 15 minutes the next configured detector takes over.
 - With only a binary sensor, T_avg and T_ch follow the sensor upward while heating, because a heating tank's sensor
   eventually rises.
 
@@ -158,9 +163,16 @@ active, with tolerance `delta` (default 1.5 K) and margin m (default 2 K):
 | `T_s >= T_ch - delta` | Cold layer still below the sensor, so `f <= h - w/2` | Lower bound: `T_avg >= T_ch - (h - w/2) * (T_ch - T_cold)` |
 | In between | Thermocline at the sensor. Linear reading: `s = (T_s - T_cold) / (T_ch - T_cold)`, `f_s = h + w/2 - s * w`, `T_s_avg = T_ch - f_s * (T_ch - T_cold)` | Upper cap: `T_avg <= T_s_avg + m` |
 | `T_s <= T_cold + delta` | Cold layer past the sensor, so `f >= h + w/2` | Upper cap: `T_avg <= T_ch - (h + w/2) * (T_ch - T_cold)` |
-| `T_s > T_ch + delta` | Heat the model did not see | `T_ch = T_s` |
+| `T_s > T_ch + delta` | Heat the model did not see | `T_ch = T_s`, and T_avg rises by the same step |
 
-`h - w/2` and `h + w/2` are limited to 0-1.
+`h - w/2` and `h + w/2` are limited to 0-1. The in-between reading then spans the limited range,
+`f_s = f_hi - s * (f_hi - f_lo)`, so it meets the two other rules at its ends.
+
+- **The tolerance is critical.** A reading just below `T_ch - delta` caps T_avg near the top of the thermocline
+  (about 12.5 K below T_ch with the defaults), while one just above it only sets the lower bound. A sensor that reads
+  more than delta below the flow and return charge, or that cools faster than the tank, drops the estimate by about a
+  quarter of the tank at once. The docs tell users to raise delta when the sensor sits below the charged temperature
+  right after a run.
 
 - **The lower bound** corrects overcounted small draws and keeps the model from emptying while the sensor still reads
   hot. Evidence 3: a 141 L shower at a cold fraction of about 0.31 left the sensor unchanged, which is within
@@ -330,7 +342,12 @@ the evidence was produced, and the shipped defaults are only where it starts.
 - **Excluded closures:**
   - runs shorter than 15 minutes, because a short run does not mix the tank;
   - intervals in which a source was unavailable for more than 10 % of the time;
-  - intervals in which the "Shower ran cold" button reset the model.
+  - intervals in which the "Shower ran cold" button reset the model;
+  - intervals ending in a run with no charged temperature (neither flow and return nor the tank sensor available).
+    The model keeps its values. The interval after it is excluded too, because it has no known charged start.
+- **Counter lag at the run end:** with a binary sensor or heat power deciding the run, the energy counter can report
+  the run's last step after the run ended. Counter increases within 10 minutes after the end count towards that
+  run's energy for its closure. The model itself has already been charged, so it does not apply them.
 - **Visibility:** the diagnostic sensors show each parameter with its source, the samples and the charge errors. A
   rising mean charge error points at a wrong sensor height or a changed household. It is the first thing the README
   tells users to check.
