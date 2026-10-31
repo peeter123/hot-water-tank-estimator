@@ -1,5 +1,6 @@
 """Tests for draw classification: one test per scenario of the draw-classification spec."""
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 import logging
 
@@ -228,40 +229,50 @@ def test_shower_litre() -> None:
     assert 57 - model.t_avg == pytest.approx(24 / 281)
 
 
-def test_reclassify_at_detection() -> None:
-    """7 L in the 3 minutes before detection become mixed draws, 40 L of slow trickle stay."""
-    classifier = DrawClassifier(ClassifierOptions())
-    classifier.on_humidity(T0 - 10 * MINUTE, "bath", 50.0)
+def _slow_trickle_then_shower(feed: Callable[[int, int], object]) -> None:
+    """Feed 40 L of slow trickle, then 45 L in the 10 minutes before detection, one session.
+
+    The trickle is 20 draws of 2 L, 50 s apart, ending 620 s before the detection at 1620 s. The
+    shower litres are 45 draws of 1 L, 12 s apart, from 1050 s, the last 42 s before detection.
+    """
     litres = 1000.0
-    classifier.on_meter(T0, litres, "L")
+    feed(0, int(litres))
     for i in range(20):
         litres += 2.0
-        classifier.on_meter(T0 + (50 * i + 50) * SECOND, litres, "L")
-    for i in range(7):
+        feed(50 * i + 50, int(litres))
+    for i in range(45):
         litres += 1.0
-        classifier.on_meter(T0 + (1000 + 25 * i + 50) * SECOND, litres, "L")
-    reclassified = classifier.on_humidity(T0 + 1210 * SECOND, "bath", 60.0)
+        feed(1050 + 12 * i, int(litres))
+
+
+def test_reclassify_at_detection() -> None:
+    """45 L in the 10 minutes before detection become mixed draws, 40 L of slow trickle stay."""
+    classifier = DrawClassifier(ClassifierOptions())
+    classifier.on_humidity(T0 - 10 * MINUTE, "bath", 50.0)
+    _slow_trickle_then_shower(
+        lambda seconds, litres: classifier.on_meter(
+            T0 + seconds * SECOND, float(litres), "L"
+        )
+    )
+    reclassified = classifier.on_humidity(T0 + 1620 * SECOND, "bath", 60.0)
     assert classifier.detected
-    assert reclassified == pytest.approx(7.0)
+    assert reclassified == pytest.approx(45.0)
 
 
 def test_reclassify_corrects_the_model_by_the_energy_difference() -> None:
-    """The model ends where it would be had the 7 L been mixed draws from the start."""
+    """The model ends where it would be had the 45 L been mixed draws from the start."""
     model = make_model()
     model.on_humidity(T0 - 10 * MINUTE, "bath", 50.0)
-    litres = 1000.0
-    model.on_water_meter(T0, litres, "L")
-    for i in range(20):
-        litres += 2.0
-        model.on_water_meter(T0 + (50 * i + 50) * SECOND, litres, "L")
-    for i in range(7):
-        litres += 1.0
-        model.on_water_meter(T0 + (1000 + 25 * i + 50) * SECOND, litres, "L")
-    events = model.on_humidity(T0 + 1210 * SECOND, "bath", 60.0)
-    assert events[0].change == {"reclassified_litres": pytest.approx(7.0)}
-    assert 57 - model.t_avg == pytest.approx((40 * 0.2 * 43 + 7 * 24) / 281)
+    _slow_trickle_then_shower(
+        lambda seconds, litres: model.on_water_meter(
+            T0 + seconds * SECOND, float(litres), "L"
+        )
+    )
+    events = model.on_humidity(T0 + 1620 * SECOND, "bath", 60.0)
+    assert events[0].change == {"reclassified_litres": pytest.approx(45.0)}
+    assert 57 - model.t_avg == pytest.approx((40 * 0.2 * 43 + 45 * 24) / 281)
     sums = model.interval_sums
-    assert sums.mixed == pytest.approx(7 * 24 / 281)
+    assert sums.mixed == pytest.approx(45 * 24 / 281)
     assert sums.other == pytest.approx(40 * 43 / 281)
 
 
@@ -275,7 +286,7 @@ def test_toilet_flush_or_tap() -> None:
 
 
 def test_litres_reclassified_when_the_long_draw_rule_fires() -> None:
-    """At the long-draw start, the session litres of the last 3 minutes become mixed draws."""
+    """At the long-draw start, the 9 session litres within the reclassify window become mixed draws."""
     classifier = DrawClassifier(ClassifierOptions(long_draw_minutes=3.0))
     litres = 1000.0
     classifier.on_meter(T0, litres, "L")

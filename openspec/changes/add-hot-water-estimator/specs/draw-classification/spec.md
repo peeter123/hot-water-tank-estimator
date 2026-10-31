@@ -84,14 +84,14 @@ its hot and its cold part counted by the house meter. The tank model takes the m
 
 ### Requirement: Litres just before detection are reclassified
 When detection starts during a session, the litres of that session drawn within the configured reclassify window
-before detection (default 3 minutes) SHALL be reclassified from other draws to mixed draws, and the tank model
-corrected by the difference. Humidity rises about a minute after a shower starts, and the long-draw rule fires only
-after its duration. The window keeps a slow trickle earlier in a long session from being reclassified.
+before detection (default 10 minutes) SHALL be reclassified from other draws to mixed draws, and the tank model
+corrected by the difference. Humidity rises up to about 6 minutes after a shower starts, and the long-draw rule
+fires only after its duration. The window keeps other draws earlier in a long session from being reclassified.
 
 #### Scenario: Reclassify at detection
-- **WHEN** a session has drawn 7 litres in the 3 minutes before a shower is detected, and 40 litres earlier in a
+- **WHEN** a session has drawn 45 litres in the 10 minutes before a shower is detected, and 40 litres earlier in a
   slow trickle
-- **THEN** the 7 litres become mixed draws and the 40 litres stay other draws
+- **THEN** the 45 litres become mixed draws and the 40 litres stay other draws
 
 ### Requirement: Other litres are other draws
 A litre drawn while no shower or bath is detected SHALL be another draw. The tank model takes the configured hot

@@ -104,31 +104,40 @@ Applies to every group:
 
 ## 3. Test data from recorded history
 
-- [ ] 3.1 Add `scripts/history.py`: a REST history export with the token read from a file (never printed), entity
+- [x] 3.1 Add `scripts/history.py`: a REST history export with the token read from a file (never printed), entity
   IDs per role and the time range as arguments, and JSON per role as output, in the format of the files in
   `private/history/`. Add `scripts/anonymise.py`, which cuts a window from an export into a fixture with made-up
   entity IDs and only the roles the model uses. Verify: running anonymise on
   `private/history/2026-10-01_2026-10-31/` for a 1-hour window gives a fixture in which `git grep` finds no real
   entity ID.
-- [ ] 3.2 Build the six fixtures of design D10 (`long_shower`, `shower_unseen`, `back_to_back`, `night_trickle`,
+- [x] 3.2 Build the six fixtures of design D10 (`long_shower`, `shower_unseen`, `back_to_back`, `late_detection`,
   `quiet_days`, `week`) into `tests/fixtures/`, using the role mapping in `private/installation.md`. Verify: the
-  fixtures are each under 500 kB, and a scan for every entity ID in `private/installation.md` finds none of them.
-- [ ] 3.3 Add `tests/test_replay.py`, which replays each fixture with the default options and checks:
+  fixtures are each under 500 kB, a scan for every entity ID in `private/installation.md` finds none of them, and a
+  replay of each fixture equals a replay of the same window built from the raw export. A fixture thinned with
+  `--thin` may lag inside heating runs by up to 0.1 K of T_avg; each charge agrees within 0.001 K.
+- [x] 3.3 Add `tests/test_replay.py`, which replays each fixture with the default options and checks:
   - `long_shower`: shower water stays above 0 until at least 200 L into the session; tank water is 0-60 L at its
     end; the charge at the end of the recovery run is within 3 K of the model before the charge, once the
     start-up energy of 1.8 kWh is set in the options.
   - `shower_unseen`: the lower sensor bound holds T_avg at or above `T_ch - 0.325 * (T_ch - T_cold)` through the
     141 L shower, and shower water stays above 150 L.
-  - `back_to_back`: shower detection reclassifies litres from the start of both sessions, and the cold cap or the
+  - `back_to_back`: shower detection reclassifies the litres from the start of the first session. No litre of
+    either session stays an other draw: the second starts while detection still holds. The cold cap or the
     thermocline cap acts during the second session.
-  - `night_trickle`: the reclassify window keeps the trickle before the shower as other draws.
+  - `late_detection`: detection 6.3 minutes into the session reclassifies every litre the session drew before it,
+    with the default 10-minute window.
   - `quiet_days`: no output falls more than 10 % in a night without draws.
+  - A fixture's first charge starts from the sensor reading, and is labelled a sensor-start charge in the
+    recorded numbers. Later charges are closures, and only those count towards the closure errors.
 
   Verify: the tests pass. Record the replayed numbers in `private/installation.md` under "Replay results" with the
   date.
-- [ ] 3.4 **User review.** Show the user the replay numbers from 3.3 (litres and charge errors per fixture), and
+- [x] 3.4 **User review.** Show the user the replay numbers from 3.3 (litres and charge errors per fixture), and
   ask whether the outputs match what they remember of those evenings. Record their answer with its date in this
   task and in `private/installation.md`. Verify: the decision is recorded.
+  - 2026-10-31: the user confirmed that the outputs match. None of the showers on 13, 14, 22 or 29 October ran cold
+    or lukewarm, so the model is right that hot water was left at the end of each. The user also kept the
+    reclassify window default at 10 minutes.
 
 ## 4. Calibration (pure Python, plus the backtest)
 

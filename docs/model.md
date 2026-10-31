@@ -201,7 +201,8 @@ other rules at its ends. When neither is limited, `f_s = h + w / 2 - s * w`.
   minutes use the unrounded shower water.
 - Percent charged is 100 % right after any charge. Charged is by convention whatever the heater reached, so percent
   compares with the last charge, not with the setpoint. The litres show the absolute amount.
-- The default shower flow 7.5 L/min is the median flow of single showers (6.3-7.6 L/min). The default mix
+- The default shower flow 7.5 L/min is a round value near the median flow of single showers (about 7.3 L/min;
+  6.2-10.0 L/min for single showers). The default mix
   temperature 38 C is a common thermostatic setting.
 
 ## Cold water temperature
@@ -239,12 +240,14 @@ mixed draw while a shower or bath is detected, and an other draw otherwise.
   mixed, which errs on the side of showing less.
 - **Long-draw rule.** When set (minutes, default 0 = off), a session that has lasted that long counts as a shower
   until it ends. It is for homes without a humidity sensor, and it also fires on garden watering.
-- **Reclassify window.** Humidity lags the start of a shower by up to a minute, and the long-draw rule fires only after
-  its duration. When detection starts, the litres of the current session that were drawn within the last 3 minutes
-  (the window) and counted as other draws become mixed draws, and the model is corrected by the energy difference
-  `dV * (min(t_mix, t_ch) - t_cold) / V - share * dV * (t_ch - t_cold) / V`. Only the window is reclassified, not the
-  whole session, because a slow night trickle can merge with a later shower in one session, and reclassifying all of
-  it would take far too much energy.
+- **Reclassify window.** Humidity rose 0.9-6.3 minutes after a shower started on the development installation, and
+  the long-draw rule fires only after its duration. When detection starts, the litres of the current session that
+  were drawn within the last 10 minutes (the window) and counted as other draws become mixed draws, and the model is
+  corrected by the energy difference
+  `dV * (min(t_mix, t_ch) - t_cold) / V - share * dV * (t_ch - t_cold) / V`. With a 3-minute window, six showers of
+  the month kept 8-21 L as other draws, up to about 1.2 K of T_avg each; 10 minutes covers every case seen. The
+  window still bounds the reclassification, so a long session in which other draws ran into a shower does not take
+  mix energy for all of it. The data had no such session, so this is a safeguard, not evidence.
 
 ## Calibration and backtest
 

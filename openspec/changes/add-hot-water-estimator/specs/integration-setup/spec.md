@@ -81,7 +81,7 @@ The defaults for draws, losses and heat input SHALL be those in the scenario bel
   - other-draws hot share 0.2 and start-up energy 0 kWh;
   - shower flow 7.5 L/min;
   - humidity rise 6 points and humidity window 60 min;
-  - long-draw duration 0 (off) and reclassify window 3 min;
+  - long-draw duration 0 (off) and reclassify window 10 min;
   - session gap 60 s and maximum draw per reading 100 L;
   - power threshold 100 W.
 

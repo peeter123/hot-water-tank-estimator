@@ -12,6 +12,10 @@ requires-python = ">=3.14.2"
 required-version = ">=0.17.3"
 target-version = "py314"
 
+# Scripts run under the system Python, which may be older than the integration's.
+[tool.ruff.per-file-target-version]
+"scripts/*.py" = "py313"
+
 [tool.ruff.lint]
 select = [
   "A001",   # Variable {name} is shadowing a Python builtin

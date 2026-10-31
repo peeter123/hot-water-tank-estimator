@@ -50,15 +50,22 @@ An evening price block keeps the heat pump from charging between 16:00 and 23:00
      without a shower never rose more than 2 points.
    - Eight emptied the tank past the sensor: sessions of 240-361 L, often several showers in a row. The sensor fell
      to 22-28 C within an hour.
-   - Five did not move the sensor at all: 60-150 L. On 14 October a 141 L shower at 7.3 L/min left it at
+   - Five did not move the sensor at all: 60-150 L. On 14 October a 141 L shower at 8.8 L/min left it at
      57.5 -> 57.1 C, a cold fraction of about 0.31.
    - The tank is sharply stratified, and the sensor only reacts once the cold layer reaches it.
+   - Single showers ran at 6.2-10.0 L/min, with a median of about 7.3 L/min.
+   - Humidity detection came 0.9-6.3 minutes after a shower session started (a replay of the month with the
+     model's detection rule).
+   - Correction, found in task group 3: the first analysis took a session's start from the meter's previous reading,
+     which can be hours old. That made one morning shower look like a 270-minute night trickle at 0.8 L/min, and
+     skewed session durations and flows. The figures here are recomputed from the meter's first increase. October
+     has no slow trickle merging with a shower.
 4. **Standing loss.**
    - 28 quiet windows of 5-10 hours with no draw and no heating. The sensor fell 0.08-0.24 K/h, giving k from
      0.0027 to 0.0083 per hour, with a median of about 0.0042.
    - The high values follow evenings with draws, when the cold layer was already near the sensor.
 5. **Long shower 29 October.**
-   - 240 L at 6.7 L/min starting at 54 C. The sensor fell from 54 to 50 C over the first 96 L, then to 40 C at
+   - 240 L at 7.1 L/min starting at 54 C. The sensor fell from 54 to 50 C over the first 96 L, then to 40 C at
      146 L, 30 C at 205 L and 23 C at the end. It settled at 21.9 C.
    - The user confirmed that the last shower was still warm.
    - The recovery run's energy, less the start-up energy, puts the average at about 23 C. Against a charged
@@ -209,10 +216,11 @@ active, with tolerance `delta` (default 1.5 K) and margin m (default 2 K):
 - Detection uses a rise of at least 6 points over the 60-minute minimum. Evidence 3: shower rises are 13-40 points,
   other draws stay within 2. Hysteresis is half the rise, so detection lasts until the room has dried most of the
   way. A tap used in that time counts as mixed, which errs on the side of showing less.
-- **Reclassify window:** humidity lags the start of a shower by up to a minute. At detection, the session's litres
-  from the last 3 minutes become mixed draws. The window, not the whole session, matters because evidence 3 has a
-  session of 270 minutes where a slow night trickle (0.8 L/min) merged with a shower. Reclassifying all of it would
-  have taken 209 L of mix energy.
+- **Reclassify window:** humidity rose 0.9-6.3 minutes after a shower started (evidence 3). At detection, the
+  session's litres from the last 10 minutes become mixed draws. With a 3-minute window, six October showers kept
+  8-21 L as other draws, up to about 1.2 K of T_avg each; 10 minutes covers every October case.
+  - The window still bounds the reclassification, so a long session in which other draws ran into a shower does
+    not take mix energy for all of it. October has no such session, so this is a safeguard, not evidence.
 - Sessions are increases no more than 60 s apart. At 1 L resolution and the lowest realistic shower flow (about
   2.5 L/min), increases are at most 24 s apart.
 - The long-draw rule is off by default, for homes without a humidity sensor. It would also fire on garden watering.
@@ -231,8 +239,8 @@ active, with tolerance `delta` (default 1.5 K) and margin m (default 2 K):
 - **Percent charged:** `(u - f) / u * 100`, 100 % right after any charge. Charged is by convention whatever the
   heater reached, so percent compares with the last charge, not with the setpoint. The litres show the absolute
   amount.
-- **Shower minutes:** shower litres divided by 7.5 L/min, the median shower flow in evidence 3 and 5 (6.3-7.6
-  L/min for single showers).
+- **Shower minutes:** shower litres divided by 7.5 L/min, a round value near the median shower flow in evidence 3
+  (about 7.3 L/min; 6.2-10.0 L/min for single showers).
 - **Mix temperature:** 38 C, the user's thermostatic setting and a common default.
 
 ### D8: Seasonal cold water curve
@@ -281,13 +289,18 @@ active, with tolerance `delta` (default 1.5 K) and margin m (default 2 K):
 
 | Fixture | Window | Evidence |
 |---|---|---|
-| `long_shower` | 29 October 18:00 to 30 October 02:00 | 240 L to 22 C, still warm, recovery run to 50 C |
-| `shower_unseen` | 14 October 12:00 to 15 October 13:40 | Midday charge, 141 L shower the sensor does not see, next run |
-| `back_to_back` | 22 October 13:00 to 23 October 01:00 | 88 + 200 L sessions, the block, recovery run |
-| `night_trickle` | 25 October 13:00 to 26 October 09:00 | 270-minute trickle with a shower, morning run |
-| `quiet_days` | 23 October 13:00 to 25 October 12:30 | 47 h of small draws only, the worst closure interval |
+| `long_shower` | 28 October 14:30 to 30 October 02:00 | A charge, then 240 L to 22 C, still warm, recovery run to 50 C |
+| `shower_unseen` | 14 October 11:30 to 15 October 15:30 | Midday charge, 141 L shower the sensor does not see, next run |
+| `back_to_back` | 22 October 11:30 to 23 October 01:00 | 88 + 200 L sessions, the block, recovery run |
+| `late_detection` | 13 October 18:00 to 23:30 | Detection 6.3 minutes into a shower session, then a 163 L shower and the recovery run |
+| `quiet_days` | 23 October 11:30 to 25 October 13:30 | 47 h of small draws only, the worst closure interval, with both its charges |
 | `week` | 23 October 11:30 to 30 October 13:30 | 8 runs and 7 closures, showers, quiet nights; tests the setup fit |
 | `month` | 1-31 October | Every run, shower and quiet night; used by the backtest, not by unit tests |
+
+A replay starts each fixture charged at the tank sensor's reading, which ignores the draws since the last real
+charge. So a fixture's first charge measures that start, not the model, and is not a closure. Later charges close
+an interval that starts at a charge. Each window starts before or inside a run, so that its first charge comes
+early and the charges after it are closures.
 
 The first six are trimmed to the roles in use and kept in `tests/fixtures/`. `month` stays in `private/` because
 of its size and is only used by the backtest.

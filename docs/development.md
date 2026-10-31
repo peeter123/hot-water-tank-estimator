@@ -114,6 +114,18 @@ device per entry, so only the rules about devices appearing or disappearing at r
 - Fixtures in `tests/fixtures/` come from `scripts/anonymise.py`: made-up entity IDs and only the roles the model
   uses. No real entity ID, hostname or serial enters the repository; the real ones stay in the git-ignored
   `private/` folder.
+- `tests/test_replay.py` replays the fixtures through the model with a tick every 5 minutes. A fixture is one JSON
+  file: tank volume and sensor height, the window, and the states per made-up entity with its role and unit. The
+  format is in the docstring of `scripts/anonymise.py`. The tests read the tank parameters from the fixture, so
+  no installation fact is hard-coded.
+- `scripts/history.py` exports recorder history over the REST API (one JSON file per role, token read from a file),
+  and `scripts/anonymise.py` cuts a window from such an export into a fixture. Both use only the standard library
+  and run under the system Python 3.13; `pyproject.toml` sets ruff's target to py313 for `scripts/*.py`, so ruff does
+  not rewrite syntax 3.13 cannot parse. An export whose files are not named by role needs a mapping from file stem
+  to role (`--map-file`); that mapping holds the installation's naming, so it stays in `private/`. A fixture must
+  stay under 500 kB (a test checks it): identical consecutive states are merged, 32-bit float noise is shortened,
+  times are rounded to the millisecond, and `--thin` can thin a counter (the `week` fixture uses 20 s on the energy
+  counter, keeping the rows around every heating change so each increase stays in its run).
 
 ## Private data
 
