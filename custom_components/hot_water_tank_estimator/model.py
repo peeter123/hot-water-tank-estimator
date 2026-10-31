@@ -25,6 +25,7 @@ from typing import Any
 from .classification import ClassifierOptions, DrawClassifier
 from .const import (
     CHARGE_WINDOW_SECONDS,
+    COUNTER_LAG_SECONDS,
     DEFAULT_AMBIENT_TEMPERATURE,
     DEFAULT_COLD_AMPLITUDE,
     DEFAULT_COLD_COLDEST_DAY,
@@ -309,6 +310,15 @@ class TankModel:
 
         self._sums = IntervalSums()
         self._last_charge_temp: float | None = None
+        # The sums at the last counter increase: a counter-timeout run end is found late, and
+        # its closure uses the sums as of the run end.
+        self._increase_sums: IntervalSums | None = None
+        # When the last run ended: counter increases soon after it still belong to that run.
+        self._last_run_end: datetime | None = None
+        # Seconds each source was unavailable in this calibration interval, and since when the
+        # sources that are unavailable now have been.
+        self._unavailable: dict[str, float] = {}
+        self._down_since: dict[str, datetime] = {}
 
         self.t_cold = self._cold_at(now)
         self._clamp()
@@ -329,6 +339,7 @@ class TankModel:
             The events the reading caused.
         """
         now, events = self._begin(now)
+        self._mark("water_meter", _finite(value), now)
         result = self._classifier.on_meter(now, value, unit)
         if result is None:
             return events
@@ -342,6 +353,7 @@ class TankModel:
     ) -> list[ModelEvent]:
         """Process a bathroom humidity reading in percent."""
         now, events = self._begin(now)
+        self._mark(f"humidity:{sensor_id}", _finite(value), now)
         events += self._apply_reclassify(
             now, self._classifier.on_humidity(now, sensor_id, value)
         )
@@ -354,6 +366,7 @@ class TankModel:
         A decrease is a counter reset: no heat, and the reading is the new starting point.
         """
         now, events = self._begin(now)
+        self._mark("energy_counter", _finite(kwh), now)
         if not _finite(kwh):
             return events
         last, self._last_energy = self._last_energy, float(kwh)
@@ -361,10 +374,16 @@ class TankModel:
             return events
         delta = self._last_energy - last
         self._last_increase = now
+        self._increase_sums = replace(self._sums)
         self._draw_log.clear()
         events += self._evaluate_heating(now)
         if self._heating and self.sources.energy_counter:
             events += self._apply_heat(now, delta)
+        elif self._counter_lag(now):
+            # The counter reports the last step of a run after the run ended. The model has
+            # charged already, so only the closure uses it.
+            change = {"counter_lag_kwh": delta, "run_end": _iso(self._last_run_end)}
+            events.append(self._record(now, EventKind.HEAT, change, self._temps()))
         return events
 
     def on_power(self, now: datetime, watts: float | None) -> list[ModelEvent]:
@@ -374,6 +393,7 @@ class TankModel:
         a run is active. A gap where the power was unavailable counts as no energy.
         """
         now, events = self._begin(now)
+        self._mark("power", _finite(watts), now)
         events += self._integrate_power(now)
         if _finite(watts):
             self._power = float(watts)
@@ -388,6 +408,7 @@ class TankModel:
     def on_heating(self, now: datetime, active: bool | None) -> list[ModelEvent]:
         """Process the heating-active binary sensor: True on, False off, None unavailable."""
         now, events = self._begin(now)
+        self._mark("heating_binary", active is not None, now)
         if active is None and self._binary is not None:
             self._binary_lost = now
         self._binary = active
@@ -403,6 +424,7 @@ class TankModel:
         Either value None records a gap.
         """
         now, events = self._begin(now)
+        self._mark("flow_return", _finite(flow) and _finite(ret), now)
         if _finite(flow) and _finite(ret):
             self._ring.append((now, float(flow), float(ret)))
         else:
@@ -416,6 +438,7 @@ class TankModel:
     def on_tank_sensor(self, now: datetime, value: float | None) -> list[ModelEvent]:
         """Process the tank temperature sensor in C, None when unavailable."""
         now, events = self._begin(now)
+        self._mark("tank_sensor", _finite(value), now)
         self._tank_sensor = float(value) if _finite(value) else None
         events += self._follow_sensor(now)
         events += self._apply_sensor_bounds(now)
@@ -426,6 +449,7 @@ class TankModel:
     ) -> list[ModelEvent]:
         """Process the cold water temperature sensor in C, None when unavailable."""
         now, events = self._begin(now)
+        self._mark("cold_sensor", _finite(value), now)
         self._cold_sensor = float(value) if _finite(value) else None
         events += self._refresh_cold(now)
         return events
@@ -479,7 +503,7 @@ class TankModel:
             self.t_avg = t_avg
         self._clamp()
         self._bal_avg, self._bal_ch = self.t_avg, self.t_ch
-        self._reset_interval()
+        self._reset_interval(now)
         self._classifier.clear_pending()
         events.append(self._record(now, EventKind.CHARGE, {"manual": True}, before))
         return events
@@ -493,6 +517,32 @@ class TankModel:
         if span <= 0:
             return 0.0
         return _clamp01((self.t_ch - self.t_avg) / span)
+
+    @property
+    def balance_cold_fraction(self) -> float:
+        """Return f of the energy balance without the sensor bounds, limited to 0-1.
+
+        It is `(t_ch - t_avg) / (t_ch - t_cold)` of the plain balance, which calibration uses
+        to estimate the thermocline width.
+        """
+        span = self._bal_ch - self.t_cold
+        if span <= 0:
+            return 0.0
+        return _clamp01((self._bal_ch - self._bal_avg) / span)
+
+    @property
+    def tank_sensor(self) -> float | None:
+        """Return the last tank sensor reading in C, None when unavailable."""
+        return self._tank_sensor
+
+    def unavailable_seconds(self, now: datetime) -> dict[str, float]:
+        """Return the seconds each source was unavailable since the interval started."""
+        result = dict(self._unavailable)
+        for source, since in self._down_since.items():
+            result[source] = result.get(source, 0.0) + max(
+                0.0, (now - since).total_seconds()
+            )
+        return result
 
     @property
     def tank_litres_exact(self) -> float:
@@ -554,6 +604,27 @@ class TankModel:
         return self._cold_at(now)
 
     # ----- internals ----------------------------------------------------------------------
+
+    def _mark(self, source: str, available: bool, now: datetime) -> None:
+        """Track how long a source is unavailable within the calibration interval."""
+        since = self._down_since.get(source)
+        if available:
+            if since is not None:
+                seconds = max(0.0, (now - since).total_seconds())
+                self._unavailable[source] = self._unavailable.get(source, 0.0) + seconds
+                del self._down_since[source]
+        elif since is None:
+            self._down_since[source] = now
+
+    def _counter_lag(self, now: datetime) -> bool:
+        """Return whether a counter increase now belongs to the run that just ended."""
+        end = self._last_run_end
+        return (
+            not self._heating
+            and self.sources.energy_counter
+            and end is not None
+            and 0 <= (now - end).total_seconds() <= COUNTER_LAG_SECONDS
+        )
 
     def _cold_at(self, now: datetime) -> float:
         """Return t_cold = mean - amplitude * cos(2 pi (doy - coldest_day) / 365)."""
@@ -897,6 +968,7 @@ class TankModel:
         events = self._integrate_power(now)
         before = self._temps()
         charge, source = self._charge_temperature(t_end)
+        run_sums = self._run_sums(t_end, now)
         change: dict[str, Any] = {
             "charge_temperature": charge,
             "source": source,
@@ -908,6 +980,8 @@ class TankModel:
             "run_start_t_avg": self._run_start_avg,
             "previous_charge_temperature": self._last_charge_temp,
             "interval": self._run_snapshot.as_dict(),
+            "run": run_sums.as_dict(),
+            "unavailable_seconds": self.unavailable_seconds(now),
         }
         late = [entry for entry in self._draw_log if entry[0] > t_end]
         self._draw_log.clear()
@@ -915,18 +989,39 @@ class TankModel:
         self._run_start = None
         self._run_energy = 0.0
         self._startup_used = 0.0
+        self._last_run_end = t_end
         if charge is None:
             # Nothing to charge to: the closure is not valid, so the interval starts again.
-            self._reset_interval()
+            self._reset_interval(now)
             self._classifier.clear_pending(until=t_end)
             return [*events, self._record(now, EventKind.CHARGE, change, before)]
         self.t_avg = self.t_ch = self._bal_avg = self._bal_ch = charge
         self._clamp()
-        self._reset_interval()
+        self._reset_interval(now)
         self._classifier.clear_pending(until=t_end)
         self._last_charge_temp = self.t_ch
         events.append(self._record(now, EventKind.CHARGE, change, before))
         return events + self._replay_late_draws(now, t_end, late)
+
+    def _run_sums(self, t_end: datetime, now: datetime) -> IntervalSums:
+        """Return the balance sums of the run: from its start to `t_end`.
+
+        A counter-timeout end is found late, so the sums are those taken at the last counter
+        increase. They hold the in-run draws and loss that the closure equation needs.
+        """
+        start = self._run_snapshot
+        if t_end >= now:
+            end = self._sums
+        elif t_end == self._last_increase and self._increase_sums is not None:
+            end = self._increase_sums
+        else:
+            end = start
+        return IntervalSums(
+            hours=max(0.0, end.hours - start.hours),
+            loss=end.loss - start.loss,
+            other=end.other - start.other,
+            mixed=end.mixed - start.mixed,
+        )
 
     def _replay_late_draws(
         self, now: datetime, t_end: datetime, late: list[tuple[datetime, float, str]]
@@ -961,11 +1056,14 @@ class TankModel:
             self._replaying = False
         return events
 
-    def _reset_interval(self) -> None:
-        """Start a new calibration interval."""
+    def _reset_interval(self, now: datetime) -> None:
+        """Start a new calibration interval at `now`."""
         self._sums = IntervalSums()
         self._last_charge_temp = None
         self._run_snapshot = IntervalSums()
+        self._increase_sums = None
+        self._unavailable = {}
+        self._down_since = dict.fromkeys(self._down_since, now)
 
     # ----- persistence --------------------------------------------------------------------
 
@@ -996,6 +1094,12 @@ class TankModel:
             "run_snapshot": self._run_snapshot.as_dict(),
             "sums": self._sums.as_dict(),
             "last_charge_temp": self._last_charge_temp,
+            "increase_sums": None
+            if self._increase_sums is None
+            else self._increase_sums.as_dict(),
+            "last_run_end": _iso(self._last_run_end),
+            "unavailable": self._unavailable,
+            "down_since": {s: t.isoformat() for s, t in self._down_since.items()},
             "classifier": self._classifier.to_dict(),
         }
 
@@ -1060,6 +1164,17 @@ class TankModel:
             model._run_snapshot = IntervalSums.from_dict(data["run_snapshot"])
             model._sums = IntervalSums.from_dict(data["sums"])
             model._last_charge_temp = data["last_charge_temp"]
+            # Added with the calibration bookkeeping: older saved states lack them.
+            if data.get("increase_sums") is not None:
+                model._increase_sums = IntervalSums.from_dict(data["increase_sums"])
+            model._last_run_end = _from_iso(data.get("last_run_end"))
+            model._unavailable = {
+                s: float(v) for s, v in data.get("unavailable", {}).items()
+            }
+            model._down_since = {
+                s: datetime.fromisoformat(t)
+                for s, t in data.get("down_since", {}).items()
+            }
             model._classifier.restore(data["classifier"])
             model._clamp()
         except (KeyError, TypeError, AttributeError) as err:

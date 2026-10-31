@@ -325,13 +325,15 @@ the evidence was produced, and the shipped defaults are only where it starts.
 
   ```text
   T_ch_prev - T_true_start = loss_sum * k + other_sum * share + mixed_sum
-  T_true_start = T_charge - (E_run - S) / C
+  T_true_start = T_charge - (E_run - S) / C + mixed_run + share * other_run + k * loss_run
   ```
 
   where:
-  - `loss_sum` is the sum of `(T - T_ambient) * dt`;
-  - `other_sum` is the sum of `dV * (T_ch - T_cold) / V` over other draws;
-  - `mixed_sum` is the mixed-draw drop;
+  - `loss_sum` is the sum of `(T - T_ambient) * dt` from the previous charge to the run start;
+  - `other_sum` is the sum of `dV * (T_ch - T_cold) / V` over other draws in that time;
+  - `mixed_sum` is the mixed-draw drop in that time;
+  - `loss_run`, `other_run` and `mixed_run` are the same three sums inside the run, because the tank is drawn
+    and loses heat while the heater runs;
   - C = 1.163 * V / 1000 kWh/K.
 
   This is linear in k, share and S. A weighted least-squares fit over the stored intervals (forgetting factor 0.95,
@@ -340,6 +342,14 @@ the evidence was produced, and the shipped defaults are only where it starts.
   minimum count keep one odd interval (a guest's bath, a leaking tap) from throwing the values off.
 - **Loss from quiet windows.** Evidence 4 shows that quiet nights give k directly from the sensor while it still
   reads the hot layer. This also covers installations without a heat measurement, where there are no closures.
+  - A window opens 1 hour after a run end at the earliest. Right after a run the sensor still settles, and windows
+    opened at the end gave the three lowest October estimates (0.0016-0.0020 per hour against 0.0027-0.0037 an hour
+    later).
+  - With at least 3 quiet estimates, the closure fit holds k at their mean and fits only the share and S. Closures
+    alone cannot separate k from the share: the loss and other-draw sums move together (correlation 0.93-0.96 in
+    October), so a week of closures gave share 0.00 and k 0.0094 with a standard error wider than the bounds. With
+    k held at the quiet-window value, the week gives share 0.11 and S 2.2 kWh, and the month 0.18 and 1.75 kWh,
+    as evidence 2 did with k fixed from evidence 4. Without quiet windows the closures fit k too.
 - **Width from the first sensor drop.** The cold fraction of the energy balance at the moment the sensor first
   leaves the charged temperature is `h - w/2`. Evidence 3 and 6 place that at about 0.31-0.35.
 - **Usable fraction from the user.** Only a person can tell that a shower ran cold, so a button does it and also
@@ -351,7 +361,11 @@ the evidence was produced, and the shipped defaults are only where it starts.
     `history.state_changes_during_period` per entity). It then runs the replay in the executor too, because a month
     is about 80 000 states and a few seconds of CPU.
 - **Precedence:** option value, then the setup fit, then live learning, unless locked. Locks are for users who know
-  better, and for tests.
+  better, and for tests. Removing a lock discards the value learned before it, so the option value applies until
+  the next fit. A recalibrate keeps the usable fraction learned from the button, which no replay can learn.
+- **Every update of a learned parameter**, the width and the quiet-window k included, moves it by at most a quarter
+  of its bound range, so one odd night or drain cannot throw it off. The "Shower ran cold" button is the exception:
+  it records what the user observed.
 - **Excluded closures:**
   - runs shorter than 15 minutes, because a short run does not mix the tank;
   - intervals in which a source was unavailable for more than 10 % of the time;

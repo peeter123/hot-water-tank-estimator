@@ -78,9 +78,12 @@ core integrations:
 
 ## Architecture rules
 
-- `model.py`, `classification.py` and `calibration.py` in `custom_components/hot_water_tank_estimator/` are pure
-  Python: standard library only, no Home Assistant imports, and no I/O. They take timestamps and numbers and return
-  state and events. Tests, the setup fit and `scripts/backtest.py` all run the same code.
+- `model.py`, `classification.py`, `calibration.py` and `setup_fit.py` in
+  `custom_components/hot_water_tank_estimator/` are pure Python: standard library only, no Home Assistant imports,
+  and no I/O. They take timestamps and numbers and return state and events. Tests, the setup fit and
+  `scripts/backtest.py` all run the same code. `setup_fit.py` replays a neutral `History` (per source: role, entity
+  ID, unit and `(time, state)` rows), which a fixture, a recorder export and Home Assistant's recorder states can all
+  be turned into; the reading of files and of the recorder stays outside the pure modules.
 - One `TankEstimator` per config entry, kept in `entry.runtime_data`. It owns the subscriptions
   (`async_track_state_change_event`, a 5-minute `async_track_time_interval`) and the model. Entities read from it
   through a dispatcher signal. There is no coordinator, because nothing is polled.
@@ -126,6 +129,18 @@ device per entry, so only the rules about devices appearing or disappearing at r
   stay under 500 kB (a test checks it): identical consecutive states are merged, 32-bit float noise is shortened,
   times are rounded to the millisecond, and `--thin` can thin a counter (the `week` fixture uses 20 s on the energy
   counter, keeping the rows around every heating change so each increase stays in its run).
+- `tests/test_calibration.py` has a test per calibration scenario, named after it, and the closure rules: the
+  exclusions, the counter lag, the in-run draws. A model with known parameters generates a month of history and the
+  fitter has to find them again within 5 %. `tests/test_setup_fit.py` runs the setup fit on the `week` fixture.
+- `scripts/backtest.py` runs the setup fit and the comparison with the given options on a fixture or a history export
+  (usage in `docs/model.md`). The package `__init__` imports Home Assistant, so the script does not import the
+  package. It registers the folder of the pure modules as a package of its own (`hwte_pure`) and imports `model`,
+  `calibration` and `setup_fit` from it, so no Home Assistant and no package is needed. Those modules need Python
+  3.14 (the annotations in `model.py` and `calibration.py` refer to their own class, which 3.14 evaluates lazily), so
+  unlike `history.py` and `anonymise.py` it does not run under the system Python 3.13. It is run with
+  `uv run --no-project scripts/backtest.py`, which picks 3.14 from `.python-version`, and exits with that command in
+  its message on an older Python. The script itself has no syntax newer than 3.13. `tests/test_backtest.py` loads
+  it by path and checks that it fits the same parameters as `setup_fit`.
 
 ## Private data
 

@@ -251,4 +251,139 @@ mixed draw while a shower or bath is detected, and an other draw otherwise.
 
 ## Calibration and backtest
 
-Calibration is documented when it is implemented.
+The code is `calibration.py` (closures, the fitter, quiet windows, the width) and `setup_fit.py` (the replay of
+history). Both are pure Python. Each tank fits its own parameters, because the hot share of tap water, the start-up
+energy of the plumbing, the insulation and the thermocline differ per house. The defaults are only where it starts.
+
+| Parameter | Bounds | Learned from |
+|---|---|---|
+| other-draws hot share `share` | 0-0.6 | charge closures |
+| start-up energy `S` | 0-3 kWh | charge closures |
+| loss coefficient `k` | 0.001-0.015 per hour | charge closures, quiet windows |
+| thermocline width `w` | 0.1-0.6 | first sensor drop after a charge |
+| usable fraction `u` | 0.5-0.98 | the "Shower ran cold" button |
+
+The value in use is the option value until a parameter has been learned, then the learned value. A parameter the
+user locks keeps its option value and is never learned; removing the lock discards the value learned before it, so
+the option value applies until the next fit. The source of a value is option, setup fit, learned or locked.
+
+### The charge closure
+
+The balance in `model.py` keeps a second copy of `t_avg` and `t_ch` that leaves out the sensor bounds, and sums,
+since the previous charge, the three terms that change `t_avg`: `loss` (the sum of `(t_avg - t_ambient) * dt`, in
+K*h), `other` (the sum of `dV * (t_ch - t_cold) / V` over other draws, in K, for a share of 1) and `mixed` (the
+mixed-draw drops, in K). So learning measures the balance and not the corrections.
+
+At the end of a run the tank is evenly mixed at `t_charge`, so the true average at the start of the run follows from
+the run's energy `E_run` (kWh), the start-up energy `S` and the draws and loss during the run. With
+`C = 1.163 * V / 1000` kWh/K:
+
+```text
+t_true_start = t_charge - (E_run - S) / C + mixed_run + share * other_run + k * loss_run
+t_ch_prev - t_true_start = k * loss + share * other + mixed          (the interval before the run)
+```
+
+- The charge error is the model's `t_avg` at the run start (with its sensor bounds) minus `t_true_start`. A sensor
+  bound that corrected a missed shower shows as a smaller error, so the error measures the whole estimate.
+- The `_run` sums are the same three terms inside the run. Showers and loss do not stop while the heater runs, and a
+  run that starts during a shower is common.
+- Together the two lines are linear in `k`, `share` and `S`:
+  `t_ch_prev - t_charge + E_run / C - mixed_total = k * loss_total + share * other_total + S / C`, with the totals
+  over the interval and the run. The fit solves this.
+- **Counter lag.** When a binary sensor or the heat power decides the run, the energy counter can report the last
+  step after the run ended. Counter increases up to 10 minutes after the end count towards `E_run`. The model has
+  charged by then, so only the closure uses them.
+- A run ended by the counter timeout is found 10 minutes late. Its sums are those at the last counter increase.
+
+A closure is excluded from the fit and from the error statistics when:
+- the run lasted less than 15 minutes, because a short run does not mix the tank;
+- a source was unavailable for more than 10 % of the interval. The model counts the unavailable seconds of every
+  source it was given: water meter, energy counter, power, heating sensor, flow and return, tank sensor, cold water
+  sensor and each humidity sensor;
+- the "Shower ran cold" button reset the model in the interval or at its start. The model then starts from a guessed
+  state, so the interval has no charged start;
+- the run has no charged temperature (no flow and return and no tank sensor). The model keeps its values, and the
+  next interval is excluded too, because it has no known charged start.
+
+The first charge of a replay is a sensor start and not a closure: the model starts at the sensor's reading, which
+ignores the draws since the real last charge. Its error is information only. Without an energy counter or power
+sensor there are no closures, and `k` comes from quiet windows only.
+
+### Learning
+
+- **Closure fit.** After each valid closure the fitter solves the equation above for `k`, `share` and `S` over the
+  stored closures (at most 100) by weighted least squares. The newest closure has weight 1 and each older one 0.95
+  times the next. A locked parameter moves to the right-hand side and leaves the unknowns. The fit is applied only
+  with at least 5 closures stored. From 3 quiet-window estimates on, `k` is held at their mean and counts as locked
+  here, so the closures fit only `share` and `S` (see below why).
+- **Bounds and steps.** Every update of a learned parameter (closure fit, quiet-window `k` and width alike) is first
+  limited to the bounds, then moves from the value in use by at most a quarter of the bound range. The button is
+  the exception: it is the user's observation. A share of 0.2 and a fit of 0.5 give 0.35. One odd interval (a guest's
+  bath, a leaking tap) cannot throw the values off, and a fit that wanders needs several updates to get anywhere.
+- **Loss from quiet windows.** A window is a stretch of at least 5 hours with no draw and no heating, in which the
+  tank sensor reads within `delta` of `t_ch`. A window opens no earlier than 1 hour after a run end, because the
+  sensor still settles then (windows opened at the run end gave estimates about half of the others). Then
+  `k = rate / (t_mean - t_ambient)`, with the sensor's fall in K/h and its time-weighted mean reading. The last 10
+  windows are averaged. From 3 estimates on their mean is the loss coefficient in use, and the closure fit holds it.
+  With fewer, the closure fit sets `k` once 5 closures are stored (without a heat measurement, the quiet windows
+  always do). Any draw ends a window, even one litre, so busy households get few windows.
+- **Width from the first drop.** When the sensor first falls below `t_ch - delta` after a charge, with heating off,
+  the balance's cold fraction `f_e` is the cold fraction at the top of the thermocline, `h - w / 2`. So
+  `w = 2 * (h - f_e)`. Each estimate is limited to the bounds, the width is the mean of the last 10, and it is
+  applied after 3.
+- **Usable fraction.** Only a person can tell that a shower ran cold. The button sets `u` to the cold fraction at that
+  moment (within the bounds) and sets `t_avg` so that the tank water is 0.
+- **Precedence.** Option value, then the setup fit, then live learning, unless locked. Live learning changes a
+  parameter the setup fit set from `setup_fit` to `learned`: `setup_fit` returns a calibrator that is already live
+  (`Calibrator.go_live`), so only what the fit itself changed keeps the source `setup_fit`. A recalibrate replaces
+  the calibration state with the new fit, but keeps the usable fraction learned from the button (and its source),
+  which no replay can learn.
+- **What the data can separate.** The loss sum and the other-draw sum of the closures move together (a correlation of
+  0.93-0.96 in the development data), because both grow with the length of an interval. `S` is a constant per run,
+  and `k` and `share` trade off against each other. Over a month (25 closures) all three separate; over a week
+  (7 closures) the standard errors of `k` and `share` are wider than their bounds, and the fit gave `share` 0.00 and
+  `k` 0.0094 per hour, then a different pair when one closure was left out. Quiet windows measure `k` directly from
+  the sensor, so the closure fit holds `k` there and fits `share` and `S`; this gave the same values on a month as
+  a free `k` did and a stable fit on a week. Without quiet windows (a busy household) `k` is fitted from the
+  closures too; expect the first weeks to move the values then. The step limit and the minimum of 5 closures
+  limit the damage of any single fit.
+
+### The setup fit
+
+When an entry is created, and when the recalibrate action runs, the history of the sources (the configured number of
+days, up to 30, as far as the recorder keeps them: 10 days by default) is replayed through the same model and learner.
+`setup_fit.setup_fit(history, options, locks=...)` takes a `History` (per source: role, entity ID, unit and `(time,
+state)` rows, the first row being the state in force at the start). It returns the fitted options, the parameters with
+their sources, the closures with their charge errors and the calibration state. `setup_fit.evaluate(history, options)`
+replays with fixed options and reports the same errors, so fitted options can be compared with the defaults. A fixture
+becomes a `History` with `history_from_fixture`, and a recorder export with the reader in the backtest script.
+
+The replay starts the model at the tank sensor's first numeric reading and ticks every 5 minutes. It applies each
+learned change to the model as it goes, so the fit of a long history converges the way live learning does. A parameter
+with too little data keeps its option value: with fewer than 5 closures the share and `S` stay, and `k` may still come
+from quiet windows.
+
+### The backtest
+
+`scripts/backtest.py` is the developer's view of what an entry's setup fit does. It runs the setup fit on a fixture
+or on a history export, then replays the history with the options as given and with the fitted ones. It prints the
+charge error at every closure for both, the outputs through every shower, the fitted parameters with their sources
+and the mean absolute error for both. On a fixture:
+
+```sh
+uv run --no-project scripts/backtest.py tests/fixtures/week.json
+```
+
+On an export folder from `scripts/history.py` the tank volume is needed, and file names that are not role names need
+a mapping from file stem to role:
+
+```sh
+uv run --no-project scripts/backtest.py EXPORT_DIR --volume 281 --map-file MAPPING.json
+```
+
+- `--options '{"sensor_tolerance": 2.0}'` (or `--options-file`) sets tuning values.
+- `--lock PARAMETER` keeps a parameter at its option value.
+- `--days N` fits the last N days only.
+- `--sensor-height` (default 0.5) and `--water-unit` (default m3) are for an export.
+
+A rising mean charge error points at a wrong sensor height or a changed household: check the sensor height first.

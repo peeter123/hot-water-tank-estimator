@@ -41,3 +41,5 @@ CHARGE_WINDOW_SECONDS = (
 DETECTOR_HOLD_SECONDS = (
     900.0  # an unavailable heating detector holds the state this long
 )
+# Counter increases this long after a run ended still count towards that run's energy.
+COUNTER_LAG_SECONDS = 600.0

@@ -141,7 +141,7 @@ Applies to every group:
 
 ## 4. Calibration (pure Python, plus the backtest)
 
-- [ ] 4.1 Implement the closure sums and the fitter in `calibration.py`, per the calibration spec and design D11:
+- [x] 4.1 Implement the closure sums and the fitter in `calibration.py`, per the calibration spec and design D11:
   - interval sums from the energy balance without sensor bounds;
   - the true start average;
   - weighted least squares with forgetting factor 0.95;
@@ -162,24 +162,28 @@ Applies to every group:
 
   Verify: `tests/test_calibration.py` covers each calibration scenario. A synthetic test generates intervals from
   known parameters and recovers them within 5 %.
-- [ ] 4.2 Implement quiet-window loss learning and the first-drop width estimator. The width estimator needs the
+- [x] 4.2 Implement quiet-window loss learning and the first-drop width estimator. The width estimator needs the
   cold fraction of the balance without sensor bounds at the first drop; the model keeps it in private fields, so
   expose it. Verify: tests for the quiet-night
   scenario and the sensor-drop scenario, and a test that a window with a draw is skipped.
-- [ ] 4.3 Implement the setup-fit replay as a pure function: history in, parameters and calibration state out,
+- [x] 4.3 Implement the setup-fit replay as a pure function: history in, parameters and calibration state out,
   shared with the backtest. Verify: on the `week` fixture it returns 7 closures, share 0.1-0.3, start-up energy
   1.0-2.6 kWh, k 0.002-0.007, and a mean absolute charge error of 2.5 K or less.
-- [ ] 4.4 Add `scripts/backtest.py` per design D10. It runs on any history export with options from arguments or
+- [x] 4.4 Add `scripts/backtest.py` per design D10. It runs on any history export with options from arguments or
   JSON, and prints the charge errors, the showers, the fitted parameters and the error with fitted against default
   parameters. Verify: on the `week` fixture its fitted parameters equal those of 4.3.
-- [ ] 4.5 Run the backtest on `private/history/2026-10-01_2026-10-31/`, and record the fit and the errors in
+- [x] 4.5 Run the backtest on `private/history/2026-10-01_2026-10-31/`, and record the fit and the errors in
   `private/installation.md` under "Backtest results" with the date. Verify: the mean absolute charge error with
   the fitted parameters is 2.5 K or less.
-- [ ] 4.6 **User review.** Show the user the fitted parameters and the error against the shipped defaults. Ask
+- [x] 4.6 **User review.** Show the user the fitted parameters and the error against the shipped defaults. Ask
   whether to change any shipped default; the defaults are meant to be generic, not this tank's fit. If one changes,
   update the defaults scenarios in the integration-setup spec, design D2-D7, `const.py` and `docs/model.md`
   together. Record the decision with its date. Verify: the decision is recorded, and the lint and tests pass.
-- [ ] 4.7 Document calibration in `docs/model.md`: the closure equation, learning, bounds and locks, the setup fit
+  - 2026-10-31: the user kept every shipped default. The fit on October is share 0.18, start-up energy 1.74 kWh, k
+    0.0040 per hour and w 0.33, with a mean charge error of 1.92 K, against 5.42 K with the defaults. The share, k
+    and w defaults are already close to it. The start-up energy stays 0: it depends on the plumbing, it only matters
+    during a run, and the setup fit learns it.
+- [x] 4.7 Document calibration in `docs/model.md`: the closure equation, learning, bounds and locks, the setup fit
   and the backtest's usage. Verify: the documented backtest command runs as written on the `week` fixture.
 
 ## 5. Home Assistant integration

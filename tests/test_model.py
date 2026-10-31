@@ -829,3 +829,121 @@ def test_draws_before_the_counter_timeout_survive_a_restart() -> None:
     restored.tick(T0 + 12 * MINUTE)
     assert restored.t_avg == pytest.approx(54.0 - 50 * 0.2 * 40 / 281)
     assert restored.to_dict() == model.to_dict()
+
+
+def test_charge_event_holds_the_in_run_sums() -> None:
+    """Draws and loss during a run are in the charge event's run sums, apart from the interval sums."""
+    model = make_model(
+        Sources(heating_binary=True, energy_counter=True),
+        t_avg=57.0,
+        t_ch=57.0,
+        loss_coefficient=0.004,
+    )
+    model.on_heating(T0, False)
+    model.on_water_meter(T0, 1000.0, "L")
+    model.on_water_meter(T0 + HOUR, 1010.0, "L")  # 10 L before the run
+    model.on_heating(T0 + 2 * HOUR, True)
+    model.on_energy(T0 + 2 * HOUR, 100.0)
+    model.on_water_meter(T0 + 2 * HOUR + 10 * MINUTE, 1030.0, "L")  # 20 L in the run
+    model.on_energy(T0 + 3 * HOUR, 104.0)
+    events = model.on_heating(T0 + 3 * HOUR, False)
+    change = events[-1].change
+    assert change["interval"]["other"] == pytest.approx(10 * 43 / 281, rel=1e-2)
+    assert change["interval"]["hours"] == pytest.approx(2.0)
+    assert change["run"]["other"] == pytest.approx(20 * 43 / 281, rel=2e-2)
+    assert change["run"]["hours"] == pytest.approx(1.0)
+    assert change["run"]["loss"] > 0.0
+    assert change["interval"]["loss"] + change["run"]["loss"] > change["run"]["loss"]
+
+
+def test_counter_timeout_run_sums_end_at_the_last_increase() -> None:
+    """A counter-timeout end is found 10 minutes late; the in-run sums stop at the last increase."""
+    model = make_model(t_avg=57.0, t_ch=57.0, loss_coefficient=0.004)
+    model.on_tank_sensor(T0, 40.0)
+    model.on_energy(T0, 100.0)
+    model.on_energy(T0 + MINUTE, 101.0)
+    model.on_energy(T0 + 9 * MINUTE, 102.0)
+    events = model.tick(T0 + 40 * MINUTE)
+    (charge,) = [e for e in events if e.kind == EventKind.CHARGE]
+    change = charge.change
+    assert change["run_end"] == (T0 + 9 * MINUTE).isoformat()
+    assert change["run"]["hours"] == pytest.approx(8 / 60)
+    assert model.interval_sums.hours == pytest.approx(31 / 60)
+
+
+def test_counter_increase_soon_after_a_run_end_is_reported() -> None:
+    """With a binary sensor deciding, a counter step within 10 minutes after the end is a lag event."""
+    model = make_model(
+        Sources(heating_binary=True, energy_counter=True), t_avg=40.0, t_ch=40.0
+    )
+    model.on_heating(T0, True)
+    model.on_energy(T0, 100.0)
+    model.on_energy(T0 + 30 * MINUTE, 103.0)
+    end = T0 + 31 * MINUTE
+    model.on_heating(end, False)
+    t_avg = model.t_avg
+    (late,) = model.on_energy(end + 5 * MINUTE, 103.5)
+    assert late.kind == EventKind.HEAT
+    assert late.change == {"counter_lag_kwh": 0.5, "run_end": end.isoformat()}
+    assert model.t_avg == t_avg
+    assert model.on_energy(end + 11 * MINUTE, 104.0) == []
+
+
+def test_unavailable_time_per_source() -> None:
+    """The seconds a source was unavailable in the interval, also while it still is."""
+    model = make_model(
+        Sources(heating_binary=True, energy_counter=True, humidity_sensors=("bath",)),
+        t_avg=50.0,
+        t_ch=50.0,
+    )
+    model.on_water_meter(T0, 1000.0, "L")
+    model.on_water_meter(T0 + 10 * MINUTE, None, "L")
+    model.on_humidity(T0 + 20 * MINUTE, "bath", None)
+    model.on_water_meter(T0 + 30 * MINUTE, 1000.0, "L")
+    seconds = model.unavailable_seconds(T0 + 60 * MINUTE)
+    assert seconds["water_meter"] == pytest.approx(20 * 60)
+    assert seconds["humidity:bath"] == pytest.approx(40 * 60)
+    assert "tank_sensor" not in seconds
+    model.on_heating(T0 + 61 * MINUTE, True)
+    model.on_energy(T0 + 61 * MINUTE, 100.0)
+    model.on_energy(T0 + 62 * MINUTE, 101.0)
+    model.on_tank_sensor(T0 + 62 * MINUTE, 45.0)
+    events = model.on_heating(T0 + 63 * MINUTE, False)
+    charge = events[-1].change
+    assert charge["unavailable_seconds"]["humidity:bath"] == pytest.approx(43 * 60)
+    # The next interval starts with the sources that are still unavailable.
+    later = model.unavailable_seconds(T0 + 73 * MINUTE)
+    assert later == {"humidity:bath": pytest.approx(10 * 60)}
+
+
+def test_balance_cold_fraction_ignores_the_sensor() -> None:
+    """The balance's cold fraction stays on the draws while a sensor bound lifts T_avg."""
+    model = make_model(t_avg=57.0, t_ch=57.0)
+    start_shower(model, T0)
+    for minute in range(1, 4):
+        model.on_water_meter(T0 + minute * MINUTE, 1000.0 + 95 * minute, "L")
+    model.on_tank_sensor(T0 + 4 * MINUTE, 57.0)
+    assert model.balance_cold_fraction == pytest.approx(3 * 95 * 24 / 281 / 43)
+    assert model.cold_fraction < model.balance_cold_fraction
+    assert model.tank_sensor == 57.0
+
+
+def test_calibration_bookkeeping_survives_a_restore() -> None:
+    """The counter-lag, unavailable time and increase sums are part of the saved state."""
+    model = make_model(Sources(heating_binary=True, energy_counter=True))
+    model.on_heating(T0, True)
+    model.on_energy(T0, 100.0)
+    model.on_energy(T0 + 10 * MINUTE, 102.0)
+    model.on_water_meter(T0 + 11 * MINUTE, None, "L")
+    model.on_heating(T0 + 12 * MINUTE, False)
+    model.on_water_meter(T0 + 20 * MINUTE, None, "L")
+    saved = json.loads(json.dumps(model.to_dict()))
+    restored = TankModel.from_dict(make_options(), model.sources, saved)
+    assert restored.to_dict() == model.to_dict()
+    assert restored.unavailable_seconds(T0 + HOUR) == model.unavailable_seconds(
+        T0 + HOUR
+    )
+    # A state saved before the bookkeeping existed still restores.
+    for key in ("increase_sums", "last_run_end", "unavailable", "down_since"):
+        saved.pop(key)
+    TankModel.from_dict(make_options(), model.sources, saved)
