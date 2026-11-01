@@ -358,6 +358,11 @@ their sources, the closures with their charge errors and the calibration state. 
 replays with fixed options and reports the same errors, so fitted options can be compared with the defaults. A fixture
 becomes a `History` with `history_from_fixture`, and a recorder export with the reader in the backtest script.
 
+In the integration the fit runs in the background when an entry is first set up, and again at each start until it
+has run once (a recorder that is missing or holds no history does not count). Sources excluded from the recorder
+weaken it, because their rows are missing. The live model does not take the replay's end state: it keeps its own
+state, which starts at the tank sensor's reading, and only the calibration comes from the fit.
+
 The replay starts the model at the tank sensor's first numeric reading and ticks every 5 minutes. It applies each
 learned change to the model as it goes, so the fit of a long history converges the way live learning does. A parameter
 with too little data keeps its option value: with fewer than 5 closures the share and `S` stay, and `k` may still come

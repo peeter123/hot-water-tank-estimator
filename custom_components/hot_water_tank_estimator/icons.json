@@ -1,0 +1,72 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "shower_detected": {
+        "default": "mdi:shower-head",
+        "state": {
+          "off": "mdi:shower"
+        }
+      }
+    },
+    "button": {
+      "shower_ran_cold": {
+        "default": "mdi:water-thermometer-outline"
+      }
+    },
+    "sensor": {
+      "tank_litres": {
+        "default": "mdi:water-boiler"
+      },
+      "shower_litres": {
+        "default": "mdi:shower-head"
+      },
+      "percent_charged": {
+        "default": "mdi:battery-charging-medium"
+      },
+      "shower_minutes": {
+        "default": "mdi:timer-outline"
+      },
+      "charged_temperature": {
+        "default": "mdi:thermometer-high"
+      },
+      "tank_average": {
+        "default": "mdi:thermometer-water"
+      },
+      "cold_water_temperature": {
+        "default": "mdi:water-thermometer"
+      },
+      "other_hot_share": {
+        "default": "mdi:water-percent"
+      },
+      "startup_energy": {
+        "default": "mdi:flash-outline"
+      },
+      "loss_coefficient": {
+        "default": "mdi:thermometer-minus"
+      },
+      "thermocline_width": {
+        "default": "mdi:arrow-expand-vertical"
+      },
+      "usable_fraction": {
+        "default": "mdi:water-percent"
+      },
+      "calibration_samples": {
+        "default": "mdi:counter"
+      },
+      "last_charge_error": {
+        "default": "mdi:delta"
+      },
+      "mean_charge_error": {
+        "default": "mdi:delta"
+      }
+    }
+  },
+  "services": {
+    "set_tank_state": {
+      "service": "mdi:water-boiler"
+    },
+    "recalibrate": {
+      "service": "mdi:tune"
+    }
+  }
+}

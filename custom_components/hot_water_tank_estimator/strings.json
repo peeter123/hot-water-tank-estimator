@@ -1,0 +1,353 @@
+{
+  "title": "Hot Water Tank Estimator",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Tank",
+        "description": "Name the tank and give its volume and temperature sensor.",
+        "data": {
+          "name": "Name",
+          "volume": "Tank volume",
+          "tank_sensor": "Tank temperature sensor",
+          "sensor_height": "Sensor height"
+        },
+        "data_description": {
+          "volume": "The effective volume of the tank, 20-2000 L.",
+          "tank_sensor": "The temperature sensor of the tank.",
+          "sensor_height": "Where the sensor sits in the tank, as a percentage of the tank height from the bottom (20-80). The data sheet of the tank gives it."
+        }
+      },
+      "water_meter": {
+        "title": "Water meter",
+        "description": "Choose the total water meter of the house.",
+        "data": {
+          "water_meter": "Water meter"
+        },
+        "data_description": {
+          "water_meter": "The total water meter of the house, with a volume unit (L, m3, gal or ft3). It counts the hot and the cold water."
+        }
+      },
+      "heat": {
+        "title": "Heat input",
+        "description": "Give at least one way to know when and how much the tank is heated. The flow and return temperatures give the charged temperature.",
+        "data": {
+          "energy_counter": "Heat energy counter",
+          "power_sensor": "Heat power sensor",
+          "heating_active": "Heating active binary sensor",
+          "flow_sensor": "Flow temperature sensor",
+          "return_sensor": "Return temperature sensor"
+        },
+        "data_description": {
+          "energy_counter": "The thermal energy counter of the heater for heating the tank, in kWh.",
+          "power_sensor": "The heat power of the heater for heating the tank, in W.",
+          "heating_active": "A binary sensor that is on while the tank is being heated.",
+          "flow_sensor": "The flow temperature of the heater. Give it together with the return temperature.",
+          "return_sensor": "The return temperature of the heater. Give it together with the flow temperature."
+        }
+      },
+      "detection": {
+        "title": "Shower detection",
+        "description": "Choose bathroom humidity sensors, if you have them.",
+        "data": {
+          "humidity_sensors": "Bathroom humidity sensors"
+        },
+        "data_description": {
+          "humidity_sensors": "A rise in humidity tells a shower or bath from other draws. Leave empty to detect showers by the long draw duration only."
+        }
+      },
+      "cold": {
+        "title": "Cold water",
+        "description": "Choose a cold water temperature sensor, if you have one.",
+        "data": {
+          "cold_sensor": "Cold water temperature sensor"
+        },
+        "data_description": {
+          "cold_sensor": "The temperature of the cold supply water. Leave empty to use the seasonal curve of the options."
+        }
+      }
+    },
+    "error": {
+      "volume_out_of_range": "The volume must be 20-2000 L.",
+      "height_out_of_range": "The sensor height must be 20-80 %.",
+      "water_meter_unit": "The water meter must have a volume unit: L, m3, gal or ft3.",
+      "no_heat_source": "Give at least one of the energy counter, the heat power sensor and the heating active binary sensor.",
+      "flow_return_pair": "Give both the flow and the return temperature sensor, or neither."
+    },
+    "abort": {
+      "already_configured": "A tank with this temperature sensor is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Tank and temperatures",
+        "description": "The tank, and the temperature and shape values of the model.",
+        "data": {
+          "volume": "Tank volume",
+          "tank_sensor": "Tank temperature sensor",
+          "sensor_height": "Sensor height",
+          "thermocline_width": "Thermocline width",
+          "usable_fraction": "Usable fraction",
+          "mix_temperature": "Shower mix temperature",
+          "max_temperature": "Maximum temperature",
+          "sensor_tolerance": "Sensor tolerance",
+          "sensor_margin": "Sensor margin",
+          "ambient_temperature": "Ambient temperature",
+          "cold_mean": "Cold water mean temperature",
+          "cold_amplitude": "Cold water amplitude",
+          "cold_coldest_day": "Coldest day of the year"
+        },
+        "data_description": {
+          "volume": "The effective volume of the tank, 20-2000 L.",
+          "tank_sensor": "The temperature sensor of the tank.",
+          "sensor_height": "Where the sensor sits in the tank, as a percentage of the tank height from the bottom (20-80). The data sheet of the tank gives it.",
+          "thermocline_width": "The width of the layer between hot and cold water, as a percentage of the tank. Learned from the first sensor drop after each charge.",
+          "usable_fraction": "The fraction of the tank that can be drawn before the outlet runs cold, 0.5-0.98. The Shower ran cold button learns it.",
+          "mix_temperature": "The temperature of your shower water.",
+          "max_temperature": "The highest temperature the model accepts for the tank.",
+          "sensor_tolerance": "How far below the charged temperature the tank sensor may read before the cold layer is taken to have reached it.",
+          "sensor_margin": "How far the tank average may stay above the value the tank sensor gives.",
+          "ambient_temperature": "The temperature around the tank, for the standing loss.",
+          "cold_mean": "The yearly mean of the cold water temperature, used without a cold water sensor.",
+          "cold_amplitude": "The seasonal swing of the cold water temperature around its mean.",
+          "cold_coldest_day": "The day of the year (1-365) on which the cold water is coldest."
+        }
+      },
+      "sources": {
+        "title": "Sources",
+        "description": "The water meter and the optional sources.",
+        "data": {
+          "water_meter": "Water meter",
+          "energy_counter": "Heat energy counter",
+          "power_sensor": "Heat power sensor",
+          "heating_active": "Heating active binary sensor",
+          "flow_sensor": "Flow temperature sensor",
+          "return_sensor": "Return temperature sensor",
+          "humidity_sensors": "Bathroom humidity sensors",
+          "cold_sensor": "Cold water temperature sensor"
+        },
+        "data_description": {
+          "water_meter": "The total water meter of the house, with a volume unit (L, m3, gal or ft3). It counts the hot and the cold water.",
+          "energy_counter": "The thermal energy counter of the heater for heating the tank, in kWh.",
+          "power_sensor": "The heat power of the heater for heating the tank, in W.",
+          "heating_active": "A binary sensor that is on while the tank is being heated.",
+          "flow_sensor": "The flow temperature of the heater. Give it together with the return temperature.",
+          "return_sensor": "The return temperature of the heater. Give it together with the flow temperature.",
+          "humidity_sensors": "A rise in humidity tells a shower or bath from other draws. Leave empty to detect showers by the long draw duration only.",
+          "cold_sensor": "The temperature of the cold supply water. Leave empty to use the seasonal curve of the options."
+        }
+      },
+      "draws": {
+        "title": "Draws, losses and heat",
+        "description": "The values for draws, standing loss and heat input. Learned values replace them unless locked.",
+        "data": {
+          "loss_coefficient": "Loss coefficient",
+          "other_hot_share": "Other draws hot share",
+          "startup_energy": "Start-up energy per run",
+          "shower_flow": "Shower flow",
+          "humidity_rise": "Humidity rise",
+          "humidity_window": "Humidity window",
+          "long_draw_minutes": "Long draw duration",
+          "reclassify_window": "Reclassify window",
+          "session_gap": "Session gap",
+          "max_draw": "Maximum draw per reading",
+          "power_threshold": "Power threshold"
+        },
+        "data_description": {
+          "loss_coefficient": "The standing loss, as a fraction per hour of the excess of the tank over the ambient temperature. Learned from quiet nights and charges.",
+          "other_hot_share": "The share of the litres drawn outside a shower that comes from the tank. Learned from charges.",
+          "startup_energy": "The energy of each heating run that does not reach the tank. Learned from charges.",
+          "shower_flow": "The flow of a shower, to turn litres into minutes.",
+          "humidity_rise": "The rise in bathroom humidity, in percentage points above the lowest value of the window, that counts as a shower.",
+          "humidity_window": "The window over which the lowest humidity is taken.",
+          "long_draw_minutes": "A draw that lasts this long counts as a shower. 0 turns the rule off.",
+          "reclassify_window": "The litres drawn this long before a shower is detected count as shower water.",
+          "session_gap": "Draws less than this far apart belong to one session.",
+          "max_draw": "A rise of the water meter above this in one reading is ignored as a meter catching up.",
+          "power_threshold": "The heat power above which the heater counts as heating the tank."
+        }
+      },
+      "learning": {
+        "title": "Learning",
+        "description": "Lock learned parameters and set the history for the setup fit.",
+        "data": {
+          "locks": "Locked parameters",
+          "history_days": "Days of history for the setup fit"
+        },
+        "data_description": {
+          "locks": "A locked parameter keeps its value from these options and is never learned.",
+          "history_days": "How many days of recorder history the setup fit and the recalibrate action replay, 1-30."
+        }
+      }
+    },
+    "error": {
+      "volume_out_of_range": "The volume must be 20-2000 L.",
+      "height_out_of_range": "The sensor height must be 20-80 %.",
+      "water_meter_unit": "The water meter must have a volume unit: L, m3, gal or ft3.",
+      "no_heat_source": "Give at least one of the energy counter, the heat power sensor and the heating active binary sensor.",
+      "flow_return_pair": "Give both the flow and the return temperature sensor, or neither."
+    }
+  },
+  "selector": {
+    "locks": {
+      "options": {
+        "other_hot_share": "Other draws hot share",
+        "startup_energy": "Start-up energy",
+        "loss_coefficient": "Loss coefficient",
+        "thermocline_width": "Thermocline width",
+        "usable_fraction": "Usable fraction"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "tank_litres": {
+        "name": "Tank water remaining"
+      },
+      "shower_litres": {
+        "name": "Shower water remaining"
+      },
+      "percent_charged": {
+        "name": "Percent charged"
+      },
+      "shower_minutes": {
+        "name": "Shower time remaining"
+      },
+      "charged_temperature": {
+        "name": "Charged temperature"
+      },
+      "tank_average": {
+        "name": "Tank average temperature"
+      },
+      "cold_water_temperature": {
+        "name": "Cold water temperature"
+      },
+      "other_hot_share": {
+        "name": "Other draws hot share",
+        "state_attributes": {
+          "source": {
+            "name": "Source",
+            "state": {
+              "option": "Option",
+              "setup_fit": "Setup fit",
+              "learned": "Learned",
+              "locked": "Locked"
+            }
+          }
+        }
+      },
+      "startup_energy": {
+        "name": "Start-up energy",
+        "state_attributes": {
+          "source": {
+            "name": "Source",
+            "state": {
+              "option": "Option",
+              "setup_fit": "Setup fit",
+              "learned": "Learned",
+              "locked": "Locked"
+            }
+          }
+        }
+      },
+      "loss_coefficient": {
+        "name": "Loss coefficient",
+        "state_attributes": {
+          "source": {
+            "name": "Source",
+            "state": {
+              "option": "Option",
+              "setup_fit": "Setup fit",
+              "learned": "Learned",
+              "locked": "Locked"
+            }
+          }
+        }
+      },
+      "thermocline_width": {
+        "name": "Thermocline width",
+        "state_attributes": {
+          "source": {
+            "name": "Source",
+            "state": {
+              "option": "Option",
+              "setup_fit": "Setup fit",
+              "learned": "Learned",
+              "locked": "Locked"
+            }
+          }
+        }
+      },
+      "usable_fraction": {
+        "name": "Usable fraction",
+        "state_attributes": {
+          "source": {
+            "name": "Source",
+            "state": {
+              "option": "Option",
+              "setup_fit": "Setup fit",
+              "learned": "Learned",
+              "locked": "Locked"
+            }
+          }
+        }
+      },
+      "calibration_samples": {
+        "name": "Calibration samples"
+      },
+      "last_charge_error": {
+        "name": "Last charge error"
+      },
+      "mean_charge_error": {
+        "name": "Mean charge error"
+      }
+    },
+    "binary_sensor": {
+      "shower_detected": {
+        "name": "Shower detected"
+      }
+    },
+    "button": {
+      "shower_ran_cold": {
+        "name": "Shower ran cold"
+      }
+    }
+  },
+  "services": {
+    "set_tank_state": {
+      "name": "Set tank state",
+      "description": "Sets the tank average and the charged temperature by hand. With neither given, the tank is charged to the reading of the tank sensor.",
+      "fields": {
+        "tank_average": {
+          "name": "Tank average",
+          "description": "The new tank average temperature. The charged temperature stays as it is."
+        },
+        "charged_temperature": {
+          "name": "Charged temperature",
+          "description": "The new charged temperature of the hot layer."
+        }
+      }
+    },
+    "recalibrate": {
+      "name": "Recalibrate",
+      "description": "Fits the parameters of the tank again from the recorder history. Locked parameters and the usable fraction learned from the button stay.",
+      "fields": {
+        "days": {
+          "name": "Days",
+          "description": "How many days of history to replay, 1-30. The default is the number in the options."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "no_tank_targeted": {
+      "message": "The action targets no loaded tank."
+    },
+    "tank_sensor_unavailable": {
+      "message": "The tank sensor is unavailable, so the tank cannot be charged to its reading. Give the temperatures."
+    },
+    "no_history": {
+      "message": "There is no recorder history to fit."
+    }
+  }
+}

@@ -1,7 +1,12 @@
 {
   "domain": "hot_water_tank_estimator",
   "name": "Hot Water Tank Estimator",
-  "codeowners": ["@peeter123"],
+  "after_dependencies": [
+    "recorder"
+  ],
+  "codeowners": [
+    "@peeter123"
+  ],
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/peeter123/hot-water-tank-estimator",

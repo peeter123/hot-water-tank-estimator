@@ -104,12 +104,33 @@ core integrations:
   `scripts/backtest.py` all run the same code. `setup_fit.py` replays a neutral `History` (per source: role, entity
   ID, unit and `(time, state)` rows), which a fixture, a recorder export and Home Assistant's recorder states can all
   be turned into; the reading of files and of the recorder stays outside the pure modules.
-- One `TankEstimator` per config entry, kept in `entry.runtime_data`. It owns the subscriptions
-  (`async_track_state_change_event`, a 5-minute `async_track_time_interval`) and the model. Entities read from it
-  through a dispatcher signal. There is no coordinator, because nothing is polled.
+- One `TankEstimator` (`estimator.py`) per config entry, kept in `entry.runtime_data`. It owns the subscriptions
+  (`async_track_state_change_event`, a 5-minute `async_track_time_interval`), the model and the calibrator. Entities
+  read from it through a dispatcher signal. There is no coordinator, because nothing is polled.
+  - A source state goes to the model with the state's `last_updated` as its time: the moment the reading was
+    produced. `last_changed` only moves with the value.
+  - After every input and tick, `Calibrator.observe` sees the model's events and learns. Changed options go back to
+    the model with `set_options`.
+  - Temperatures are converted to C, the energy counter to kWh and the power sensor to W (`readings.py`). The
+    model converts the water meter's unit itself, from the state's attributes.
+  - `async_setup_entry` loads the store, creates the estimator (which restores the model and the calibration from
+    it), sets up the platforms and only then starts the listeners.
 - Heavy work (the setup fit's history read and replay) runs in the recorder's executor and the default executor,
-  never in the event loop.
-- Model state persists in the tank average sensor's restore data, and calibration state in a `Store` per entry.
+  never in the event loop. `history.py` turns recorder states into the pure `History`. The fit itself runs as a
+  background task of the entry.
+- The model state and the calibration state persist together in a `Store` per entry, not in entity restore data, so
+  disabling or renaming an entity loses nothing. The estimator asks for a save after every input (it
+  requests one only when none is pending, because `Store.async_delay_save` would move a pending write later with
+  every request, so the store is written 60 s after the first input and then at most once per 60 s while inputs
+  keep arriving) and saves at unload.
+  - A replaced water meter or energy counter entity starts a new baseline (`TankModel.forget_reading`).
+  - Fits run one at a time. The fit works on a copy of the calibrator, and a button press or manual reset made
+    while it ran is kept when it is applied.
+  - Calibration changes are logged as `calibration` events with the old and new values and the source.
+- Actions (`set_tank_state`, `recalibrate`) are registered in `async_setup` (`services.py`) and resolve their target
+  to loaded entries with `async_extract_config_entry_ids`.
+- The config flow stores everything in the entry options. The sensor height and the thermocline width are
+  percentages there, and fractions in the model.
 - All user-facing text lives in `strings.json` and `translations/en.json`. Plain text, no emoji.
 - Formulas in code use the symbols of `docs/model.md` (`t_avg`, `t_ch`, `t_cold`, `f`, `h`, `w`, `u`) and give
   units in names or comments.
@@ -149,6 +170,11 @@ device per entry, so only the rules about devices appearing or disappearing at r
   stay under 500 kB (a test checks it): identical consecutive states are merged, 32-bit float noise is shortened,
   times are rounded to the millisecond, and `--thin` can thin a counter (the `week` fixture uses 20 s on the energy
   counter, keeping the rows around every heating change so each increase stays in its run).
+- Home Assistant tests share `tests/common.py`: made-up source entity IDs, entry options, and a `Rig` that changes
+  the sources and feeds the same inputs to a reference `TankModel` to compare the entities with. `TID251` (banned
+  `tests` import) is ignored under `tests/` for these relative imports. A test with the recorder asks for
+  `recorder_mock` before `hass`, and for `enable_custom_integrations` itself (`tests/conftest.py` explains why);
+  `tests/test_calibration_runtime.py` writes a fixture into the recorder at its own times with `freezer`.
 - `tests/test_calibration.py` has a test per calibration scenario, named after it, and the closure rules: the
   exclusions, the counter lag, the in-run draws. A model with known parameters generates a month of history and the
   fitter has to find them again within 5 %. `tests/test_setup_fit.py` runs the setup fit on the `week` fixture.

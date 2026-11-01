@@ -265,8 +265,14 @@ active, with tolerance `delta` (default 1.5 K) and margin m (default 2 K):
   - Events instead of polling keep each litre and each heat step exact.
 - Entities subscribe to the estimator through a dispatcher signal. There is no coordinator because nothing is
   polled.
-- The tank average sensor is a `RestoreSensor`. Its extra stored data holds the full model state from the
-  integration-setup spec.
+- The full model state from the integration-setup spec persists in the entry's `Store`, next to the calibration
+  state. It is written at most once a minute while inputs arrive, and at unload. A later input must not push a
+  pending write further out, or a long heating run would go unsaved for hours. The event log is not persisted.
+  The first draft kept the model in the tank average sensor's restore data, but a user who disables that sensor
+  would then lose the model at every restart.
+- The setup fit and `recalibrate` run one at a time. A fit takes a snapshot of the calibration state when it
+  starts. When it is applied, a "Shower ran cold" press or a manual reset made while it ran is kept. Live closures
+  from those seconds are dropped.
 - Config flow steps:
   1. tank: name, volume, tank sensor and height;
   2. water meter;
@@ -275,7 +281,7 @@ active, with tolerance `delta` (default 1.5 K) and margin m (default 2 K):
   5. cold water.
 
   Selectors are filtered by domain and device class. The options flow holds every tuning value plus the optional
-  sources. An options update reloads the entry, and the state survives through the restore data.
+  sources. An options update reloads the entry, and the state survives through the `Store`.
 - Diagnostics: options, state, source availability and a ring of the last 100 events.
 - Translations go in `strings.json` and `translations/en.json`, plain text.
 
@@ -379,8 +385,8 @@ the evidence was produced, and the shipped defaults are only where it starts.
   rising mean charge error points at a wrong sensor height or a changed household. It is the first thing the README
   tells users to check.
 - **Code:** `calibration.py` is pure Python next to `model.py`: the interval sums, the fitter and the width
-  estimator. Persistence uses a `Store` per entry, separate from the restore data, so learned values survive the
-  entity being renamed or re-added.
+  estimator. Persistence uses a `Store` per entry, not entity restore data, so the model and the learned values
+  survive an entity being renamed, disabled or re-added.
 
 Alternatives:
 - **Shipping the development installation's values as defaults with only manual tuning** (the first draft). It

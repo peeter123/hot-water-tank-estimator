@@ -43,3 +43,61 @@ DETECTOR_HOLD_SECONDS = (
 )
 # Counter increases this long after a run ended still count towards that run's energy.
 COUNTER_LAG_SECONDS = 600.0
+
+# Config entry keys. Everything the user sets is stored in the entry options. The tuning values
+# use the field names of `ModelOptions`, in the units shown in the options form: the sensor height
+# and the thermocline width are percentages there, and fractions in the model.
+CONF_VOLUME = "volume"  # litres
+CONF_TANK_SENSOR = "tank_sensor"
+CONF_SENSOR_HEIGHT = "sensor_height"  # percent
+CONF_WATER_METER = "water_meter"
+CONF_ENERGY_COUNTER = "energy_counter"
+CONF_POWER_SENSOR = "power_sensor"
+CONF_HEATING_ACTIVE = "heating_active"
+CONF_FLOW_SENSOR = "flow_sensor"
+CONF_RETURN_SENSOR = "return_sensor"
+CONF_HUMIDITY_SENSORS = "humidity_sensors"
+CONF_COLD_SENSOR = "cold_sensor"
+CONF_THERMOCLINE_WIDTH = "thermocline_width"  # percent
+CONF_LOCKS = "locks"
+CONF_HISTORY_DAYS = "history_days"
+
+# The sensor entities the model reads, as keys of the entry options (humidity is a list).
+SOURCE_KEYS = (
+    CONF_TANK_SENSOR,
+    CONF_WATER_METER,
+    CONF_ENERGY_COUNTER,
+    CONF_POWER_SENSOR,
+    CONF_HEATING_ACTIVE,
+    CONF_FLOW_SENSOR,
+    CONF_RETURN_SENSOR,
+    CONF_COLD_SENSOR,
+)
+
+# Limits of the config flow.
+MIN_VOLUME = 20.0  # litres
+MAX_VOLUME = 2000.0  # litres
+MIN_SENSOR_HEIGHT = 20.0  # percent
+MAX_SENSOR_HEIGHT = 80.0  # percent
+DEFAULT_HISTORY_DAYS = 30
+MIN_HISTORY_DAYS = 1
+MAX_HISTORY_DAYS = 30
+
+# The first start when the tank sensor has no reading.
+FALLBACK_TEMPERATURE = 50.0  # C
+
+# The runtime ticks the model this often; the dispatcher signal carries the entry id.
+TICK_MINUTES = 5
+SIGNAL_UPDATE = f"{DOMAIN}_update_{{}}"
+DIAGNOSTIC_EVENTS = 100
+
+# Persistence.
+STORAGE_VERSION = 1
+STORAGE_SAVE_DELAY = 60  # seconds
+
+# Actions.
+SERVICE_SET_TANK_STATE = "set_tank_state"
+SERVICE_RECALIBRATE = "recalibrate"
+ATTR_TANK_AVERAGE = "tank_average"
+ATTR_CHARGED_TEMPERATURE = "charged_temperature"
+ATTR_DAYS = "days"

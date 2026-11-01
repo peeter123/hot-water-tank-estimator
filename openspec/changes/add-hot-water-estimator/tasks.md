@@ -189,7 +189,7 @@ Applies to every group:
 
 ## 5. Home Assistant integration
 
-- [ ] 5.1 Config flow (design D9 steps), with selectors filtered by domain and device class, and the validation in
+- [x] 5.1 Config flow (design D9 steps), with selectors filtered by domain and device class, and the validation in
   the integration-setup spec:
   - volume;
   - sensor height 20-80 %;
@@ -198,10 +198,10 @@ Applies to every group:
   - a volume unit on the water meter.
 
   Verify: `tests/test_config_flow.py` covers a successful entry and each error scenario.
-- [ ] 5.2 Options flow with every tuning value and its default, the optional sources, a lock per learned parameter
+- [x] 5.2 Options flow with every tuning value and its default, the optional sources, a lock per learned parameter
   and the history days. An update reloads the entry. Verify: a test changes the sensor height, and T_avg, T_ch and
   the calibration state are unchanged after the reload.
-- [ ] 5.3 Estimator runtime:
+- [x] 5.3 Estimator runtime:
   - `entry.runtime_data`;
   - state listeners for every configured source;
   - the flow and return ring;
@@ -211,7 +211,7 @@ Applies to every group:
 
   Verify: tests drive `hass.states.async_set` on made-up sources through a shower and a heating run, and check the
   entity states against the model.
-- [ ] 5.4 Calibration in the runtime:
+- [x] 5.4 Calibration in the runtime:
   - a `Store` per entry;
   - the setup fit on entry creation, reading the recorder through its executor and replaying in the executor;
   - closure learning at each charge;
@@ -220,23 +220,24 @@ Applies to every group:
 
   Verify: a test with the recorder test fixture loads the `week` fixture as history, creates an entry, and checks
   that the samples sensor reads 7 and the parameters match 4.3. A button test checks the cold-shower scenario.
-- [ ] 5.5 Entities, each with translated names, units and device and state classes, on one device per entry:
-  - the seven sensors from the integration-setup spec, with the tank average sensor as a RestoreSensor holding the
-    model state;
+- [x] 5.5 Entities, each with translated names, units and device and state classes, on one device per entry:
+  - the seven sensors from the integration-setup spec (the model state persists in the entry's `Store`, not in an
+    entity's restore data, per D9);
   - the shower detected binary sensor;
   - the button;
   - the diagnostic-category calibration sensors with their `source` attribute.
 
-  Verify: a restart test (`mock_restore_cache_with_extra_data`) restores the model, and a test checks that the
+  Verify: a restart test (a stored model in the entry's `Store`) restores the model, also with the tank average
+  sensor disabled, and a test checks that the
   binary sensor is unavailable without detection methods.
-- [ ] 5.6 Actions `set_tank_state` and `recalibrate` (`services.yaml`, translated fields). Verify: tests for each
+- [x] 5.6 Actions `set_tank_state` and `recalibrate` (`services.yaml`, translated fields). Verify: tests for each
   scenario in the integration-setup spec, including the error when the sensor is unavailable, and that locked
   parameters survive a recalibration.
-- [ ] 5.7 Handling of unavailable sources and counter resets per the integration-setup spec. Verify: tests for the
+- [x] 5.7 Handling of unavailable sources and counter resets per the integration-setup spec. Verify: tests for the
   water meter that goes offline briefly, the energy counter reset and the tank sensor that flickers.
-- [ ] 5.8 Diagnostics: options, state, source availability, the last 100 events and the calibration state. Verify:
+- [x] 5.8 Diagnostics: options, state, source availability, the last 100 events and the calibration state. Verify:
   a diagnostics test checks the keys.
-- [ ] 5.9 Write `strings.json` and `translations/en.json` (plain text), and the README sections on configuration,
+- [x] 5.9 Write `strings.json` and `translations/en.json` (plain text), and the README sections on configuration,
   options, entities, calibration and the diagnostic sensors. Verify: every config and options field and every
   entity appears in the README, and hassfest passes locally (`uvx` or the Docker image) or in CI once 7.3 exists.
 

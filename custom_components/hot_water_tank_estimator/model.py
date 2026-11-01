@@ -508,6 +508,42 @@ class TankModel:
         events.append(self._record(now, EventKind.CHARGE, {"manual": True}, before))
         return events
 
+    def log_event(
+        self, now: datetime, kind: EventKind, change: dict[str, Any]
+    ) -> ModelEvent:
+        """Record an event that is not a model step, such as a calibration change.
+
+        The temperatures are those now, before and after.
+
+        Args:
+            now: The time of the event.
+            kind: The kind of event.
+            change: What changed, a JSON-compatible dict.
+
+        Returns:
+            The recorded event.
+        """
+        return self._record(now, kind, change, self._temps())
+
+    def forget_reading(self, source: str) -> None:
+        """Forget the last reading of a counter, so that its next reading is a new start.
+
+        For a source whose entity was replaced: the new entity's first reading must not count
+        as a change since the old entity's last one.
+
+        Args:
+            source: `water_meter` or `energy_counter`.
+
+        Raises:
+            ValueError: The source has no baseline.
+        """
+        if source == "water_meter":
+            self._classifier.forget_meter()
+        elif source == "energy_counter":
+            self._last_energy = None
+        else:
+            raise ValueError(f"No baseline for {source}")
+
     # ----- outputs ------------------------------------------------------------------------
 
     @property

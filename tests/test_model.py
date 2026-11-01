@@ -947,3 +947,34 @@ def test_calibration_bookkeeping_survives_a_restore() -> None:
     for key in ("increase_sums", "last_run_end", "unavailable", "down_since"):
         saved.pop(key)
     TankModel.from_dict(make_options(), model.sources, saved)
+
+
+def test_log_event_records_a_calibration_event() -> None:
+    """A calibration event is logged with the temperatures now."""
+    model = make_model()
+    event = model.log_event(
+        T0 + MINUTE, EventKind.CALIBRATION, {"parameters": {"other_hot_share": 0.3}}
+    )
+    assert model.events[-1] == event
+    assert event.kind == EventKind.CALIBRATION
+    assert event.change == {"parameters": {"other_hot_share": 0.3}}
+    assert event.t_avg_before == event.t_avg_after == model.t_avg
+    assert event.t_ch_before == event.t_ch_after == model.t_ch
+
+
+def test_forget_reading_makes_the_next_reading_a_new_start() -> None:
+    """After a source is replaced, a higher counter and a higher meter reading apply nothing."""
+    model = make_model(Sources(energy_counter=True, heating_binary=True))
+    model.on_heating(T0, True)
+    model.on_energy(T0, 10.0)
+    model.on_water_meter(T0, 100.0, "m3")
+    model.forget_reading("energy_counter")
+    model.forget_reading("water_meter")
+    before = model.t_avg
+    events = model.on_energy(T0 + MINUTE, 500.0)
+    events += model.on_water_meter(T0 + MINUTE, 105.0, "m3")
+    assert all(e.kind not in (EventKind.HEAT, EventKind.DRAW) for e in events)
+    assert model.t_avg == before
+    assert [e.kind for e in model.on_energy(T0 + 2 * MINUTE, 500.5)] == [EventKind.HEAT]
+    with pytest.raises(ValueError, match="baseline"):
+        model.forget_reading("tank_sensor")

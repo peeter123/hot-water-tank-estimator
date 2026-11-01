@@ -134,6 +134,10 @@ class DrawClassifier:
         else:
             self._others = [(t, amount) for t, amount in self._others if t > until]
 
+    def forget_meter(self) -> None:
+        """Forget the last meter reading: the next one is a new starting point."""
+        self._last_litres = None
+
     def set_options(self, options: ClassifierOptions) -> None:
         """Use new tuning values and keep the state."""
         self.options = options
