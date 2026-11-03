@@ -9,7 +9,7 @@
       }
     },
     "button": {
-      "shower_ran_cold": {
+      "hot_water_ran_out": {
         "default": "mdi:water-thermometer-outline"
       }
     },

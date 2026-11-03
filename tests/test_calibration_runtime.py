@@ -32,13 +32,16 @@ from custom_components.hot_water_tank_estimator.const import (
     CONF_WATER_METER,
     DOMAIN,
 )
-from custom_components.hot_water_tank_estimator.estimator import TankConfig
+from custom_components.hot_water_tank_estimator.estimator import TankConfig, _Tolerant
 from custom_components.hot_water_tank_estimator.history import async_read_history
+from custom_components.hot_water_tank_estimator.model import EventKind
 from custom_components.hot_water_tank_estimator.setup_fit import (
     History,
     history_from_fixture,
     setup_fit,
 )
+from homeassistant.components import persistent_notification
+from homeassistant.components.persistent_notification import UpdateType
 from homeassistant.components.recorder import Recorder
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -244,10 +247,59 @@ async def test_no_recorder_means_no_setup_fit(hass: HomeAssistant, freezer) -> N
     assert rig.entry.runtime_data.payload()["fit_done"] is False
 
 
-async def test_shower_runs_cold_scenario(hass: HomeAssistant, freezer) -> None:
-    """Pressing the button at a cold fraction of 0.72 sets the usable fraction to 0.72 and empties the tank."""
+async def draw_one_litre_and_wait(rig: Rig, minutes: float = 5.0) -> float:
+    """Draw 1 L, wait until the session is over, and return the cold fraction at its end."""
+    await rig.set(METER, "100.001", after=30)
+    await rig.tick(minutes)
+    record = rig.entry.runtime_data.model.last_draw_end(dt_util.utcnow())
+    assert record is not None
+    return record.cold_fraction
+
+
+async def part_drawn(rig: Rig) -> None:
+    """Set the tank to 45 C on average, charged at 55 C: the tank sensor (20 C) is under T_ch."""
+    await rig.hass.services.async_call(
+        DOMAIN,
+        "set_tank_state",
+        {
+            "entity_id": entity_id(rig.hass, rig.entry, "sensor", "tank_litres"),
+            "tank_average": 45,
+            "charged_temperature": 55,
+        },
+        blocking=True,
+    )
+
+
+async def press_hot_water_ran_out(rig: Rig) -> None:
+    """Press the "Hot water ran out" button of the rig's entry."""
+    await rig.hass.services.async_call(
+        "button",
+        "press",
+        {"entity_id": entity_id(rig.hass, rig.entry, "button", "hot_water_ran_out")},
+        blocking=True,
+    )
+
+
+def notifications(hass: HomeAssistant) -> dict[str, dict]:
+    """Collect the persistent notifications that are shown from now on, by notification ID."""
+    shown: dict[str, dict] = {}
+
+    def collect(update_type: UpdateType, current: dict) -> None:
+        if update_type in (UpdateType.ADDED, UpdateType.UPDATED):
+            shown.update(current)
+        elif update_type == UpdateType.REMOVED:
+            for key in current:
+                shown.pop(key, None)
+
+    persistent_notification.async_register_callback(hass, collect)
+    return shown
+
+
+async def test_hot_water_ran_out_accepted(hass: HomeAssistant, freezer) -> None:
+    """A press after a draw that ended at a cold fraction near 0.72 learns it and empties the tank."""
     rig = await Rig.start(hass, freezer, states={TANK: "20.0"})
     estimator = rig.entry.runtime_data
+    shown = notifications(hass)
     t_cold = estimator.model.t_cold
     await hass.services.async_call(
         DOMAIN,
@@ -259,32 +311,94 @@ async def test_shower_runs_cold_scenario(hass: HomeAssistant, freezer) -> None:
         },
         blocking=True,
     )
-    assert estimator.model.cold_fraction == pytest.approx(0.72)
+    fraction = await draw_one_litre_and_wait(rig)
+    assert fraction == pytest.approx(0.72, abs=0.01)
     assert rig.read("sensor", "usable_fraction") == "85.0"
     assert float(rig.read("sensor", "tank_litres")) > 0
-    await hass.services.async_call(
-        "button",
-        "press",
-        {"entity_id": entity_id(hass, rig.entry, "button", "shower_ran_cold")},
-        blocking=True,
-    )
-    assert rig.read("sensor", "usable_fraction") == "72.0"
+    await press_hot_water_ran_out(rig)
+    assert rig.read("sensor", "usable_fraction") == str(round(fraction * 100, 1))
     assert rig.read("sensor", "tank_litres") == "0"
     assert rig.read("sensor", "percent_charged") == "0"
     state = hass.states.get(entity_id(hass, rig.entry, "sensor", "usable_fraction"))
     assert state is not None
     assert state.attributes["source"] == "learned"
+    assert not shown
+    (event,) = [
+        e for e in estimator.model.events if e.kind == EventKind.HOT_WATER_RAN_OUT
+    ]
+    assert event.change["result"] == "accepted"
+    assert event.change["cold_fraction"] == pytest.approx(fraction)
+
+
+async def test_a_rejected_press_changes_nothing_and_says_why(
+    hass: HomeAssistant, freezer
+) -> None:
+    """With no draw in the last 20 minutes, a press shows a notification and changes nothing."""
+    rig = await Rig.start(hass, freezer, states={TANK: "20.0"})
+    estimator = rig.entry.runtime_data
+    shown = notifications(hass)
+    await draw_one_litre_and_wait(rig, minutes=25)
+    model_before = estimator.model.to_dict()
+    calibration_before = estimator.calibrator.to_dict()
+    await press_hot_water_ran_out(rig)
+    assert estimator.model.to_dict() == model_before
+    assert estimator.calibrator.to_dict() == calibration_before
+    assert rig.read("sensor", "usable_fraction") == "85.0"
+    (notification,) = shown.values()
+    assert notification["notification_id"] == (
+        f"{DOMAIN}_{rig.entry.entry_id}_hot_water_ran_out"
+    )
+    assert notification["title"] == "Hot water"
+    assert notification["message"] == (
+        "Ignored: no water was drawn in the last 20 minutes."
+    )
+    (event,) = [
+        e for e in estimator.model.events if e.kind == EventKind.HOT_WATER_RAN_OUT
+    ]
+    assert event.change == {
+        "result": "rejected",
+        "reason": "no_recent_draw",
+        "minutes": 20,
+    }
+
+
+async def test_a_press_with_the_sensor_still_hot_names_the_reading(
+    hass: HomeAssistant, freezer
+) -> None:
+    """The notification says what the tank sensor read when the last draw ended."""
+    rig = await Rig.start(hass, freezer, states={TANK: "55.8"})
+    shown = notifications(hass)
+    await draw_one_litre_and_wait(rig)
+    await press_hot_water_ran_out(rig)
+    (notification,) = shown.values()
+    assert notification["message"] == (
+        "Ignored: the tank sensor still read 55.8 C when the last draw ended, "
+        "so the tank was not empty."
+    )
+    assert rig.read("sensor", "usable_fraction") == "85.0"
+
+
+async def test_repeated_rejected_presses_replace_the_notification(
+    hass: HomeAssistant, freezer
+) -> None:
+    """One notification per tank: a second rejected press replaces the first, an accepted one removes it."""
+    rig = await Rig.start(hass, freezer, states={TANK: "20.0"})
+    shown = notifications(hass)
+    await press_hot_water_ran_out(rig)
+    await press_hot_water_ran_out(rig)
+    assert len(shown) == 1
+    await part_drawn(rig)
+    await draw_one_litre_and_wait(rig)
+    await press_hot_water_ran_out(rig)
+    assert not shown
 
 
 async def test_the_button_value_is_saved(hass: HomeAssistant, freezer) -> None:
     """The usable fraction from the button survives a reload."""
     rig = await Rig.start(hass, freezer, states={TANK: "20.0"})
-    await hass.services.async_call(
-        "button",
-        "press",
-        {"entity_id": entity_id(hass, rig.entry, "button", "shower_ran_cold")},
-        blocking=True,
-    )
+    await part_drawn(rig)
+    await draw_one_litre_and_wait(rig)
+    await press_hot_water_ran_out(rig)
     learned = rig.read("sensor", "usable_fraction")
     assert learned != "85.0"
     assert await hass.config_entries.async_reload(rig.entry.entry_id)
@@ -479,10 +593,13 @@ async def test_a_button_press_during_a_fit_is_kept(
     freezer.move_to(WEEK_END)
     with install(hass):
         entry = await start_while_fitting(hass, gate)
+        for reading in ("100.000", "100.001"):
+            hass.states.async_set(METER, reading, {"unit_of_measurement": "m\u00b3"})
+            await hass.async_block_till_done()
         await hass.services.async_call(
             "button",
             "press",
-            {"entity_id": entity_id(hass, entry, "button", "shower_ran_cold")},
+            {"entity_id": entity_id(hass, entry, "button", "hot_water_ran_out")},
             blocking=True,
         )
         assert value(hass, entry, "sensor", "usable_fraction") == "50.0"
@@ -717,3 +834,11 @@ async def test_after_a_week_of_use(hass: HomeAssistant, freezer) -> None:
         sources.add(expected)
     assert "learned" in sources
     assert "option" in sources
+
+
+def test_a_text_with_an_unknown_placeholder_still_formats() -> None:
+    """A translation that names a value the press does not give keeps the placeholder."""
+    text = "Ignored: {sensor} C and {other}."
+    assert text.format_map(_Tolerant({"sensor": "55.8"})) == (
+        "Ignored: 55.8 C and {other}."
+    )

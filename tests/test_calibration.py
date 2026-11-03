@@ -13,6 +13,7 @@ from custom_components.hot_water_tank_estimator.calibration import (
     SENSOR_START,
     Calibrator,
     Closure,
+    PressResult,
     bounded_step,
     charge_error,
     fit_closures,
@@ -26,6 +27,7 @@ from custom_components.hot_water_tank_estimator.model import (
 )
 
 T0 = datetime(2026, 10, 31, 12, 0, tzinfo=UTC)
+SECOND = timedelta(seconds=1)
 MINUTE = timedelta(minutes=1)
 HOUR = timedelta(hours=1)
 VOLUME = 281.0
@@ -113,6 +115,30 @@ class Rig:
             self.call(end, "on_flow_return", charge, charge)
         self.call(end, "on_heating", False)
         return end
+
+
+def finish_draw(rig: Rig, at: datetime, fraction: float) -> None:
+    """Draw 1 L at `at`, leaving the cold fraction at `fraction` (tank charged at its T_ch).
+
+    A probe draw 5 minutes before measures the drop of 1 L, so that the start can be set to
+    compensate. The session of the draw is over 60 s later.
+    """
+    rig.call(at - 5 * MINUTE - SECOND, "tick")
+    probe = rig.model.t_avg
+    rig.draw(at - 5 * MINUTE, 1.0)
+    drop = probe - rig.model.t_avg
+    span = rig.model.t_ch - rig.model.t_cold
+    rig.model.set_state(
+        at - MINUTE, t_avg=rig.model.t_ch - fraction * span + drop, t_ch=rig.model.t_ch
+    )
+    rig.draw(at, 1.0)
+    assert rig.model.cold_fraction == pytest.approx(fraction, abs=1e-3)
+
+
+def press(rig: Rig, now: datetime) -> PressResult:
+    """Press "Hot water ran out" at `now`, as the runtime does: advance the model first."""
+    rig.call(now, "tick")
+    return rig.cal.hot_water_ran_out(rig.model, now)
 
 
 def make_closure(**overrides: object) -> Closure:
@@ -427,12 +453,12 @@ def test_an_ambient_outage_does_not_exclude_a_closure() -> None:
     assert rig.cal.closures[-1].status == CLOSURE
 
 
-def test_the_cold_shower_button_excludes_the_interval() -> None:
+def test_hot_water_ran_out_excludes_the_interval() -> None:
     """The reset of the model by the button makes the interval, and the one it starts, no closure."""
     rig = Rig(t_avg=57.0)
     end = rig.run(T0 + HOUR, 60, 5.0, 55.0)
-    rig.call(end + HOUR, "on_tank_sensor", 55.0)
-    rig.cal.cold_shower(rig.model, end + 2 * HOUR)
+    finish_draw(rig, end + 2 * HOUR, 0.6)
+    press(rig, end + 2 * HOUR + 3 * MINUTE)
     rig.run(end + 5 * HOUR, 60, 8.0, 55.0)
     rig.cal.flush()
     assert rig.cal.closures[-1].status == EXCLUDED
@@ -886,8 +912,8 @@ def test_the_waiting_closure_survives_a_restart() -> None:
 def test_the_reset_marker_survives_a_restart() -> None:
     """After a button reset, the next interval is still excluded once the state is restored."""
     rig = Rig()
-    rig.call(T0 + HOUR, "on_tank_sensor", 55.0)
-    rig.cal.cold_shower(rig.model, T0 + 2 * HOUR)
+    finish_draw(rig, T0 + 2 * HOUR, 0.6)
+    press(rig, T0 + 2 * HOUR + 3 * MINUTE)
     restored = Calibrator(make_options())
     restored.restore(json.loads(json.dumps(rig.cal.to_dict())))
     rig.cal = restored
@@ -899,35 +925,198 @@ def test_the_reset_marker_survives_a_restart() -> None:
 def test_the_button_is_limited_to_the_bounds_of_the_usable_fraction() -> None:
     """A cold fraction under 0.5 gives 0.5, one over 0.98 gives 0.98."""
     low = Rig(t_avg=57.0, loss_coefficient=0.0, cold_mean=14.0)
-    low.model.set_state(T0, t_avg=57.0 - 0.3 * 43)
-    low.cal.cold_shower(low.model, T0 + MINUTE)
+    finish_draw(low, T0 + 6 * MINUTE, 0.3)
+    result = press(low, T0 + 9 * MINUTE)
     assert low.model.options.usable_fraction == pytest.approx(0.5)
+    # The model is emptied at the end of the draw: the drop covers the 0.2 under the bound.
+    assert result.drop == pytest.approx(0.2 * 43.0)
     assert low.model.tank_litres_exact == pytest.approx(0.0)
     high = Rig(t_avg=57.0, loss_coefficient=0.0, cold_mean=14.0)
-    high.model.set_state(T0, t_avg=0.0)
+    finish_draw(high, T0 + 6 * MINUTE, 1.0)
     assert high.model.cold_fraction == pytest.approx(1.0)
-    high.cal.cold_shower(high.model, T0 + MINUTE)
+    press(high, T0 + 9 * MINUTE)
     assert high.model.options.usable_fraction == pytest.approx(0.98)
 
 
-def test_a_locked_usable_fraction_is_not_learned_by_the_button() -> None:
-    """The button still empties the model, but a locked fraction stays."""
-    rig = Rig(t_avg=57.0, loss_coefficient=0.0, cold_mean=14.0)
-    rig.cal.set_locks({"usable_fraction"})
-    rig.model.set_state(T0, t_avg=57.0 - 0.72 * 43)
-    rig.cal.cold_shower(rig.model, T0 + MINUTE)
-    assert rig.model.options.usable_fraction == 0.85
-    assert rig.model.tank_litres_exact == pytest.approx(0.0)
-
-
 def test_shower_runs_cold_early() -> None:
-    """At a cold fraction of 0.72 the usable fraction becomes 0.72 and the tank water is 0 L."""
+    """A draw that ended 8 minutes ago at a cold fraction of 0.72 makes the usable fraction 0.72."""
     rig = Rig(t_avg=57.0, loss_coefficient=0.0, cold_mean=14.0)
-    rig.model.set_state(T0, t_avg=57.0 - 0.72 * 43)
-    assert rig.model.cold_fraction == pytest.approx(0.72)
+    finish_draw(rig, T0 + 6 * MINUTE, 0.72)
     assert rig.model.options.usable_fraction == 0.85
-    rig.cal.cold_shower(rig.model, T0 + MINUTE)
+    assert rig.model.tank_litres_exact == pytest.approx(281.0 * (0.85 - 0.72))
+    before = rig.model.t_avg
+    result = press(rig, T0 + 14 * MINUTE)
+    assert result.accepted
     assert rig.model.options.usable_fraction == pytest.approx(0.72)
     assert rig.cal.source_of("usable_fraction") == "learned"
     assert rig.model.outputs.tank_litres == 0
     assert rig.model.tank_litres_exact == pytest.approx(0.0)
+    # The learned fraction alone empties the tank: T_avg does not move.
+    assert rig.model.t_avg == pytest.approx(before)
+    assert result.drop == 0.0
+
+
+def test_a_tap_runs_cold() -> None:
+    """A tap draw that ended at a cold fraction of 0.80 is accepted when pressed within 20 minutes."""
+    rig = Rig(t_avg=57.0, loss_coefficient=0.0, cold_mean=14.0)
+    finish_draw(rig, T0 + 6 * MINUTE, 0.80)
+    assert not rig.model.shower_detected
+    result = press(rig, T0 + 6 * MINUTE + 19 * MINUTE)
+    assert result.accepted
+    assert rig.model.options.usable_fraction == pytest.approx(0.80)
+
+
+def test_heat_added_since_the_draw() -> None:
+    """The heat added after a draw at 0.75 stays: the press leaves T_avg where it is."""
+    rig = Rig(t_avg=57.0, loss_coefficient=0.0, cold_mean=14.0)
+    finish_draw(rig, T0 + 6 * MINUTE, 0.75)
+    assert rig.model.tank_litres_exact == pytest.approx(28.1)
+    rig.call(T0 + 9 * MINUTE, "on_heating", True)
+    rig.kwh += 1.5 * CAPACITY
+    rig.call(T0 + 10 * MINUTE, "on_energy", rig.kwh)
+    assert rig.model.cold_fraction == pytest.approx(0.75 - 1.5 / 43.0)
+    before = rig.model.t_avg
+    result = press(rig, T0 + 11 * MINUTE)
+    assert result.accepted
+    assert rig.model.options.usable_fraction == pytest.approx(0.75)
+    assert rig.model.t_avg == pytest.approx(before)
+    # 28.1 L were left at the draw end; the 1.5 K of heat are 1.5 / 43 of the tank.
+    assert rig.model.tank_litres_exact == pytest.approx(281.0 * 1.5 / 43.0)
+
+
+def test_locked_usable_fraction() -> None:
+    """A locked 0.85 stays, and T_avg falls so that the tank water was 0 at the end of the draw."""
+    rig = Rig(t_avg=57.0, loss_coefficient=0.0, cold_mean=14.0)
+    rig.cal.set_locks({"usable_fraction"})
+    finish_draw(rig, T0 + 6 * MINUTE, 0.78)
+    before = rig.model.t_avg
+    result = press(rig, T0 + 9 * MINUTE)
+    assert result.accepted
+    assert rig.model.options.usable_fraction == 0.85
+    assert rig.cal.source_of("usable_fraction") == "locked"
+    assert result.drop == pytest.approx(0.07 * 43.0)
+    assert rig.model.t_avg == pytest.approx(before - 0.07 * 43.0)
+    assert rig.model.tank_litres_exact == pytest.approx(0.0)
+
+
+def test_heat_added_since_the_draw_with_a_locked_fraction() -> None:
+    """With a locked 0.85, the drop is applied to the current T_avg and the added heat stays."""
+    rig = Rig(t_avg=57.0, loss_coefficient=0.0, cold_mean=14.0)
+    rig.cal.set_locks({"usable_fraction"})
+    finish_draw(rig, T0 + 6 * MINUTE, 0.75)
+    rig.call(T0 + 9 * MINUTE, "on_heating", True)
+    rig.kwh += 1.5 * CAPACITY
+    rig.call(T0 + 10 * MINUTE, "on_energy", rig.kwh)
+    press(rig, T0 + 11 * MINUTE)
+    assert rig.model.tank_litres_exact == pytest.approx(281.0 * 1.5 / 43.0)
+
+
+def test_no_recent_draw() -> None:
+    """A draw that ended 45 minutes ago is too old: the press changes nothing."""
+    rig = Rig(t_avg=57.0, loss_coefficient=0.0, cold_mean=14.0)
+    finish_draw(rig, T0 + 6 * MINUTE, 0.72)
+    now = T0 + 6 * MINUTE + 45 * MINUTE
+    rig.call(now, "tick")
+    model_before = rig.model.to_dict()
+    calibration_before = rig.cal.to_dict()
+    result = rig.cal.hot_water_ran_out(rig.model, now)
+    assert not result.accepted
+    assert result.reason == "no_recent_draw"
+    assert result.values == {"minutes": 20}
+    assert rig.model.to_dict() == model_before
+    assert rig.cal.to_dict() == calibration_before
+    assert rig.model.options.usable_fraction == 0.85
+
+
+def test_no_draw_at_all() -> None:
+    """Without any draw there is nothing to apply the press to."""
+    rig = Rig(t_avg=57.0)
+    result = rig.cal.hot_water_ran_out(rig.model, T0 + MINUTE)
+    assert not result.accepted
+    assert result.reason == "no_recent_draw"
+
+
+def test_sensor_still_hot() -> None:
+    """A tank sensor at 55.8 C at the draw end, with T_ch 57 C and tolerance 1.5 K, rejects the press."""
+    rig = Rig(t_avg=57.0, loss_coefficient=0.0, cold_mean=14.0)
+    rig.call(T0 + MINUTE, "on_tank_sensor", 55.8)
+    finish_draw(rig, T0 + 7 * MINUTE, 0.05)
+    now = T0 + 12 * MINUTE
+    rig.call(now, "tick")
+    model_before = rig.model.to_dict()
+    calibration_before = rig.cal.to_dict()
+    result = rig.cal.hot_water_ran_out(rig.model, now)
+    assert not result.accepted
+    assert result.reason == "sensor_hot"
+    assert result.values["sensor"] == 55.8
+    assert result.values["t_ch"] == pytest.approx(57.0)
+    assert result.values["tolerance"] == 1.5
+    assert rig.model.to_dict() == model_before
+    assert rig.cal.to_dict() == calibration_before
+
+
+def test_a_sensor_below_the_threshold_is_accepted() -> None:
+    """A sensor reading well under T_ch does not reject the press."""
+    rig = Rig(t_avg=57.0, loss_coefficient=0.0, cold_mean=14.0)
+    rig.call(T0 + MINUTE, "on_tank_sensor", 30.0)
+    finish_draw(rig, T0 + 7 * MINUTE, 0.6)
+    assert press(rig, T0 + 12 * MINUTE).accepted
+
+
+def test_draw_still_running() -> None:
+    """A press during a draw applies to the cold fraction at the moment of the press."""
+    rig = Rig(t_avg=57.0, loss_coefficient=0.0, cold_mean=14.0)
+    rig.draw(T0 + MINUTE, 1.0)
+    rig.draw(T0 + MINUTE + 20 * SECOND, 30.0)
+    assert not rig.model.shower_detected
+    fraction = rig.model.cold_fraction
+    now = T0 + MINUTE + 25 * SECOND
+    record = rig.model.last_draw_end(now)
+    assert record is not None
+    assert record.time == now
+    result = rig.cal.hot_water_ran_out(rig.model, now)
+    assert result.accepted
+    assert rig.model.options.usable_fraction == pytest.approx(
+        min(max(fraction, 0.5), 0.98)
+    )
+    assert rig.model.tank_litres_exact == pytest.approx(0.0)
+
+
+def test_charge_since_the_draw() -> None:
+    """A locked 0.85, a draw that ended at 0.78 and a charge after it: only u is kept, T_avg stays charged."""
+    rig = Rig(t_avg=57.0, loss_coefficient=0.0, cold_mean=14.0)
+    rig.cal.set_locks({"usable_fraction"})
+    finish_draw(rig, T0 + 6 * MINUTE, 0.78)
+    end = rig.run(T0 + 8 * MINUTE, 10, 5.0, 55.0)
+    assert rig.model.t_avg == 55.0
+    result = press(rig, end + 2 * MINUTE)
+    assert result.accepted
+    assert result.drop == 0.0
+    assert rig.model.options.usable_fraction == 0.85
+    assert rig.model.t_avg == 55.0
+
+
+def test_a_second_press_on_the_same_draw_applies_the_drop_once() -> None:
+    """With u locked, the first press applies D; the second leaves T_avg alone."""
+    rig = Rig(t_avg=57.0, loss_coefficient=0.0, cold_mean=14.0)
+    rig.cal.set_locks({"usable_fraction"})
+    finish_draw(rig, T0 + 6 * MINUTE, 0.78)
+    first = press(rig, T0 + 9 * MINUTE)
+    after_first = rig.model.t_avg
+    second = press(rig, T0 + 10 * MINUTE)
+    assert first.drop == pytest.approx(0.07 * 43.0)
+    assert second.accepted
+    assert second.drop == 0.0
+    assert rig.model.t_avg == pytest.approx(after_first)
+
+
+def test_a_set_tank_state_since_the_draw_skips_the_drop() -> None:
+    """The set_tank_state action replaced T_avg after the draw: the press only learns u."""
+    rig = Rig(t_avg=57.0, loss_coefficient=0.0, cold_mean=14.0)
+    rig.cal.set_locks({"usable_fraction"})
+    finish_draw(rig, T0 + 6 * MINUTE, 0.78)
+    rig.model.set_state(T0 + 8 * MINUTE, t_avg=40.0)
+    result = press(rig, T0 + 9 * MINUTE)
+    assert result.accepted
+    assert result.drop == 0.0
+    assert rig.model.t_avg == pytest.approx(40.0)

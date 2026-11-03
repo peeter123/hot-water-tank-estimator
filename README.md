@@ -23,7 +23,7 @@ It provides:
 - the charged temperature and the estimated tank average temperature;
 - the cold water temperature used;
 - the standing heat loss of the tank, in W;
-- a shower detected binary sensor and a "Shower ran cold" button;
+- a shower detected binary sensor and a "Hot water ran out" button;
 - calibration diagnostics.
 
 ## What it is for
@@ -157,7 +157,7 @@ Each tank has one device with these entities. All names are translated.
 | Cold water temperature | C | The cold water temperature in use: the sensor, or the seasonal curve. |
 | Heat loss | W | The standing heat loss of the tank: the loss coefficient times the tank's heat capacity times the excess of the tank average over the ambient temperature in use. 0 W at or below the ambient temperature. |
 | Shower detected | | On while a shower or bath is detected. Unavailable when there are no humidity sensors and the long draw rule is off. |
-| Shower ran cold | | Button. Press it when a shower ran cold earlier than predicted. |
+| Hot water ran out | | Button. Press it when hot water ran out earlier than predicted. See "Tuning". |
 
 The calibration diagnostic sensors are listed under "Diagnostic sensors" below.
 
@@ -169,9 +169,9 @@ remaining shows less than the tank volume. Only the usable fraction of the tank 
   before all the hot water has been replaced;
 - with a heating coil low in the tank, the water below the coil is colder and cannot be drawn hot.
 
-The usable fraction covers both. It is a setting that is learned from the "Shower ran cold" button, not measured. Charge
-level compares the usable tank with the last charge, so it is 100 % right after any charge, whatever the heater reached.
-The litres show the absolute amount.
+The usable fraction covers both. It is a setting that is learned from the "Hot water ran out" button, not measured.
+Charge level compares the usable tank with the last charge, so it is 100 % right after any charge, whatever the heater
+reached. The litres show the absolute amount.
 
 ## Supported heat sources
 
@@ -206,7 +206,8 @@ The integration fits its parameters to your tank, so the defaults are only a sta
   background after the reload, because the loss coefficient fitted against a sensor is not the one fitted against
   the fixed ambient temperature. The tank average and the charged temperature are kept.
 - The first fall of the tank sensor after a charge gives the thermocline width.
-- The "Shower ran cold" button sets the usable fraction to the current cold fraction and empties the model.
+- The "Hot water ran out" button sets the usable fraction to the cold fraction at the end of the last draw and
+  empties the model there (see "Tuning").
 - A locked parameter keeps its value from the options and is never learned. Removing a lock discards what was
   learned before it.
 
@@ -272,8 +273,17 @@ not at 20 C biases the loss coefficient and the heat loss a little.
 
 The defaults are a start, and the fit learns most values. Three settings decide how well the estimate matches your
 showers:
-- **The shower ran cold earlier than predicted:** press the "Shower ran cold" button right then. It sets the usable
-  fraction to the current cold fraction. Check the sensor height first if the charge errors are biased.
+- **Hot water ran out earlier than predicted:** a shower or a tap that was hot ran cold. Press the "Hot water ran
+  out" button when you can, up to 20 minutes later. It applies to the end of the last draw (a draw that is still
+  running counts as ending now), sets the usable fraction to the cold fraction then, and empties the model at that
+  moment. Heat added since stays. If the tank was charged or set by hand after that draw, the tank is not lowered
+  and only the usable fraction is learned (nothing, when it is locked). A tap counts as well as a shower. The model
+  treats "cold" the same for both, though a tap is cold when the water at the tap is, and a shower with a
+  thermostatic mixer turns cold once the hot water
+  falls below the shower temperature; the learned fraction absorbs the difference. A press is ignored, with a
+  notification that says why, when no water was drawn in the last 20 minutes, or when the tank sensor still read
+  within the sensor tolerance of the charged temperature when the last draw ended: then the cold water at the outlet
+  was cold pipe water and not an empty tank. Check the sensor height first if the charge errors are biased.
 - **Usable fraction** (Options): lower it when showers run cold with litres left, raise it when water remains after
   the estimate reached zero. The button does this for you.
 - **Thermocline width** (Options): a wide layer makes the hot water run out more gradually. It is learned from the

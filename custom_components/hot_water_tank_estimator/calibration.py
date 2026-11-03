@@ -85,6 +85,32 @@ REASON_SHORT_RUN = "short_run"
 REASON_UNAVAILABLE = "source_unavailable"
 
 
+# The "Hot water ran out" button applies to a draw that ended at most this long ago.
+PRESS_WINDOW = timedelta(minutes=20)
+# Why a press is rejected.
+REJECT_NO_RECENT_DRAW = "no_recent_draw"
+REJECT_SENSOR_HOT = "sensor_hot"
+
+
+@dataclass(frozen=True)
+class PressResult:
+    """The outcome of a "Hot water ran out" press.
+
+    Attributes:
+        accepted: Whether the press changed the model and the calibration.
+        reason: Why it was rejected (`REJECT_*`), None when accepted.
+        values: The figures behind the outcome, for the event log and the notification:
+            the window in minutes, or the sensor reading, T_ch and tolerance, or the accepted
+            press's cold fraction, usable fraction in use and drop.
+        drop: The T_avg drop in K that the press applied, 0 when rejected.
+    """
+
+    accepted: bool
+    reason: str | None = None
+    values: dict[str, Any] = field(default_factory=dict)
+    drop: float = 0.0
+
+
 def heat_capacity(volume: float) -> float:
     """Return C = 1.163 * V / 1000 in kWh per K for a tank of `volume` litres."""
     return WATER_HEAT_CAPACITY_WH * volume / 1000
@@ -743,35 +769,78 @@ class Calibrator:
                     sum(self.width_estimates) / len(self.width_estimates),
                 )
 
-    # ----- the cold shower button ---------------------------------------------------------
+    # ----- the "Hot water ran out" button -------------------------------------------------
 
-    def cold_shower(self, model: TankModel, now: datetime) -> list[ModelEvent]:
-        """Learn the usable fraction from a shower that ran cold, and empty the model.
+    def hot_water_ran_out(self, model: TankModel, now: datetime) -> PressResult:
+        """Learn the usable fraction from hot water that ran out, and empty the model.
 
-        The usable fraction becomes the model's cold fraction now, within its bounds (the user
-        observed it, so the step limit of learned updates does not apply). The model is then set
-        so that its tank water is 0. The interval that contains the reset is not a closure.
-        The method observes the events of that reset itself, so the caller must not pass them
-        to `observe` again.
+        The press applies to the end of the last draw session (a running session counts as
+        ending now), not to the moment of the press. It is rejected, and changes nothing, when
+        no session ended within `PRESS_WINDOW`, or when the tank sensor still read hot at the
+        end of that draw. Otherwise the usable fraction becomes the cold fraction at the end of
+        the draw, within its bounds (the user observed it, so the step limit of learned updates
+        does not apply), unless it is locked. T_avg then drops by the amount that makes the tank
+        water 0 at that moment, applied to the current T_avg, so heat added since stays. The
+        interval that contains the reset is not a closure. The method observes the events of
+        that reset itself, so the caller must not pass them to `observe` again.
 
         Args:
-            model: The model.
+            model: The model, advanced to `now`.
             now: The time of the button press.
 
         Returns:
-            The events of setting the model.
+            The outcome: accepted with the figures, or rejected with the reason and values.
         """
+        record = model.last_draw_end(now)
+        if record is None or now - record.time > PRESS_WINDOW:
+            return PressResult(
+                accepted=False,
+                reason=REJECT_NO_RECENT_DRAW,
+                values={"minutes": int(PRESS_WINDOW.total_seconds() // 60)},
+            )
+        tolerance = model.options.sensor_tolerance
+        if (
+            record.tank_sensor is not None
+            and record.tank_sensor >= record.t_ch - tolerance
+        ):
+            return PressResult(
+                accepted=False,
+                reason=REJECT_SENSOR_HOT,
+                values={
+                    "sensor": record.tank_sensor,
+                    "t_ch": record.t_ch,
+                    "tolerance": tolerance,
+                },
+            )
+        # Nothing has changed yet: the previous usable fraction and its source are still
+        # readable here, for an undo record. The set_state below is a manual reset, not a
+        # heating-run charge: the undo of group 3 must not count it as "the next charge".
         if USABLE_FRACTION not in self.locks:
             low, high = PARAMETER_BOUNDS[USABLE_FRACTION]
-            fraction = min(max(model.cold_fraction, low), high)
-            self.values[USABLE_FRACTION] = fraction
+            self.values[USABLE_FRACTION] = min(max(record.cold_fraction, low), high)
             self.sources[USABLE_FRACTION] = SOURCE_LEARNED
         model.set_options(self.options)
         usable = model.options.usable_fraction
-        t_avg = model.t_ch - usable * (model.t_ch - model.t_cold)
-        events = model.set_state(now, t_avg=t_avg)
+        # A charge, a set_tank_state or an earlier press since the draw end replaced the T_avg
+        # that D would correct: only u is learned then.
+        if model.reset_since(record.time):
+            drop = 0.0
+        else:
+            drop = max(0.0, usable - record.cold_fraction) * (
+                record.t_ch - record.t_cold
+            )
+        events = model.set_state(now, t_avg=model.t_avg - drop)
         self.observe(model, events, now)
-        return events
+        return PressResult(
+            accepted=True,
+            values={
+                "draw_end": record.time.isoformat(),
+                "cold_fraction": record.cold_fraction,
+                "usable_fraction": usable,
+                "drop": drop,
+            },
+            drop=drop,
+        )
 
     # ----- persistence --------------------------------------------------------------------
 
@@ -817,9 +886,13 @@ __all__ = [
     "CLOSURE",
     "EXCLUDED",
     "PARAMETER_BOUNDS",
+    "PRESS_WINDOW",
+    "REJECT_NO_RECENT_DRAW",
+    "REJECT_SENSOR_HOT",
     "SENSOR_START",
     "Calibrator",
     "Closure",
+    "PressResult",
     "bounded_step",
     "charge_error",
     "fit_closures",

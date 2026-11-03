@@ -99,13 +99,18 @@ moment, and apply that drop to the current T_avg, so heat added since that momen
 #### Scenario: Heat added since the draw
 - **WHEN** the last draw ended at a cold fraction of 0.75 with tank water remaining 28 L, and a heating run has
   added 1.5 K to T_avg since
-- **THEN** a press sets the usable fraction to 0.75, and T_avg is lowered by the drop that removed those 28 L, so the
-  1.5 K added since stays
+- **THEN** a press sets the usable fraction to 0.75, which removes those 28 L with a drop D of 0, and the 1.5 K added
+  since stays: tank water remaining is `V * 1.5 / (T_ch - T_cold)`
 
 #### Scenario: Locked usable fraction
 - **WHEN** the usable fraction is locked at 0.85 and the last draw ended at a cold fraction of 0.78
 - **THEN** a press keeps the usable fraction at 0.85, and lowers T_avg so that tank water remaining was 0 at the end
   of that draw
+
+#### Scenario: Charge since the draw
+- **WHEN** the usable fraction is locked at 0.85, the last draw ended at a cold fraction of 0.78, and a heating run
+  ended after it, so the tank is charged
+- **THEN** a press keeps the usable fraction at 0.85 and leaves T_avg at its charged value
 
 ### Requirement: Implausible presses are rejected with a notification
 A press of "Hot water ran out" SHALL be rejected when no draw session is running or has ended within the last 20

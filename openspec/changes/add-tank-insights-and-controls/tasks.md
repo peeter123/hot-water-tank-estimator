@@ -91,16 +91,29 @@ Applies to every group:
 
 ## 2. "Hot water ran out" and its checks
 
-- [ ] 2.1 Report draw session ends from `classification.py`, and keep the `DrawEnd` record in the model (design D3,
+- [x] 2.1 Report draw session ends from `classification.py`, and keep the `DrawEnd` record in the model (design D3,
   the draw-classification requirement "The end of the last draw is kept"). Save it in the store. Verify:
   - a test for the scenario "Draw ends";
   - a test that a running session yields a record at the current state;
   - a test that a store without `draw_end` loads.
-- [ ] 2.2 Replace `Calibrator.cold_shower` with `hot_water_ran_out` (design D4): the 20-minute window, the
+  - Done 2026-11-03: `DrawClassifier.take_session_end()` reports the end of a session once (the time of its last
+    increase). The model keeps `last_draw` (the `DrawEnd` after every draw increase, so the record has the state at the
+    end and not the state when the session gap was noticed) and promotes it to `draw_end` on that report; both are saved
+    (`draw_end`, `last_draw`) and default to None on load. `TankModel.last_draw_end(now)` returns a record built now
+    while a session runs. New `EventKind.HOT_WATER_RAN_OUT`; `log_event` takes an optional `before`.
+- [x] 2.2 Replace `Calibrator.cold_shower` with `hot_water_ran_out` (design D4): the 20-minute window, the
   `sensor_hot` check, learning from f at the draw end, the drop D applied now, and the lock. Verify: tests for the
   calibration scenarios "Shower runs cold early", "A tap runs cold", "Heat added since the draw", "Locked usable
-  fraction", "No recent draw", "Sensor still hot" and "Draw still running".
-- [ ] 2.3 Rename the button in the runtime:
+  fraction", "Charge since the draw", "No recent draw", "Sensor still hot" and "Draw still running".
+  - Done 2026-11-03: `Calibrator.hot_water_ran_out(model, now)` returns a `PressResult` (accepted, reason, values,
+    drop) with reasons `no_recent_draw` and `sensor_hot`; the window is `PRESS_WINDOW`. The undo record (step 5) is
+    left to group 3: the previous u and its source are still readable at the marked place before they change. The
+    "Heat added since the draw" scenario holds with u learned (D is 0, T_avg stays, and the 1.5 K of heat leave 9.8 L);
+    a second test with a locked u checks that the drop D is applied to the current T_avg and gives the same litres.
+    D is skipped when T_avg was reset after the draw end (a charge, `set_tank_state` or an earlier press): the model
+    saves `last_reset` (time of the last T_avg replacement, default None on load) and `reset_since(time)` tells the
+    calibrator. Tests: "Charge since the draw", a second press, and a `set_tank_state` after the draw.
+- [x] 2.3 Rename the button in the runtime:
   - key, translation key and name become `hot_water_ran_out` / "Hot water ran out", with a new icon translation;
   - a rejected press shows a persistent notification per tank, with a fixed notification ID and translated text
     that names the reason and the values;
@@ -108,10 +121,20 @@ Applies to every group:
 
   Verify: runtime tests for an accepted press, a rejected press (the notification text and that nothing changed),
   and the integration-setup scenario "Rejected press in the diagnostics".
-- [ ] 2.4 Replace "Shower ran cold" with "Hot water ran out" everywhere in the README and `docs/model.md`: the press
+  - Done 2026-11-03: key, translation key and icon `hot_water_ran_out`; `TankEstimator.async_hot_water_ran_out` ticks
+    the model, runs the calibrator, logs the `hot_water_ran_out` event (`result`, `reason`, the values) and the
+    calibration event with trigger `hot_water_ran_out`. A rejection shows a persistent notification with ID
+    `hot_water_tank_estimator_<entry_id>_hot_water_ran_out` and the tank name as title; an accepted press dismisses it.
+    The text is in the `exceptions` translation category (`press_ignored_no_recent_draw`, `press_ignored_sensor_hot`),
+    loaded with `async_get_translations` in the language of Home Assistant, because hassfest accepts no other
+    category for message text.
+- [x] 2.4 Replace "Shower ran cold" with "Hot water ran out" everywhere in the README and `docs/model.md`: the press
   timing, the checks, a tap counting as well, and how "cold" differs a little between a tap and a shower. Remove
   the old text. Verify: a search finds no "Shower ran cold" outside `openspec/changes/add-hot-water-estimator/`, and
   `python scripts/lint.py`.
+  - Done 2026-11-03: README ("Tuning", entity table, learning list) and `docs/model.md` ("Usable fraction": the four
+    steps, the tap versus shower note); no "Shower ran cold" left outside `openspec/`. `python scripts/lint.py` and
+    `--hassfest` are clean.
 
 ## 3. Undo
 
@@ -171,7 +194,8 @@ Applies to every group:
   - the new entities exist: heat loss, both buttons and the shower flow number;
   - the system log has no entries for the integration.
 
-  Record the result in `private/installation.md`.
+  Remove the old "Shower ran cold" button's registry entry, which the rename leaves behind as an unavailable entity
+  (design, Risks). Verify that it is gone. Record the result in `private/installation.md`.
 - [ ] 5.2 With authorization, add the ambient sensor from `private/installation.md` in the options. Verify:
   - the recalibration runs;
   - k stays within its bounds, and the quiet-window estimates are compared with those from before;

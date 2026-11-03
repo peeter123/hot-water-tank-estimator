@@ -70,6 +70,7 @@ class EventKind(StrEnum):
     LOSS = "loss"
     SENSOR_BOUND = "sensor_bound"
     CALIBRATION = "calibration"
+    HOT_WATER_RAN_OUT = "hot_water_ran_out"
 
 
 @dataclass(frozen=True)
@@ -106,6 +107,55 @@ class ModelEvent:
             "t_ch_before": self.t_ch_before,
             "t_ch_after": self.t_ch_after,
         }
+
+
+@dataclass(frozen=True)
+class DrawEnd:
+    """The state of the tank at the end of a draw session.
+
+    Attributes:
+        time: When the session ended (the time of its last increase).
+        cold_fraction: The cold fraction f at that moment.
+        t_ch: The charged temperature at that moment, in C.
+        t_avg: The tank average at that moment, in C.
+        t_cold: The cold water temperature at that moment, in C.
+        tank_sensor: The tank sensor reading at that moment in C, None when unavailable.
+        usable_fraction: The usable fraction in use at that moment.
+    """
+
+    time: datetime
+    cold_fraction: float
+    t_ch: float
+    t_avg: float
+    t_cold: float
+    tank_sensor: float | None
+    usable_fraction: float
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return the record as a JSON-compatible dict."""
+        return {
+            "time": self.time.isoformat(),
+            "cold_fraction": self.cold_fraction,
+            "t_ch": self.t_ch,
+            "t_avg": self.t_avg,
+            "t_cold": self.t_cold,
+            "tank_sensor": self.tank_sensor,
+            "usable_fraction": self.usable_fraction,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DrawEnd:
+        """Return the record saved by `as_dict`."""
+        sensor = data["tank_sensor"]
+        return cls(
+            time=datetime.fromisoformat(data["time"]),
+            cold_fraction=float(data["cold_fraction"]),
+            t_ch=float(data["t_ch"]),
+            t_avg=float(data["t_avg"]),
+            t_cold=float(data["t_cold"]),
+            tank_sensor=None if sensor is None else float(sensor),
+            usable_fraction=float(data["usable_fraction"]),
+        )
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -289,6 +339,12 @@ class TankModel:
         self._bal_ch = self.t_ch
         self._now = now
         self._classifier = DrawClassifier(options.classifier_options())
+        # The last draw session that ended, and the state after the latest draw increase,
+        # which becomes that record when the classifier reports the session's end.
+        self._draw_end: DrawEnd | None = None
+        self._last_draw: DrawEnd | None = None
+        # When T_avg was last replaced: a charge or a manual set_state (the button's reset too).
+        self._last_reset: datetime | None = None
         self._events: deque[ModelEvent] = deque(maxlen=max_events)
 
         self._tank_sensor: float | None = None
@@ -355,11 +411,13 @@ class TankModel:
         now, events = self._begin(now)
         self._mark("water_meter", _finite(value), now)
         result = self._classifier.on_meter(now, value, unit)
+        self._collect_draw_end(now)
         if result is None:
             return events
         events += self._apply_reclassify(now, result.reclassified)
         events += self._apply_draw(now, result.litres, mixed=result.mixed)
         events += self._apply_sensor_bounds(now)
+        self._last_draw = self._draw_record(now)
         return events
 
     def on_humidity(
@@ -368,10 +426,11 @@ class TankModel:
         """Process a bathroom humidity reading in percent."""
         now, events = self._begin(now)
         self._mark(f"humidity:{sensor_id}", _finite(value), now)
-        events += self._apply_reclassify(
-            now, self._classifier.on_humidity(now, sensor_id, value)
-        )
+        reclassify = self._classifier.on_humidity(now, sensor_id, value)
+        self._collect_draw_end(now)
+        events += self._apply_reclassify(now, reclassify)
         events += self._apply_sensor_bounds(now)
+        self._resnapshot_draw(now, reclassify)
         return events
 
     def on_energy(self, now: datetime, kwh: float | None) -> list[ModelEvent]:
@@ -490,9 +549,12 @@ class TankModel:
         The runtime calls it at least every 5 minutes.
         """
         now, events = self._begin(now)
-        events += self._apply_reclassify(now, self._classifier.update(now))
+        reclassify = self._classifier.update(now)
+        self._collect_draw_end(now)
+        events += self._apply_reclassify(now, reclassify)
         events += self._follow_sensor(now)
         events += self._apply_sensor_bounds(now)
+        self._resnapshot_draw(now, reclassify)
         return events
 
     def set_options(self, options: ModelOptions) -> None:
@@ -534,26 +596,32 @@ class TankModel:
         self._clamp()
         self._bal_avg, self._bal_ch = self.t_avg, self.t_ch
         self._reset_interval(now)
+        self._last_reset = now
         self._classifier.clear_pending()
         events.append(self._record(now, EventKind.CHARGE, {"manual": True}, before))
         return events
 
     def log_event(
-        self, now: datetime, kind: EventKind, change: dict[str, Any]
+        self,
+        now: datetime,
+        kind: EventKind,
+        change: dict[str, Any],
+        before: tuple[float, float] | None = None,
     ) -> ModelEvent:
         """Record an event that is not a model step, such as a calibration change.
-
-        The temperatures are those now, before and after.
 
         Args:
             now: The time of the event.
             kind: The kind of event.
             change: What changed, a JSON-compatible dict.
+            before: T_avg and T_ch before the change, by default those now.
 
         Returns:
             The recorded event.
         """
-        return self._record(now, kind, change, self._temps())
+        return self._record(
+            now, kind, change, self._temps() if before is None else before
+        )
 
     def forget_reading(self, source: str) -> None:
         """Forget the last reading of a counter, so that its next reading is a new start.
@@ -600,6 +668,16 @@ class TankModel:
     def tank_sensor(self) -> float | None:
         """Return the last tank sensor reading in C, None when unavailable."""
         return self._tank_sensor
+
+    def last_draw_end(self, now: datetime) -> DrawEnd | None:
+        """Return the state at the end of the last draw, None when there was none.
+
+        A running draw session counts as ending now: the record is built from the current
+        state, with `now` as its time.
+        """
+        if self._classifier.session_active:
+            return self._draw_record(now)
+        return self._draw_end
 
     def unavailable_seconds(self, now: datetime) -> dict[str, float]:
         """Return the seconds each source was unavailable since the interval started."""
@@ -687,6 +765,45 @@ class TankModel:
         return self._cold_at(now)
 
     # ----- internals ----------------------------------------------------------------------
+
+    def reset_since(self, time: datetime) -> bool:
+        """Return whether T_avg was replaced after `time` (a charge or a manual set_state)."""
+        return self._last_reset is not None and self._last_reset > time
+
+    def _resnapshot_draw(self, now: datetime, reclassified: float) -> None:
+        """Refresh the open session's record after a reclassification lowered T_avg."""
+        if reclassified > 0 and self._last_draw is not None:
+            if self._classifier.session_active:
+                self._last_draw = replace(
+                    self._draw_record(now), time=self._last_draw.time
+                )
+
+    def _draw_record(self, time: datetime) -> DrawEnd:
+        """Return the current state as a draw end record at `time`."""
+        return DrawEnd(
+            time=time,
+            cold_fraction=self.cold_fraction,
+            t_ch=self.t_ch,
+            t_avg=self.t_avg,
+            t_cold=self.t_cold,
+            tank_sensor=self._tank_sensor,
+            usable_fraction=self.options.usable_fraction,
+        )
+
+    def _collect_draw_end(self, now: datetime) -> None:
+        """Keep the record of a draw session that the classifier reports as ended.
+
+        The record is the state after the session's last increase. When the model has no such
+        state (the session began before a restart), it is the state now.
+        """
+        ended = self._classifier.take_session_end()
+        if ended is None:
+            return
+        last = self._last_draw
+        if last is None or last.time != ended:
+            last = replace(self._draw_record(now), time=ended)
+        self._draw_end = last
+        self._last_draw = None
 
     def _mark(self, source: str, available: bool, now: datetime) -> None:
         """Track how long a source is unavailable within the calibration interval."""
@@ -1080,6 +1197,7 @@ class TankModel:
             return [*events, self._record(now, EventKind.CHARGE, change, before)]
         self.t_avg = self.t_ch = self._bal_avg = self._bal_ch = charge
         self._clamp()
+        self._last_reset = now
         self._reset_interval(now)
         self._classifier.clear_pending(until=t_end)
         self._last_charge_temp = self.t_ch
@@ -1191,6 +1309,9 @@ class TankModel:
             "unavailable": self._unavailable,
             "down_since": {s: t.isoformat() for s, t in self._down_since.items()},
             "classifier": self._classifier.to_dict(),
+            "draw_end": None if self._draw_end is None else self._draw_end.as_dict(),
+            "last_draw": None if self._last_draw is None else self._last_draw.as_dict(),
+            "last_reset": _iso(self._last_reset),
         }
 
     @classmethod
@@ -1279,6 +1400,12 @@ class TankModel:
                 for s, t in data.get("down_since", {}).items()
             }
             model._classifier.restore(data["classifier"])
+            # Added with "Hot water ran out": older saved states lack it.
+            if (draw_end := data.get("draw_end")) is not None:
+                model._draw_end = DrawEnd.from_dict(draw_end)
+            model._last_reset = _from_iso(data.get("last_reset"))
+            if (last_draw := data.get("last_draw")) is not None:
+                model._last_draw = DrawEnd.from_dict(last_draw)
             model._clamp()
         except (KeyError, TypeError, AttributeError) as err:
             raise ValueError(f"Invalid model state: {err}") from err
@@ -1286,6 +1413,7 @@ class TankModel:
 
 
 __all__ = [
+    "DrawEnd",
     "EventKind",
     "IntervalSums",
     "ModelEvent",

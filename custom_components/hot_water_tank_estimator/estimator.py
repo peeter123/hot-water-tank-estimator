@@ -23,6 +23,7 @@ from functools import partial
 import logging
 from typing import Any
 
+from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     ATTR_UNIT_OF_MEASUREMENT,
@@ -44,9 +45,10 @@ from homeassistant.helpers.event import (
     async_track_time_interval,
 )
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
 
-from .calibration import PARAMETER_BOUNDS, USABLE_FRACTION, Calibrator
+from .calibration import PARAMETER_BOUNDS, USABLE_FRACTION, Calibrator, PressResult
 from .const import (
     CONF_AMBIENT_SENSOR,
     CONF_COLD_SENSOR,
@@ -111,6 +113,14 @@ __all__ = [
 _UNAVAILABLE = {STATE_UNAVAILABLE, STATE_UNKNOWN}
 # The roles whose last reading is a baseline, and the model source that forgets it.
 _BASELINES = {WATER_METER: "water_meter", DHW_ENERGY: "energy_counter"}
+
+
+class _Tolerant(dict[str, Any]):
+    """Format values that leave an unknown placeholder as it is, so a text cannot break a press."""
+
+    def __missing__(self, key: str) -> str:
+        """Return the placeholder unchanged."""
+        return "{" + key + "}"
 
 
 @dataclass(frozen=True)
@@ -494,17 +504,53 @@ class TankEstimator:
         self._manual += 1
         self._finish(events, now)
 
-    @callback
-    def cold_shower(self) -> None:
-        """Learn the usable fraction from a shower that ran cold, and empty the model."""
+    async def async_hot_water_ran_out(self) -> None:
+        """Handle a press of "Hot water ran out": learn from it, or explain why not."""
         now = dt_util.utcnow()
         self._finish(self.model.tick(now), now)
-        before = self.calibrator.options
-        self.calibrator.cold_shower(self.model, now)
-        self._manual += 1
-        self._log_calibration(now, "shower_ran_cold", before)
+        before_options = self.calibrator.options
+        before = (self.model.t_avg, self.model.t_ch)
+        result = self.calibrator.hot_water_ran_out(self.model, now)
+        if result.accepted:
+            self._manual += 1
+            change: dict[str, Any] = {"result": "accepted", **result.values}
+        else:
+            change = {
+                "result": "rejected",
+                "reason": result.reason,
+                **result.values,
+            }
+        self.model.log_event(now, EventKind.HOT_WATER_RAN_OUT, change, before)
+        if result.accepted:
+            self._log_calibration(now, "hot_water_ran_out", before_options)
+            persistent_notification.async_dismiss(self.hass, self._press_notification)
+        else:
+            await self._notify_rejected_press(result)
         self.save_soon()
         async_dispatcher_send(self.hass, self.signal)
+
+    @property
+    def _press_notification(self) -> str:
+        """Return the notification ID of this tank's rejected press (one at a time)."""
+        return f"{DOMAIN}_{self.entry.entry_id}_hot_water_ran_out"
+
+    async def _notify_rejected_press(self, result: PressResult) -> None:
+        """Show why a press was ignored, in the language of Home Assistant."""
+        key = f"press_ignored_{result.reason}"
+        texts = await async_get_translations(
+            self.hass, self.hass.config.language, "exceptions", [DOMAIN]
+        )
+        template = texts.get(f"component.{DOMAIN}.exceptions.{key}.message", key)
+        values = {
+            name: f"{value:.1f}" if isinstance(value, float) else value
+            for name, value in result.values.items()
+        }
+        persistent_notification.async_create(
+            self.hass,
+            template.format_map(_Tolerant(values)),
+            title=self.entry.title,
+            notification_id=self._press_notification,
+        )
 
     # ----- the setup fit ------------------------------------------------------------------
 

@@ -4,7 +4,9 @@ from dataclasses import replace
 import json
 from pathlib import Path
 
-from custom_components.hot_water_tank_estimator.const import DIAGNOSTIC_EVENTS
+import pytest
+
+from custom_components.hot_water_tank_estimator.const import DIAGNOSTIC_EVENTS, DOMAIN
 from custom_components.hot_water_tank_estimator.diagnostics import (
     async_get_config_entry_diagnostics,
 )
@@ -18,6 +20,30 @@ from homeassistant.core import HomeAssistant
 from .common import ENERGY, FLOW, HEATING, HUMIDITY, METER, RETURN, TANK, Rig, entity_id
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+async def part_drawn(hass: HomeAssistant, rig: Rig) -> None:
+    """Set the tank to 45 C on average, charged at 55 C: the tank sensor (20 C) is under T_ch."""
+    await hass.services.async_call(
+        DOMAIN,
+        "set_tank_state",
+        {
+            "entity_id": entity_id(hass, rig.entry, "sensor", "tank_litres"),
+            "tank_average": 45,
+            "charged_temperature": 55,
+        },
+        blocking=True,
+    )
+
+
+async def press(hass: HomeAssistant, rig: Rig) -> None:
+    """Press the "Hot water ran out" button."""
+    await hass.services.async_call(
+        "button",
+        "press",
+        {"entity_id": entity_id(hass, rig.entry, "button", "hot_water_ran_out")},
+        blocking=True,
+    )
 
 
 async def test_download_diagnostics(hass: HomeAssistant, freezer) -> None:
@@ -112,24 +138,54 @@ async def test_only_the_last_100_events(hass: HomeAssistant, freezer) -> None:
 async def test_a_calibration_event_appears(hass: HomeAssistant, freezer) -> None:
     """A button press logs a calibration event with the old and new value and the source."""
     rig = await Rig.start(hass, freezer, states={TANK: "20.0"})
-    await hass.services.async_call(
-        "button",
-        "press",
-        {"entity_id": entity_id(hass, rig.entry, "button", "shower_ran_cold")},
-        blocking=True,
-    )
+    await part_drawn(hass, rig)
+    await rig.set(METER, "100.001", after=30)
+    await rig.tick(5)
+    await press(hass, rig)
     data = await async_get_config_entry_diagnostics(hass, rig.entry)
     events = [e for e in data["events"] if e["kind"] == "calibration"]
     assert len(events) == 1
     change = events[0]["change"]
-    assert change["trigger"] == "shower_ran_cold"
+    assert change["trigger"] == "hot_water_ran_out"
+    (press_event,) = [e for e in data["events"] if e["kind"] == "hot_water_ran_out"]
     assert change["parameters"]["usable_fraction"] == {
         "old": 0.85,
-        "new": 0.5,
+        "new": pytest.approx(press_event["change"]["cold_fraction"]),
         "source": "learned",
     }
     # The manual reset is an excluded interval for the next closure; closures are listed.
     assert isinstance(data["calibration"]["closures"], list)
+
+
+async def test_an_accepted_press_is_in_the_events(hass: HomeAssistant, freezer) -> None:
+    """An accepted press logs a hot water ran out event with the draw end and the figures."""
+    rig = await Rig.start(hass, freezer, states={TANK: "20.0"})
+    await part_drawn(hass, rig)
+    await rig.set(METER, "100.001", after=30)
+    await rig.tick(5)
+    await press(hass, rig)
+    data = await async_get_config_entry_diagnostics(hass, rig.entry)
+    (event,) = [e for e in data["events"] if e["kind"] == "hot_water_ran_out"]
+    assert event["change"]["result"] == "accepted"
+    assert event["change"]["usable_fraction"] == pytest.approx(
+        event["change"]["cold_fraction"]
+    )
+    assert set(event["change"]) >= {"draw_end", "cold_fraction", "drop"}
+    json.dumps(data)
+
+
+async def test_rejected_press_in_the_diagnostics(hass: HomeAssistant, freezer) -> None:
+    """A press with no draw in the last 20 minutes is an event marked rejected, with its reason."""
+    rig = await Rig.start(hass, freezer, states={TANK: "20.0"})
+    await press(hass, rig)
+    data = await async_get_config_entry_diagnostics(hass, rig.entry)
+    (event,) = [e for e in data["events"] if e["kind"] == "hot_water_ran_out"]
+    assert event["change"]["result"] == "rejected"
+    assert event["change"]["reason"] == "no_recent_draw"
+    assert event["t_avg_before"] == event["t_avg_after"]
+    assert data["calibration"]["parameters"]["usable_fraction"]["source"] == "option"
+    assert data["state"]["model"]["draw_end"] is None
+    json.dumps(data)
 
 
 async def test_excluded_closures_are_listed_with_their_reason(

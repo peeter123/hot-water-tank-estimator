@@ -241,8 +241,8 @@ other rules at its ends. When neither is limited, `f_s = h + w / 2 - s * w`.
 
 - `u` is the usable fraction: the cold fraction at which the outlet runs cold. It covers the thermocline and the
   outlet position. The default 0.85 is just above a drain that was still warm at about 0.78, and below 1, the limit
-  of an ideal tank. A tank with a worse thermocline runs cold earlier, so users lower `u` after a shower that ran
-  cold.
+  of an ideal tank. A tank with a worse thermocline runs cold earlier, so the "Hot water ran out" button lowers `u`
+  after hot water ran out early.
 - Right after a charge `f` is 0, so tank water is `V * u`, less than the tank volume `V`. The unusable `1 - u`
   covers the lukewarm layer that cold inflow mixes at the bottom during draws and, for a coil low in the tank, the
   colder water below the coil, which cannot be drawn hot. The energy that this colder water lacks is not in `u`: the
@@ -314,7 +314,7 @@ energy of the plumbing, the insulation and the thermocline differ per house. The
 | start-up energy `S` | 0-3 kWh | charge closures |
 | loss coefficient `k` | 0.001-0.015 per hour | charge closures, quiet windows |
 | thermocline width `w` | 0.1-0.6 | first sensor drop after a charge |
-| usable fraction `u` | 0.5-0.98 | the "Shower ran cold" button |
+| usable fraction `u` | 0.5-0.98 | the "Hot water ran out" button |
 
 The value in use is the option value until a parameter has been learned, then the learned value. A parameter the
 user locks keeps its option value and is never learned; removing the lock discards the value learned before it, so
@@ -355,7 +355,7 @@ A closure is excluded from the fit and from the error statistics when:
   sensor and each humidity sensor. The ambient sensor does not count: the model always has an ambient value (the
   sensor, its last reading or the option), and it enters only the loss term, where a 1 K error moves a closure by
   about 0.03 K over 8 hours;
-- the "Shower ran cold" button reset the model in the interval or at its start. The model then starts from a guessed
+- the "Hot water ran out" button reset the model in the interval or at its start. The model then starts from a guessed
   state, so the interval has no charged start;
 - the run has no charged temperature (no flow and return and no tank sensor). The model keeps its values, and the
   next interval is excluded too, because it has no known charged start.
@@ -389,8 +389,31 @@ sensor there are no closures, and `k` comes from quiet windows only.
   the balance's cold fraction `f_e` is the cold fraction at the top of the thermocline, `h - w / 2`. So
   `w = 2 * (h - f_e)`. Each estimate is limited to the bounds, the width is the mean of the last 10, and it is
   applied after 3.
-- **Usable fraction.** Only a person can tell that a shower ran cold. The button sets `u` to the cold fraction at that
-  moment (within the bounds) and sets `t_avg` so that the tank water is 0.
+- **Usable fraction.** Only a person can tell that hot water ran out. The button "Hot water ran out" applies to the
+  end of the last draw, not to the moment of the press, because the user leaves the shower or the tap first and a
+  press up to 20 minutes later still means that draw. A draw session that is still running counts as ending now. The
+  model keeps, for the last draw session, the state after its last increase: end time, `f`, `t_ch`, `t_avg`, `t_cold`,
+  the tank sensor reading and `u` in use. The press then runs these steps on that record:
+  1. No session running or ended within the last 20 minutes: reject (`no_recent_draw`). A tap counts like a shower,
+     because a tap running cold is the same evidence.
+  2. The tank sensor read at least `t_ch - delta` at the end of that draw: reject (`sensor_hot`). While the sensor
+     reads hot, the cold layer is below it and cannot have reached the outlet at the top, so a cold outlet is cold
+     pipe water and not an empty tank. A record without a sensor reading skips this check.
+  3. Unless `u` is locked, `u = clamp(f_end, 0.5, 0.98)`, set directly because it is the user's observation.
+  4. The tank is emptied at the end of that draw: `D = max(0, u - f_end) * (t_ch_end - t_cold_end)` in K is the
+     `t_avg` drop that makes `V * (u - f) = 0` there (`f` rises by `dT / (t_ch - t_cold)` per K). It is applied to
+     the current `t_avg`, so heat added since the draw end stays and the loss since is already in `t_avg`. With a
+     learned `u` set to `f_end`, `D` is 0 and only the new `u` empties the outputs; with a locked `u`, or `u` held
+     at 0.5, `D` is positive. `D` is not applied when `t_avg` was replaced after the draw end, by a charge (the end
+     of a heating run), by the `set_tank_state` action or by an earlier press: that reset already replaced the
+     `t_avg` that `D` would correct, so a press after a charge would lower a freshly charged tank, and a second press
+     on the same draw with a locked `u` would apply `D` twice. Only `u` is learned then.
+
+  A rejected press changes nothing, is logged as an event with the reason and its values, and shows a notification
+  that names the reason (for example the sensor reading). "Cold" differs a little between a tap and a shower: a tap
+  runs cold when the outlet water at the tap is cold, while a shower with a thermostatic mixer turns cold once the hot
+  side falls below the mix temperature. The model treats both as the moment `f` reached the limit `u`, so a tap and a
+  shower teach the same parameter, and the difference is absorbed in the learned value.
 - **Precedence.** Option value, then the setup fit, then live learning, unless locked. Live learning changes a
   parameter the setup fit set from `setup_fit` to `learned`: `setup_fit` returns a calibrator that is already live
   (`Calibrator.go_live`), so only what the fit itself changed keeps the source `setup_fit`. A recalibrate replaces

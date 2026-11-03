@@ -138,9 +138,9 @@ async def test_every_entity_is_on_one_device_with_a_translated_name(
     state = hass.states.get(entity_id(hass, entry, "sensor", "tank_litres"))
     assert state is not None
     assert state.attributes["friendly_name"] == "Hot water Hot water remaining"
-    button = hass.states.get(entity_id(hass, entry, "button", "shower_ran_cold"))
+    button = hass.states.get(entity_id(hass, entry, "button", "hot_water_ran_out"))
     assert button is not None
-    assert button.attributes["friendly_name"] == "Hot water Shower ran cold"
+    assert button.attributes["friendly_name"] == "Hot water Hot water ran out"
 
 
 async def test_two_tanks_have_two_devices(hass: HomeAssistant) -> None:

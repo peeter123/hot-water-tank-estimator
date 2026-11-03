@@ -322,3 +322,28 @@ def test_unknown_unit_warns_once(caplog: pytest.LogCaptureFixture) -> None:
         assert classifier.on_meter(T0 + 6 * SECOND, 6.0, None) is None
     assert len(caplog.records) == 2
     assert litres_from_meter(1.0, None) is None
+
+
+def test_a_session_end_is_reported_once() -> None:
+    """A session that ends reports the time of its last increase, once, after the session gap."""
+    classifier = DrawClassifier(ClassifierOptions(session_gap=60.0))
+    classifier.on_meter(T0, 1000.0, "L")
+    classifier.on_meter(T0 + 10 * SECOND, 1001.0, "L")
+    classifier.on_meter(T0 + 30 * SECOND, 1002.0, "L")
+    classifier.update(T0 + 60 * SECOND)
+    assert classifier.take_session_end() is None
+    assert classifier.session_active
+    classifier.update(T0 + 100 * SECOND)
+    assert not classifier.session_active
+    assert classifier.take_session_end() == T0 + 30 * SECOND
+    assert classifier.take_session_end() is None
+
+
+def test_a_new_draw_after_the_gap_reports_the_old_session_end() -> None:
+    """The reading that opens the next session also reports the end of the one before."""
+    classifier = DrawClassifier(ClassifierOptions(session_gap=60.0))
+    classifier.on_meter(T0, 1000.0, "L")
+    classifier.on_meter(T0 + 10 * SECOND, 1001.0, "L")
+    classifier.on_meter(T0 + 5 * MINUTE, 1002.0, "L")
+    assert classifier.take_session_end() == T0 + 10 * SECOND
+    assert classifier.session_active

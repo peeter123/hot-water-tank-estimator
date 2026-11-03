@@ -134,7 +134,7 @@
         "data_description": {
           "sensor_height": "Share of the tank's water below the sensor, in % (20-80). See the README for how to work it out from the data sheet.",
           "thermocline_width": "The width of the layer between hot and cold water, as a percentage of the tank. Learned from the first sensor drop after each charge.",
-          "usable_fraction": "The fraction of the tank that can be drawn before the outlet runs cold, 0.5-0.98. The Shower ran cold button learns it.",
+          "usable_fraction": "The fraction of the tank that can be drawn before the outlet runs cold, 0.5-0.98. The Hot water ran out button learns it.",
           "mix_temperature": "The temperature of your shower water.",
           "max_temperature": "The highest temperature the model accepts for the tank.",
           "sensor_tolerance": "How far below the charged temperature the tank sensor may read before the cold layer is taken to have reached it.",
@@ -338,8 +338,8 @@
       }
     },
     "button": {
-      "shower_ran_cold": {
-        "name": "Shower ran cold"
+      "hot_water_ran_out": {
+        "name": "Hot water ran out"
       }
     }
   },
@@ -378,6 +378,12 @@
     },
     "no_history": {
       "message": "There is no recorder history to fit."
+    },
+    "press_ignored_no_recent_draw": {
+      "message": "Ignored: no water was drawn in the last {minutes} minutes."
+    },
+    "press_ignored_sensor_hot": {
+      "message": "Ignored: the tank sensor still read {sensor} C when the last draw ended, so the tank was not empty."
     }
   }
 }

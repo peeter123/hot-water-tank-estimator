@@ -1,4 +1,4 @@
-"""The "Shower ran cold" button."""
+"""The "Hot water ran out" button."""
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.core import HomeAssistant
@@ -16,16 +16,16 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Add the button."""
-    async_add_entities([ShowerRanColdButton(entry.runtime_data)])
+    async_add_entities([HotWaterRanOutButton(entry.runtime_data)])
 
 
-class ShowerRanColdButton(TankEntity, ButtonEntity):
-    """Teaches the usable fraction: the user observed that the shower ran cold."""
+class HotWaterRanOutButton(TankEntity, ButtonEntity):
+    """Teaches the usable fraction: the user observed that hot water ran out."""
 
     def __init__(self, estimator: TankEstimator) -> None:
         """Create the button."""
-        super().__init__(estimator, "shower_ran_cold")
+        super().__init__(estimator, "hot_water_ran_out")
 
     async def async_press(self) -> None:
-        """Set the usable fraction to the cold fraction now and empty the model."""
-        self.estimator.cold_shower()
+        """Apply the press to the end of the last draw, or explain why it is ignored."""
+        await self.estimator.async_hot_water_ran_out()

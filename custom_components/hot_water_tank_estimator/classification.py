@@ -110,6 +110,8 @@ class DrawClassifier:
         self._long_active = False
         self._humidity: dict[str, _Humidity] = {}
         self._was_detected = False
+        # The end of a session that has ended and was not taken yet (see `take_session_end`).
+        self._ended: datetime | None = None
         self._warned_units: set[str | None] = set()
 
     @property
@@ -121,6 +123,20 @@ class DrawClassifier:
     def session_active(self) -> bool:
         """Return whether a draw session is open."""
         return self._last_increase is not None
+
+    def take_session_end(self) -> datetime | None:
+        """Return the end of the draw session that ended since the last call, once.
+
+        The end of a session is the time of its last increase. A session ends when the session
+        gap has passed, which the classifier notices at its next call, so the caller asks after
+        every call that advances time. When several sessions ended unnoticed, only the last one
+        is reported.
+
+        Returns:
+            The end time of the session, None when no session ended.
+        """
+        ended, self._ended = self._ended, None
+        return ended
 
     def clear_pending(self, until: datetime | None = None) -> None:
         """Forget the other-draw litres that could still be reclassified (after a charge).
@@ -274,6 +290,7 @@ class DrawClassifier:
         if self._last_increase is None:
             return
         if (now - self._last_increase).total_seconds() > self.options.session_gap:
+            self._ended = self._last_increase
             self._session_start = None
             self._last_increase = None
             self._others.clear()

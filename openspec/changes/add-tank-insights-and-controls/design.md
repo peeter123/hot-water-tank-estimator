@@ -110,6 +110,11 @@ When a session ends, the classifier reports it, and the model stores a `DrawEnd`
 A running session counts as "ending now" for a press: the record is built on the spot from the current state. The
 record is part of the saved model state, so a restart between the draw and the press keeps it.
 
+The classifier notices a session end only one session gap after its last increase, so the model keeps the state
+after every draw increase (`last_draw`, also saved) and turns it into the `DrawEnd` record when the classifier
+reports the end. The record then holds the state at the last increase, not at the moment the gap ran out. This was
+decided in the group 2 implementation on 2026-11-03.
+
 This answers "what was the tank like when the water ran cold". The press happens up to 20 minutes later, because
 the user leaves the shower first. The 20-minute window is the user's choice (2026-11-03): time to step out, dry off
 and reach a phone.
@@ -133,12 +138,23 @@ development installation on 2026-11-03. It calls `Calibrator.hot_water_ran_out(m
    - Heat added since the draw end stays added. Loss since then is already in T_avg.
    - When u was just set to f_end, D is 0 and only the learned u empties the outputs. When u is locked, or clamped
      at 0.5, D is positive.
+   - **T_avg reset since the draw end.** D is not applied when T_avg was reset after the draw end: by a charge, by the
+     `set_tank_state` action, or by an earlier accepted press. Only u is learned. The reset already replaced the
+     T_avg that D would correct, the same argument D5 makes for undo after a charge. Without this rule, a press after
+     a charge would lower a freshly charged tank, and a second press on the same draw with u locked would apply D
+     twice. Decided after the group 2 review on 2026-11-03.
 5. **Record the undo:** the press time, the previous u and its source, and D.
 
 A rejection changes neither the model nor the calibrator. It records a `hot_water_ran_out` event with
 `result: rejected` and the reason. The runtime then shows a persistent notification, one per tank with a fixed
 notification ID, so repeated presses replace it. The text names the reason and the values, for example "Ignored: the
 tank sensor still read 55.8 C when the last draw ended, so the tank was not empty".
+- The texts are in the `exceptions` translation category, because hassfest allows no custom category. The runtime
+  loads them with `async_get_translations` and fills in the values.
+- The notification title is the tank name.
+- An accepted press dismisses the notification, so a stale rejection does not stay beside an accepted press.
+
+These choices were made in the group 2 implementation on 2026-11-03.
 
 **Alternatives considered:**
 - Apply the press to the state at the moment of the press. A heating run or a long wait would then distort f.
@@ -225,8 +241,9 @@ readings. That is the meter's resolution, not noise to filter.
 
 New keys are added to the existing dicts, each with a default on load, so stores saved before this change load
 unchanged:
-- model: `draw_end`, and `ambient_sensor` with `ambient_last` (the last good reading, and the time the sensor
-  was last known good, from which the fallback counts);
+- model: `draw_end` and `last_draw` (D3), `last_reset` (the time T_avg was last replaced, D4), and
+  `ambient_sensor` with `ambient_last` (the last good reading, and the time the sensor was last known good, from
+  which the fallback counts);
 - the entry store: `ambient_fit`, the ambient entity the calibration was last fitted with (D1);
 - calibrator: `shower_flow_history` and `undo`.
 
@@ -256,8 +273,16 @@ Diagnostics already dump these dicts, so the new state appears there without new
 - [A press 20 minutes late, after another short draw, such as a toilet flush] → The last session then is the flush,
   not the shower, and its f is a little higher than at the shower's end. This errs towards a larger u by the litres
   of that draw (about 6 L, or 2 % of a 285 L tank). Accepted.
+- [A sensor bound between the draw end and a press with u locked] → The bound has already moved T_avg towards the
+  sensor, and D is applied on top. The bound acts only when the sensor disagrees with the model, and the error is
+  small next to a charge reset. Accepted (group 2 review, 2026-11-03).
+- [A second press while the same draw keeps running] → It learns a higher u from the later f, and undo restores only
+  the value from before the last press. A user who presses twice means the later moment. Accepted (group 2 review,
+  2026-11-03).
 - [The renamed button breaks a dashboard or automation that used the old entity ID] → Development only; the rollout
   task updates the live dashboard.
+- [The old button's registry entry stays as an unavailable entity after the upgrade] → Only pre-release
+  installations have it, so there is no migration code. The rollout removes it on the development installation.
 
 ## Migration Plan
 

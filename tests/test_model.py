@@ -1103,3 +1103,154 @@ def test_forget_reading_makes_the_next_reading_a_new_start() -> None:
     assert [e.kind for e in model.on_energy(T0 + 2 * MINUTE, 500.5)] == [EventKind.HEAT]
     with pytest.raises(ValueError, match="baseline"):
         model.forget_reading("tank_sensor")
+
+
+def draw_end_model(fraction: float, sensor: float | None) -> TankModel:
+    """A model charged at 57 C whose draw at 19:42 leaves the cold fraction at `fraction`.
+
+    The litres of the draw take a fixed drop off T_avg, so the start is set to compensate.
+    """
+    start = datetime(2026, 10, 31, 19, 40, tzinfo=UTC)
+    probe = TankModel(make_options(), Sources(energy_counter=True), start, 57.0, 57.0)
+    probe.on_water_meter(start, 1000.0, "L")
+    probe.on_water_meter(start + 2 * MINUTE, 1001.0, "L")
+    drop = 57.0 - probe.t_avg
+    model = TankModel(
+        make_options(),
+        Sources(energy_counter=True),
+        start,
+        57.0 - fraction * (57.0 - 14.0) + drop,
+        57.0,
+    )
+    if sensor is not None:
+        model.on_tank_sensor(start, sensor)
+    model.on_water_meter(start, 1000.0, "L")
+    model.on_water_meter(start + 2 * MINUTE, 1001.0, "L")
+    return model
+
+
+def test_draw_ends() -> None:
+    """A session that ends at 19:42 at a cold fraction of 0.74 with the sensor at 31.0 C is kept."""
+    model = draw_end_model(0.74, 31.0)
+    model.tick(datetime(2026, 10, 31, 19, 50, tzinfo=UTC))
+    record = model.last_draw_end(datetime(2026, 10, 31, 19, 50, tzinfo=UTC))
+    assert record is not None
+    assert record.time == datetime(2026, 10, 31, 19, 42, tzinfo=UTC)
+    assert record.cold_fraction == pytest.approx(0.74)
+    assert record.tank_sensor == 31.0
+    assert record.t_ch == pytest.approx(57.0)
+    assert record.t_cold == pytest.approx(14.0)
+    assert record.usable_fraction == 0.85
+    assert record.t_avg == pytest.approx(57.0 - 0.74 * 43.0)
+
+
+def test_the_draw_end_is_the_state_after_the_last_increase() -> None:
+    """Heat and loss between the last increase and the end of the session are not in the record."""
+    model = draw_end_model(0.74, None)
+    model.on_tank_sensor(datetime(2026, 10, 31, 19, 43, tzinfo=UTC), 40.0)
+    model.set_state(datetime(2026, 10, 31, 19, 43, tzinfo=UTC), t_avg=50.0)
+    model.tick(datetime(2026, 10, 31, 19, 50, tzinfo=UTC))
+    record = model.last_draw_end(datetime(2026, 10, 31, 19, 50, tzinfo=UTC))
+    assert record is not None
+    assert record.cold_fraction == pytest.approx(0.74)
+    assert record.tank_sensor is None
+
+
+def test_a_running_session_yields_a_record_at_the_current_state() -> None:
+    """While the session runs, the record is built now from the current state."""
+    model = draw_end_model(0.74, 31.0)
+    now = datetime(2026, 10, 31, 19, 42, 20, tzinfo=UTC)
+    record = model.last_draw_end(now)
+    assert record is not None
+    assert record.time == now
+    assert record.cold_fraction == pytest.approx(model.cold_fraction)
+    assert record.t_avg == model.t_avg
+    assert record.tank_sensor == 31.0
+
+
+def test_there_is_no_draw_end_before_any_draw() -> None:
+    """A model that has seen no draw has no record."""
+    assert make_model().last_draw_end(T0) is None
+
+
+def test_the_draw_end_survives_a_round_trip() -> None:
+    """The record of an ended session is saved and restored."""
+    model = draw_end_model(0.74, 31.0)
+    model.tick(datetime(2026, 10, 31, 19, 50, tzinfo=UTC))
+    restored = TankModel.from_dict(
+        make_options(), model.sources, json.loads(json.dumps(model.to_dict()))
+    )
+    assert restored.to_dict() == model.to_dict()
+    now = datetime(2026, 10, 31, 19, 51, tzinfo=UTC)
+    assert restored.last_draw_end(now) == model.last_draw_end(now)
+    assert restored.last_draw_end(now) is not None
+
+
+def test_a_state_saved_before_the_draw_end_loads() -> None:
+    """A store without draw_end and last_draw loads with no record."""
+    model = draw_end_model(0.74, 31.0)
+    model.tick(datetime(2026, 10, 31, 19, 50, tzinfo=UTC))
+    saved = json.loads(json.dumps(model.to_dict()))
+    saved.pop("draw_end")
+    saved.pop("last_draw")
+    restored = TankModel.from_dict(make_options(), model.sources, saved)
+    assert restored.last_draw_end(datetime(2026, 10, 31, 19, 51, tzinfo=UTC)) is None
+
+
+def test_a_state_saved_during_the_session_gap_promotes_the_same_record() -> None:
+    """Saved after the last increase, before the gap passes: the restored model ends the session alike."""
+    model = draw_end_model(0.74, 31.0)
+    saved_at = datetime(2026, 10, 31, 19, 42, 30, tzinfo=UTC)
+    model.tick(saved_at)
+    assert model.to_dict()["draw_end"] is None
+    snapshot = model.to_dict()["last_draw"]
+    assert snapshot is not None
+    restored = TankModel.from_dict(
+        make_options(), model.sources, json.loads(json.dumps(model.to_dict()))
+    )
+    later = datetime(2026, 10, 31, 19, 50, tzinfo=UTC)
+    restored.tick(later)
+    record = restored.last_draw_end(later)
+    assert record is not None
+    assert record.as_dict() == snapshot
+    assert record.time == datetime(2026, 10, 31, 19, 42, tzinfo=UTC)
+
+
+def test_a_reclassification_in_an_open_session_updates_the_record() -> None:
+    """Detection that lowers T_avg while the session is open puts the lower cold fraction in the record."""
+    model = make_model(
+        Sources(energy_counter=True, humidity_sensors=("bath",)), t_avg=57.0, t_ch=57.0
+    )
+    model.on_humidity(T0 - 10 * MINUTE, "bath", 50.0)
+    model.on_water_meter(T0, 1000.0, "L")
+    model.on_water_meter(T0 + 5 * SECOND, 1030.0, "L")
+    before = model.t_avg
+    snapshot = model.to_dict()["last_draw"]
+    assert snapshot["t_avg"] == before
+    model.on_humidity(T0 + 10 * SECOND, "bath", 70.0)
+    assert model.shower_detected
+    assert model.t_avg < before
+    assert model.to_dict()["last_draw"]["t_avg"] == model.t_avg
+    assert model.to_dict()["last_draw"]["time"] == snapshot["time"]
+
+
+def test_a_state_saved_before_the_reset_marker_loads() -> None:
+    """A store without last_reset loads with no reset known."""
+    model = draw_end_model(0.74, 31.0)
+    saved = json.loads(json.dumps(model.to_dict()))
+    saved.pop("last_reset")
+    restored = TankModel.from_dict(make_options(), model.sources, saved)
+    assert not restored.reset_since(T0 - timedelta(days=1))
+
+
+def test_a_manual_set_state_is_a_reset() -> None:
+    """set_state marks a reset at its time, and only draws that ended before it are behind it."""
+    model = draw_end_model(0.74, None)
+    at = datetime(2026, 10, 31, 19, 45, tzinfo=UTC)
+    model.set_state(at, t_avg=50.0)
+    assert model.reset_since(datetime(2026, 10, 31, 19, 42, tzinfo=UTC))
+    assert not model.reset_since(at)
+    restored = TankModel.from_dict(
+        make_options(), model.sources, json.loads(json.dumps(model.to_dict()))
+    )
+    assert restored.reset_since(datetime(2026, 10, 31, 19, 42, tzinfo=UTC))
