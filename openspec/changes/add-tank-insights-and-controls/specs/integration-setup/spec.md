@@ -125,10 +125,55 @@ reason, or undone) and shower flow.
 - **WHEN** a "Hot water ran out" press was rejected because no draw ended in the last 20 minutes
 - **THEN** the events contain a hot water ran out event marked rejected, with that reason
 
+### Requirement: Reconfigure changes the tank and its sources
+A reconfigure step SHALL let the user change everything the config flow asked for, with the config flow's
+validation: the volume, the tank sensor and its height, the water meter, the heat inputs and the optional sources.
+The volume, the tank sensor, the water meter and the heat inputs SHALL change only here, not in the options flow. It
+SHALL refuse a tank sensor that another entry uses. Saving SHALL keep the tuning values, the locks, the history days,
+the tank average, the charged temperature and the calibration state, and SHALL reload the entry. When the save
+adds, removes or replaces the ambient temperature sensor, a recalibration SHALL replace the calibration state, as in
+the options flow, because the loss coefficient depends on it.
+
+#### Scenario: Replace the water meter
+- **WHEN** T_avg is 50 C, the usable fraction is locked, and the user picks another water meter in reconfigure
+- **THEN** the entry reloads with the new meter, T_avg stays 50 C, and the lock and the calibration samples stay
+
+#### Scenario: Tank sensor of another entry
+- **WHEN** the user picks a tank sensor that another entry already uses
+- **THEN** reconfigure refuses it and the entry stays unchanged
+
+#### Scenario: Ambient sensor in reconfigure
+- **WHEN** T_avg is 52 C and the user adds an ambient temperature sensor in reconfigure
+- **THEN** the entry reloads, T_avg stays 52 C, and a recalibration over the history days runs with that sensor's
+  history
+
+### Requirement: State survives a restart
+After a Home Assistant restart or an entry reload, each tank SHALL restore:
+- T_avg and T_ch;
+- the last water meter reading and the last energy counter reading;
+- the heating-run state, including the start-up energy used;
+- the current draw session;
+- the humidity window history;
+- the end of the last draw and the time T_avg was last reset (see draw-classification and calibration);
+- the shower in progress, with its flow so far;
+- the last ambient reading and when it was last good, for a sensor that is still configured.
+
+On the first start, with nothing restored, the tank SHALL start charged at the tank sensor's reading. If that is
+unavailable, it SHALL start at 50 C.
+
+#### Scenario: Restart
+- **WHEN** Home Assistant restarts while T_avg is 41.2 C and T_ch 56.0 C
+- **THEN** after the restart T_avg is 41.2 C and T_ch 56.0 C
+
+#### Scenario: First start
+- **WHEN** a new entry starts and the tank sensor reads 56 C
+- **THEN** T_avg and T_ch are 56 C
+
 ## ADDED Requirements
 
 ### Requirement: Shower flow number
-The "Shower flow" number SHALL show the shower flow in use, with a `source` attribute (default, learned or locked),
+The "Shower flow" number (device class volume flow rate) SHALL show the shower flow in use, with a `source`
+attribute (default, learned or locked),
 and `low` and `high` attributes with the lowest and highest flow in the shower flow history. Setting it SHALL set
 the shower flow to that value, within the bounds of 3-20 L/min, and lock it. Turning the lock off, with the "Shower
 flow locked" switch or in the options, SHALL turn learning back on.
@@ -143,12 +188,10 @@ flow locked" switch or in the options, SHALL turn learning back on.
 - **THEN** the shower flow in use is the median of the history again, with source learned
 
 ### Requirement: Shower flow lock switch
-The "Shower flow locked" switch SHALL show whether the shower flow is locked. It is the same lock as the shower flow
-lock in the options, so the switch, the options and the number's `source` always agree, also after a restart or a
-reload. Turning the switch on SHALL lock the shower flow at the flow in use at that moment. Turning it off SHALL
-return the shower flow to the median of the history, within its bounds, with source learned, or to the default
-while the history is empty. Setting the "Shower flow" number SHALL turn the switch on. The history SHALL keep
-filling while the switch is on.
+The "Shower flow locked" switch SHALL show and set the shower flow lock, which is the same lock as in the options
+and the number, also after a restart or a reload. On SHALL lock the flow in use at that moment. Off SHALL return to
+the median of the history, within its bounds, with source learned, or to the starting value while the history is
+empty. Setting the number SHALL turn the switch on. The history SHALL keep filling while it is on.
 
 #### Scenario: Lock the learned flow
 - **WHEN** the learned shower flow is 7.65 L/min and the user turns the switch on

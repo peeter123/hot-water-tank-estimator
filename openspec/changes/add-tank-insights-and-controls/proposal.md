@@ -64,14 +64,17 @@ These capabilities are added by `add-hot-water-estimator`, which must be archive
   - quiet-window loss learning uses the ambient in use;
   - the shower flow becomes a learned parameter, with its bounds and lock;
   - the setup fit replays the ambient sensor.
-- `draw-classification`: a detected shower reports its own flow, for shower flow learning, and its rolling flow
-  while it runs.
+- `draw-classification`:
+  - a detected shower reports its own flow, for shower flow learning, and its rolling flow while it runs;
+  - the end of the last draw is kept, for the "Hot water ran out" press.
 - `integration-setup`:
-  - the ambient sensor is an optional source;
-  - the entities: the heat loss sensor, the renamed button, the undo button and the shower flow number;
+  - the ambient sensor is an optional source, in the config flow, the options and reconfigure;
+  - the entities: the heat loss sensor, the renamed button, the undo button, the shower flow number, the "Shower flow
+    locked" switch and the "Tank sensor temperature" diagnostic sensor;
   - the `shower_flow` option is replaced by its lock;
   - the defaults: the ambient fallback time;
-  - the diagnostics: the new event kinds.
+  - the restored state: the last draw end, the last reset, the shower in progress and the last ambient reading;
+  - the diagnostics: the new event kinds, the shower flow history and the undo record.
 
 ## Impact
 
@@ -82,9 +85,10 @@ These capabilities are added by `add-hot-water-estimator`, which must be archive
   - `estimator.py` and `button.py`;
   - a new `number.py` and a new `switch.py`, and the tank sensor temperature in `sensor.py`;
   - `sensor.py`, `config_flow.py`, `const.py`, the strings and translations, `icons.json`, `diagnostics.py`;
-  - `scripts/history.py` and `scripts/backtest.py`, for the ambient sensor.
-- **Tests:** the model, calibration, button, number and options-flow tests, the replay fixtures where the ambient
-  matters, and the backtest.
+  - `scripts/backtest.py`, for the ambient sensor. `scripts/history.py` needs no change, because its roles are
+    generic (D8).
+- **Tests:** the model, calibration, button, number, switch, entity and options-flow tests, the replay fixtures where
+  the ambient matters, and the backtest.
 - **Docs:** the README (entities, options, tuning, limitations, the dashboard example) and `docs/model.md` (the heat
   loss formula, the ambient fallback, the press rules, the shower flow learning).
 - **Live Home Assistant (the development installation), each step only with the user's authorization:**
@@ -94,12 +98,19 @@ These capabilities are added by `add-hot-water-estimator`, which must be archive
     recalibration runs and the loss coefficient stays within its bounds. Roll back by removing the source in the
     options;
   - point the dashboard at the renamed button, and add the heat loss and shower flow entities, with a targeted
-    dashboard transform. Verify with a dashboard search. Roll back by reversing the transform.
+    dashboard transform. Verify with a dashboard search. Roll back by reversing the transform;
+  - remove the old "Shower ran cold" button's orphaned registry entry after the first deploy. Verify that a lookup
+    finds no entity. There is no rollback, because the entity is gone from the integration;
+  - deploy and restart for the lock switch (group 6). Verify that the switch exists and locks and unlocks the number.
+    Add its tile to the dashboard, and verify with a dashboard search. Roll back by deploying the previous commit,
+    restarting and removing the tile;
+  - deploy and restart for the tank sensor temperature (group 7). Verify that the sensor is diagnostic, matches its
+    source and names it. Roll back by deploying the previous commit and restarting.
 
 ## Out of scope
 
 - **A second heat source**, such as an electric element, which heats only the water above it. It needs a model with
-  two zones and evidence from a tank that has one. It is on the backlog as the follow-up change
+  two zones and evidence from a tank that has one. It is in `openspec/backlog.md` as the follow-up change
   `add-second-heat-source`. The development installation has no element.
 - **Named shower profiles per person**, for example two flow numbers with their own minutes sensors. The minutes
   range covers the need without setup. They can be added later on top of the shower flow history.

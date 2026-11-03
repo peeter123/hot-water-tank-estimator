@@ -160,6 +160,41 @@ async def test_reconfigure_recalibrates_only_when_the_ambient_sensor_changes(
     assert entry.options.get(CONF_AMBIENT_SENSOR) == after
 
 
+async def test_ambient_sensor_in_reconfigure(hass: HomeAssistant, hass_storage) -> None:
+    """T_avg 52 C, an ambient sensor added in reconfigure: reload, T_avg stays 52 C, a fit runs."""
+    set_sources(hass)
+    hass.states.async_set(AMBIENT, "19.5", {"unit_of_measurement": "°C"})
+    entry = await setup_fitted_entry(
+        hass, hass_storage, {**FULL_OPTIONS, CONF_HISTORY_DAYS: 14}, None
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "set_tank_state",
+        {
+            "entity_id": entity_id(hass, entry, "sensor", "tank_litres"),
+            "tank_average": 52,
+            "charged_temperature": 55,
+        },
+        blocking=True,
+    )
+    old = entry.runtime_data
+    result = await start(hass, entry)
+    with patch.object(
+        TankEstimator, "async_setup_fit", new=AsyncMock(return_value=None)
+    ) as fit:
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {**FORM, CONF_AMBIENT_SENSOR: AMBIENT}
+        )
+        assert result["reason"] == "reconfigure_successful"
+        await hass.async_block_till_done()
+        assert fit.await_count == 1
+    new = entry.runtime_data
+    assert new is not old
+    assert entry.options[CONF_AMBIENT_SENSOR] == AMBIENT
+    assert new.model.t_avg == pytest.approx(52.0, abs=0.01)
+    assert new.config.history_days == 14
+
+
 async def test_reconfigure_can_keep_the_same_tank_sensor(hass: HomeAssistant) -> None:
     """The entry's own tank sensor is not a duplicate."""
     set_sources(hass)

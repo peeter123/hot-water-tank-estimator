@@ -307,6 +307,13 @@ mixed draw while a shower or bath is detected, and an other draw otherwise.
   the month kept 8-21 L as other draws, up to about 1.2 K of T_avg each; 10 minutes covers every case seen. The
   window still bounds the reclassification, so a long session in which other draws ran into a shower does not take
   mix energy for all of it. The data had no such session, so this is a safeguard, not evidence.
+- **Draw just before a shower.** A draw that ends within the session gap (default 60 s) before a shower, such as a
+  toilet flush, becomes part of the shower's session. When the shower is detected it is reclassified as mixed with
+  the rest of the session, and its litres count in that shower's flow sample. Counting a 7 L flush as mixed instead
+  of as an other draw costs `7 * ((T_mix - T_cold) - share * (T_ch - T_cold)) / V` kelvin: at T_mix 38, T_cold 13.6,
+  share 0.16, T_ch 57.1 and V 285 L that is about 0.4 K. The session gap stays at 60 s: a longer gap merges more
+  unrelated draws, and a shorter one splits a shower with a short pause. The 10-minute reclassify window also bounds
+  it. In the flow sample the session's first increase is left out, and a gap below the session gap counts as flow time.
 
 ### Shower flow
 
@@ -471,7 +478,8 @@ sensor there are no closures, and `k` comes from quiet windows only.
     value) has no error from the press left to reverse, and raising it by `D` would distort it. This holds for 24
     hours after the first such replacement, because a wrong `u` shows at the next time the tank runs low, which in a
     household with daily showers is within a day. After that the record is cleared.
-  - A press that did not change `u` (locked) restores nothing for `u`.
+  - A press that did not change `u` (locked) restores nothing for `u`. Before a replacement undo still raises `t_avg`
+    by `D`; after one there is nothing left to undo, so the record is cleared at the first replacement.
 
   The record is cleared by an undo and replaced by the next accepted press, so only the last press can be undone. It
   is saved with the calibration, and a recalibrate keeps it, as it keeps the `u` from the button.

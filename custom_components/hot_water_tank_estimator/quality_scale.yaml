@@ -130,7 +130,8 @@ rules:
     comment: The calibration sensors have the diagnostic category and the lock switch the config category.
   entity-device-class:
     status: done
-    comment: The sensors set the volume storage, duration and temperature device classes where one fits.
+    comment: The sensors set the volume storage, duration, temperature and power (Heat loss) device classes where one
+      fits, and the Shower flow number sets the volume flow rate device class.
   entity-disabled-by-default:
     status: todo
     comment: Above Silver and not required for 0.1.0; the diagnostic sensors are enabled by default.

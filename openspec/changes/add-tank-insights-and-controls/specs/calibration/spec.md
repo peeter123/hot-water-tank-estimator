@@ -15,10 +15,12 @@ The integration SHALL learn the following parameters, each kept within its bound
 | shower flow | 3-20 L/min |
 
 Until a parameter has been learned, the configured option value SHALL be used; for the shower flow that is its
-default of 7.5 L/min. Once learned, the learned value SHALL be used, unless the user has locked that parameter in the
-options. Removing a lock SHALL discard the value learned before the lock, so the option value applies until the next
-fit. Each update of a learned parameter SHALL change it by at most a quarter of its bound range, except the "Hot
-water ran out" button, which records a user observation, and the shower flow, which is the median of recent showers.
+default of 7.5 L/min. Once learned, the learned value SHALL be used, unless the user has locked that parameter, in the
+options or, for the shower flow, with its number or switch. Removing a lock SHALL discard the value learned before
+the lock (for the shower flow, the value the lock held). The option value then applies until the next fit, except
+for the shower flow, which returns to the median of its history at once (see integration-setup). Each update of a
+learned parameter SHALL change it by at most a quarter of its bound range, except the "Hot water ran out" button,
+which records a user observation, and the shower flow, which is the median of recent showers.
 
 #### Scenario: Locked parameter
 - **WHEN** the user locks the other-draws hot share at 0.25
@@ -150,6 +152,11 @@ fraction, for 24 hours after the charge. Undo SHALL act on the last accepted pre
 #### Scenario: Nothing to undo
 - **WHEN** no press was accepted, the last press was undone already, or its undo time has run out
 - **THEN** the undo button is unavailable
+
+#### Scenario: Nothing left to undo after a charge
+- **WHEN** the usable fraction was locked during an accepted press, and a heating run has ended since the press
+- **THEN** the undo button is unavailable, because the charge replaced T_avg and the press did not change the usable
+  fraction
 
 ### Requirement: Shower flow from detected showers
 Each detected shower with at least 3 minutes of flow SHALL add its flow to the shower flow history: the litres

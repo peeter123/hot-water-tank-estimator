@@ -278,7 +278,7 @@ not at 20 C biases the loss coefficient and the heat loss a little.
 
 ## Tuning
 
-The defaults are a start, and the fit learns most values. Three settings decide how well the estimate matches your
+The defaults are a start, and the fit learns most values. These settings decide how well the estimate matches your
 showers:
 - **Hot water ran out earlier than predicted:** a shower or a tap that was hot ran cold. Press the "Hot water ran
   out" button when you can, up to 20 minutes later. It applies to the end of the last draw (a draw that is still
@@ -296,7 +296,8 @@ showers:
   is charged again (or set by hand), undo restores the usable fraction and raises the tank back by the drop the press
   applied, and the water drawn and the heat added since stay counted. After a charge or a set by hand it restores
   only the usable fraction, for 24 hours after that charge, because the charge already replaced the tank average.
-  After that, or after an undo, the button is unavailable again. Only the last press can be undone.
+  After that, or after an undo, the button is unavailable again. When the usable fraction was locked, the press did
+  not change it, so after a charge or a set by hand there is nothing left to undo. Only the last press can be undone.
 - **Shower flow:** the minutes left depend on how much water your shower uses per minute. The integration learns
   it from your detected showers, so you do not enter it. If two people shower at different flows, the median
   follows the one who showers most often, and the `minutes_low` and `minutes_high` attributes of the Shower
@@ -428,7 +429,7 @@ cards:
     name: Hot water ran out
     tap_action:
       action: perform-action
-      perform-action: button.press
+      perform_action: button.press
       target:
         entity_id: button.hot_water_tank_hot_water_ran_out
     grid_options:
@@ -438,7 +439,7 @@ cards:
     name: Undo
     tap_action:
       action: perform-action
-      perform-action: button.press
+      perform_action: button.press
       target:
         entity_id: button.hot_water_tank_undo_hot_water_ran_out
     grid_options:

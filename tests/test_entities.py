@@ -68,6 +68,7 @@ async def test_units_and_classes(hass: HomeAssistant) -> None:
     flow = hass.states.get(entity_id(hass, entry, "number", "shower_flow"))
     assert flow is not None
     assert flow.attributes.get("unit_of_measurement") == "L/min"
+    assert flow.attributes.get("device_class") == "volume_flow_rate"
     assert flow.attributes.get("min") == 3.0
     assert flow.attributes.get("max") == 20.0
     assert flow.attributes.get("step") == 0.1

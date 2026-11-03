@@ -240,26 +240,34 @@ Applies to every group:
 
 ## 5. Rollout on the development installation (each step needs the user's authorization)
 
-- [ ] 5.1 With authorization, deploy and restart. Verify through the home-assistant MCP server:
+- [x] 5.1 With authorization, deploy and restart. Verify through the home-assistant MCP server:
   - the entry loads with its state kept (T_avg within 0.1 K of before);
   - the new entities exist: heat loss, both buttons and the shower flow number;
   - the system log has no entries for the integration.
 
   Remove the old "Shower ran cold" button's registry entry, which the rename leaves behind as an unavailable entity
   (design, Risks). Verify that it is gone. Record the result in `private/installation.md`.
-- [ ] 5.2 With authorization, add the ambient sensor from `private/installation.md` in the options. Verify:
+  - Done 2026-11-03 at about 19:05, from master after a fast-forward to `2e391a0`, with the user's authorization.
+    T_avg 56.32 C before and 56.31 C after. The four new entities exist, the old button's orphaned registry entry
+    is removed, and the system log has no entries for the integration.
+- [x] 5.2 With authorization, add the ambient sensor from `private/installation.md` in the options. Verify:
   - the recalibration runs;
   - k stays within its bounds, and the quiet-window estimates are compared with those from before;
   - the heat loss sensor reads within 20 % of `k * C * (T_avg - T_ambient)`, worked out by hand.
 
   Record the numbers in `private/installation.md`.
-- [ ] 5.3 With authorization, update the "Hot Water" dashboard block with a targeted dashboard transform:
+  - Done 2026-11-03 at 19:07. The recalibration ran with the ambient history: k 0.003929 to 0.003819 per hour,
+    each quiet-window estimate about 2.8 % lower, as in the 1.6 backtest. The heat loss reads 47 W against 47.2 W
+    by hand. The replay filled the shower flow history with 10 showers, median 6.83 L/min.
+- [x] 5.3 With authorization, update the "Hot Water" dashboard block with a targeted dashboard transform:
   - point any card that uses the old button to `button.<tank>_hot_water_ran_out`;
   - add a heat loss tile;
   - add a shower flow tile, with the shower time tile showing the range.
 
   Update `private/installation.md`. Verify: a dashboard search finds the new entities and no old button.
-- [ ] 5.4 Live check over the next days:
+  - Done 2026-11-03 at about 19:10. No card used the old button. The Heat loss and Shower flow tiles are added,
+    and the Shower time tile shows `minutes_low` and `minutes_high`. A search finds 7 cards and no old button.
+- [x] 5.4 Live check over the next days:
   - a press with no draw in the last 20 minutes is rejected with a notification, and the diagnostics show the
     rejected event;
   - after the next showers, the shower flow history grows by one per shower of 3 minutes or more, and the flow in
@@ -269,7 +277,18 @@ Applies to every group:
   - the heat loss follows the ambient sensor.
 
   Record the result in `private/installation.md`. Verify: the diagnostics download shows these events.
-- [ ] 5.5 **User review.** Show the user the shower flow history, the minutes range, the rejection notification and
+  - Done 2026-11-03. The details are in `private/installation.md`.
+    - **Presses.** A press at 19:18 was rejected with `sensor_hot`, and one at 21:44 with `no_recent_draw`. The
+      user saw both notifications, the diagnostics show both rejected events, and nothing changed.
+    - **Shower of 20:36-20:45.** It was detected after 4 minutes, and the minutes switched to `current_shower` at
+      detection. The rolling flow stayed within about 0.5 L/min of the meter, also while the user turned the flow
+      down. At the end of detection, at 21:39, the history gained one sample of 6.47 L/min, and the median went from
+      6.83 to 6.66 L/min.
+    - **Heat loss and the ambient sensor.** This check moved out of this change at the user's request on
+      2026-11-03. It is in `openspec/backlog.md`.
+    - **Findings.** The long humidity tail and a silent sensor outage went to the backlog
+      (`improve-shower-end-detection`, `add-source-health-repairs`).
+- [x] 5.5 **User review.** Show the user the shower flow history, the minutes range, the rejection notification and
   the backtest comparison from 1.6. Ask whether the defaults hold:
   - the 20-minute window;
   - the 3-hour fallback;
@@ -279,6 +298,25 @@ Applies to every group:
     and at what pause (design, Risks).
 
   Record the decision with its date in this task, and update the docs if a default changes.
+  - Also for the docs pass of this task: from the live shower of 2026-11-03, `docs/model.md` should say that a draw
+    within the session gap before a shower, such as a toilet flush, becomes part of the shower's session. It is
+    then reclassified as mixed and counted in the shower flow sample. The user kept the 60 s session gap on
+    2026-11-03.
+  - Decision 2026-11-03: the user reviewed the results and kept every default: the 20-minute window, the 3-hour
+    fallback, the 3-minute minimum and the 24-hour undo. Splitting two showers in one detection is left to the
+    backlog item `improve-shower-end-detection`, because a better end rule would split them. No default changed,
+    so the docs only need the session-gap note above.
+- [ ] 5.6 Fix the findings of the whole-change review (2026-11-03), then deploy with authorization:
+  - the README dashboard example's `perform_action` key;
+  - undo unavailable after a reset when the press did not change u (calibration scenario "Nothing left to undo after
+    a charge", design D5);
+  - the volume flow rate device class on the "Shower flow" number (D6);
+  - the README and `quality_scale.yaml` wording, and the `docs/model.md` session-gap note.
+  - Code fixes done 2026-11-03: all of the above except the deploy, which is still open.
+
+  Verify: `python scripts/lint.py --hassfest`, then a follow-up Opus review. After an authorized deploy, verify that
+  the undo button is unavailable and the number shows its device class. The deploy can wait for the release of the
+  first change.
 
 ## 6. Shower flow lock switch (added 2026-11-03 at the user's request)
 
@@ -348,7 +386,13 @@ Applies to every group:
 
 ## Workflow follow-up
 
-- Before starting group 1, archive `add-hot-water-estimator`, so that the modified capabilities exist under
-  `openspec/specs/`.
-- One fresh Opus review of the whole change before archiving (`openspec/config.yaml`, Review loop).
+- `add-hot-water-estimator` was not archived before group 1, because its tasks 6.3 (live check) and 8.5 (release)
+  were still open. The user decided on 2026-11-03 to keep both changes open, in this order:
+  1. finish 6.3 and the release (8.5) of `add-hot-water-estimator`;
+  2. archive `add-hot-water-estimator`, so that the modified capabilities exist under `openspec/specs/`;
+  3. archive this change.
+
+  This change's delta specs modify those capabilities, so archiving it first would fail.
+- One fresh Opus review of the whole change before archiving (`openspec/config.yaml`, Review loop). It was started
+  on 2026-11-03, and it also serves as the review of group 5.
 - Sync the delta specs into `openspec/specs/` and archive the change (`/opsx:archive`).

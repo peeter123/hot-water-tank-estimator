@@ -1,6 +1,6 @@
 """The "Shower flow" number: the flow that turns shower litres into minutes."""
 
-from homeassistant.components.number import NumberEntity, NumberMode
+from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode
 from homeassistant.const import UnitOfVolumeFlowRate
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -24,6 +24,7 @@ async def async_setup_entry(
 class ShowerFlowNumber(TankEntity, NumberEntity):
     """The shower flow in use. Setting it locks the flow at that value."""
 
+    _attr_device_class = NumberDeviceClass.VOLUME_FLOW_RATE
     _attr_native_unit_of_measurement = UnitOfVolumeFlowRate.LITERS_PER_MINUTE
     _attr_native_min_value, _attr_native_max_value = PARAMETER_BOUNDS[SHOWER_FLOW]
     _attr_native_step = 0.1

@@ -1243,6 +1243,26 @@ def test_nothing_to_undo() -> None:
     assert rig.model.options.usable_fraction == pytest.approx(0.6, abs=1e-3)
 
 
+def test_nothing_left_to_undo_after_a_charge() -> None:
+    """U locked at 0.85: the press changes nothing for u, and a charge replaced T_avg, so undo is gone."""
+    rig = Rig(
+        t_avg=57.0,
+        loss_coefficient=0.0,
+        cold_mean=14.0,
+        locks=frozenset({"usable_fraction"}),
+    )
+    finish_draw(rig, T0 + 6 * MINUTE, 0.60)
+    assert press(rig, T0 + 9 * MINUTE).accepted
+    assert rig.model.options.usable_fraction == 0.85
+    # Before the charge, undo still raises T_avg by D.
+    assert rig.cal.undo_available(rig.model, T0 + 10 * MINUTE)
+    end = rig.run(T0 + 30 * MINUTE, 10, 5.0, 55.0)
+    assert not rig.cal.undo_available(rig.model, end + HOUR)
+    rig.call(end + HOUR, "tick")
+    assert rig.cal.undo_record is None
+    assert undo(rig, end + HOUR + MINUTE) is None
+
+
 def test_the_undo_time_counts_from_the_first_reset_after_the_press() -> None:
     """A second charge later does not extend the 24 hours."""
     rig = undo_rig()
@@ -1323,17 +1343,15 @@ def test_a_locked_usable_fraction_is_not_touched_by_undo() -> None:
     assert "usable_fraction" not in rig.cal.values
 
 
-def test_a_set_tank_state_after_a_press_makes_undo_restore_only_u() -> None:
-    """The set_tank_state action replaced T_avg after the press: raising it by D would distort it."""
+def test_a_set_tank_state_after_a_locked_press_leaves_nothing_to_undo() -> None:
+    """The set_tank_state action replaced T_avg after a press that did not change u: nothing to restore."""
     rig = undo_rig()
     rig.cal.set_locks({"usable_fraction"})
     finish_draw(rig, T0 + 6 * MINUTE, 0.78)
     assert press(rig, T0 + 9 * MINUTE).accepted
     rig.model.set_state(T0 + 10 * MINUTE, t_avg=40.0)
-    done = undo(rig, T0 + 11 * MINUTE)
-    assert done is not None
-    assert done.after_reset
-    assert done.rise == 0.0
+    assert not rig.cal.undo_available(rig.model, T0 + 11 * MINUTE)
+    assert undo(rig, T0 + 11 * MINUTE) is None
     assert rig.model.t_avg == pytest.approx(40.0)
 
 

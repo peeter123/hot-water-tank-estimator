@@ -1016,8 +1016,9 @@ class Calibrator:
     ) -> tuple[UndoRecord, datetime | None] | None:
         """Return the record and the time of the first reset after the press, None if void.
 
-        The record is void when there is none, or when the first reset after the press is
-        more than `UNDO_WINDOW` ago. Nothing is changed.
+        The record is void when there is none, when the first reset after the press is
+        more than `UNDO_WINDOW` ago, or when a reset has come and the press did not change
+        the usable fraction (nothing is left to restore). Nothing is changed.
         """
         record = self.undo_record
         if record is None:
@@ -1029,7 +1030,9 @@ class Calibrator:
             and model.last_reset > record.time
         ):
             reset = model.last_reset
-        if reset is not None and now - reset > UNDO_WINDOW:
+        if reset is not None and (
+            now - reset > UNDO_WINDOW or not record.usable_changed
+        ):
             return None
         return record, reset
 

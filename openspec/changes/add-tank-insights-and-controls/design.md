@@ -185,7 +185,8 @@ Details settled before the group 3 implementation (2026-11-03):
   says "until the next charge".
 - **What u restores.** Everything the press changed about u: the value, its source, and the marker that keeps a
   button-learned u through a recalibration. A press that did not change u, because u was locked, restores nothing
-  for u.
+  for u. After the next reset such a press has nothing left to undo, so its record is cleared and the undo button is
+  unavailable (whole-change review, 2026-11-03).
 - **The reset marker.** An undo before the next charge also restores `last_reset` to its value before the press, so
   a later press on the same draw works as if the undone press never happened. Without this, the undo's own
   `set_state` would make that later press skip D.
@@ -259,7 +260,7 @@ Details settled in the group 4 implementation (2026-11-03):
   starting value. `low` and `high` are None while the history is empty.
 
 **The "Shower flow" number** (new `number.py`):
-- Its native value is the flow in use.
+- Its native value is the flow in use, with the volume flow rate device class (whole-change review, 2026-11-03).
 - Its attributes are `source`, `low` and `high`.
 - Setting it calls `Calibrator.set_shower_flow(value)`, which stores the value with source `locked` and adds
   `shower_flow` to the locks.
@@ -280,7 +281,8 @@ unchanged:
   `ambient_sensor` with `ambient_last` (the last good reading, and the time the sensor was last known good, from
   which the fallback counts);
 - the entry store: `ambient_fit`, the ambient entity the calibration was last fitted with (D1);
-- calibrator: `shower_flow_history` and `undo`.
+- calibrator: `shower_flow_history` and `undo`;
+- classifier: `shower`, the detected shower in progress with its increases (D6).
 
 Diagnostics already dump these dicts, so the new state appears there without new code. The new event kinds are
 `hot_water_ran_out` (with `result` accepted, rejected or undone, plus the reason) and `shower_flow`.
@@ -356,8 +358,9 @@ The user asked for it on 2026-11-03, for a direct link from the device to the so
   about 3 %.
 - [Two people showering one after the other within one humidity detection make one sample at the litre-weighted mean
   of their flows, such as about 9.7 L/min for 7.5 and 12] → This is the in-between value the median is meant to
-  avoid. Splitting a sample at a pause needs a threshold above a normal mid-shower pause (3 minutes in the spec), so
-  it is left for the user review in 5.5, with live evidence. Accepted for now (group 4 review, 2026-11-03).
+  avoid. Splitting a sample at a pause needs a threshold above a normal mid-shower pause (3 minutes in the spec).
+  The user review in 5.5 (2026-11-03) moved it to the backlog item `improve-shower-end-detection`, because a better
+  end rule would split such showers too.
 - [A background fit can double or lose one live shower sample near its end, because the live classifier notices a
   shower end up to one tick later than the replay] → One sample in a median of 10. Accepted.
 - [A replay that finds no showers leaves the history empty, for example with history days set to 1] → The flow
@@ -394,5 +397,4 @@ The user asked for it on 2026-11-03, for a direct link from the device to the so
 
 ## Open Questions
 
-- The exact notification wording for each reason. It can be settled in the strings during implementation without
-  changing behaviour.
+None. The notification wording was settled in group 2, in the `press_ignored_*` strings (D4).
