@@ -766,6 +766,15 @@ class TankModel:
 
     # ----- internals ----------------------------------------------------------------------
 
+    @property
+    def last_reset(self) -> datetime | None:
+        """Return when T_avg was last replaced (a charge or a manual set_state), None if never."""
+        return self._last_reset
+
+    def restore_last_reset(self, time: datetime | None) -> None:
+        """Put the time of the last T_avg replacement back to an earlier value (an undo)."""
+        self._last_reset = time
+
     def reset_since(self, time: datetime) -> bool:
         """Return whether T_avg was replaced after `time` (a charge or a manual set_state)."""
         return self._last_reset is not None and self._last_reset > time

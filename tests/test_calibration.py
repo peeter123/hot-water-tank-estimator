@@ -14,6 +14,7 @@ from custom_components.hot_water_tank_estimator.calibration import (
     Calibrator,
     Closure,
     PressResult,
+    UndoResult,
     bounded_step,
     charge_error,
     fit_closures,
@@ -1120,3 +1121,245 @@ def test_a_set_tank_state_since_the_draw_skips_the_drop() -> None:
     assert result.accepted
     assert result.drop == 0.0
     assert rig.model.t_avg == pytest.approx(40.0)
+
+
+# ----- undo of the last press --------------------------------------------------------------
+
+
+def undo(rig: Rig, now: datetime) -> UndoResult | None:
+    """Press "Undo hot water ran out" at `now`, as the runtime does: advance the model first."""
+    rig.call(now, "tick")
+    return rig.cal.undo(rig.model, now)
+
+
+def undo_rig() -> Rig:
+    """A charged tank at 57 C with no loss and cold water at 14 C (a span of 43 K)."""
+    return Rig(t_avg=57.0, loss_coefficient=0.0, cold_mean=14.0)
+
+
+def test_undo_before_the_next_charge() -> None:
+    """A draw ended at f 0.22 (span 43 K): u 0.85 -> 0.50, T_avg down 0.28 * 43 K, 30 L drawn since.
+
+    Undo restores u 0.85 and raises T_avg by 12 K; the 30 L stay counted, which the tank that
+    never had the press shows (the same draws, no press).
+    """
+    rig = undo_rig()
+    control = undo_rig()
+    for each in (rig, control):
+        finish_draw(each, T0 + 6 * MINUTE, 0.22)
+    reset_before = rig.model.last_reset
+    result = press(rig, T0 + 9 * MINUTE)
+    assert result.accepted
+    assert result.drop == pytest.approx(0.28 * 43.0)
+    assert rig.model.options.usable_fraction == 0.5
+    for each in (rig, control):
+        each.draw(T0 + 20 * MINUTE, 1.0)
+        each.draw(T0 + 21 * MINUTE, 30.0)
+    done = undo(rig, T0 + 30 * MINUTE)
+    undo(control, T0 + 30 * MINUTE)  # no press: nothing to undo
+    assert done is not None
+    assert done.rise == pytest.approx(0.28 * 43.0)
+    assert not done.after_reset
+    assert rig.model.options.usable_fraction == 0.85
+    assert rig.cal.source_of("usable_fraction") == "option"
+    assert rig.model.t_avg == pytest.approx(control.model.t_avg)
+    assert rig.model.last_reset == reset_before
+    assert rig.cal.undo_record is None
+
+
+def test_undo_of_a_press_clamped_at_the_floor() -> None:
+    """A draw that ended at f 0.4: the press sets u to 0.5 and drops T_avg by 0.1 * 43 K; undo reverses both."""
+    rig = undo_rig()
+    finish_draw(rig, T0 + 6 * MINUTE, 0.4)
+    before = rig.model.t_avg
+    result = press(rig, T0 + 9 * MINUTE)
+    assert result.accepted
+    assert result.drop == pytest.approx(0.1 * 43.0)
+    assert rig.model.options.usable_fraction == 0.5
+    assert rig.cal.undo_record is not None
+    done = undo(rig, T0 + 10 * MINUTE)
+    assert done is not None
+    assert done.rise == pytest.approx(0.1 * 43.0)
+    assert rig.model.options.usable_fraction == 0.85
+    assert rig.model.t_avg == pytest.approx(before)
+    assert rig.cal.undo_record is None
+
+
+def test_undo_restores_a_usable_fraction_learned_before() -> None:
+    """The value, its source and the learned marker come back: a recalibrate would keep them."""
+    rig = undo_rig()
+    rig.cal.values["usable_fraction"] = 0.9
+    rig.cal.sources["usable_fraction"] = "learned"
+    rig.model.set_options(rig.cal.options)
+    finish_draw(rig, T0 + 6 * MINUTE, 0.7)
+    assert press(rig, T0 + 9 * MINUTE).accepted
+    assert rig.model.options.usable_fraction == pytest.approx(0.7, abs=1e-3)
+    assert undo(rig, T0 + 10 * MINUTE) is not None
+    assert rig.cal.values["usable_fraction"] == 0.9
+    assert rig.cal.source_of("usable_fraction") == "learned"
+    assert rig.model.options.usable_fraction == 0.9
+
+
+def test_undo_after_a_charge() -> None:
+    """U 0.85 -> 0.60, a heating run ended 3 h ago: undo restores u and leaves T_avg charged."""
+    rig = undo_rig()
+    finish_draw(rig, T0 + 6 * MINUTE, 0.60)
+    assert press(rig, T0 + 9 * MINUTE).accepted
+    assert rig.model.options.usable_fraction == pytest.approx(0.60, abs=1e-3)
+    end = rig.run(T0 + 30 * MINUTE, 10, 5.0, 55.0)
+    assert rig.model.t_avg == 55.0
+    done = undo(rig, end + 3 * HOUR)
+    assert done is not None
+    assert done.after_reset
+    assert done.rise == 0.0
+    assert rig.model.options.usable_fraction == 0.85
+    assert rig.model.t_avg == pytest.approx(55.0)
+    assert rig.cal.undo_record is None
+
+
+def test_nothing_to_undo() -> None:
+    """No press, a press undone already, and a press whose time ran out: undo is unavailable."""
+    rig = undo_rig()
+    assert not rig.cal.undo_available(rig.model, T0)
+    assert undo(rig, T0 + MINUTE) is None
+    # Already undone.
+    finish_draw(rig, T0 + 6 * MINUTE, 0.6)
+    assert press(rig, T0 + 9 * MINUTE).accepted
+    assert rig.cal.undo_available(rig.model, T0 + 10 * MINUTE)
+    assert undo(rig, T0 + 10 * MINUTE) is not None
+    assert not rig.cal.undo_available(rig.model, T0 + 11 * MINUTE)
+    assert undo(rig, T0 + 11 * MINUTE) is None
+    # Time run out: 24 hours after the charge that followed the press.
+    finish_draw(rig, T0 + 2 * HOUR, 0.6)
+    assert press(rig, T0 + 2 * HOUR + 3 * MINUTE).accepted
+    end = rig.run(T0 + 3 * HOUR, 10, 5.0, 55.0)
+    assert rig.cal.undo_available(rig.model, end + 23 * HOUR)
+    assert rig.cal.undo_available(rig.model, end + 24 * HOUR)
+    assert not rig.cal.undo_available(rig.model, end + 24 * HOUR + MINUTE)
+    rig.call(end + 24 * HOUR + MINUTE, "tick")
+    assert rig.cal.undo_record is None
+    assert undo(rig, end + 24 * HOUR + 2 * MINUTE) is None
+    assert rig.model.options.usable_fraction == pytest.approx(0.6, abs=1e-3)
+
+
+def test_the_undo_time_counts_from_the_first_reset_after_the_press() -> None:
+    """A second charge later does not extend the 24 hours."""
+    rig = undo_rig()
+    finish_draw(rig, T0 + 6 * MINUTE, 0.6)
+    assert press(rig, T0 + 9 * MINUTE).accepted
+    first = rig.run(T0 + 30 * MINUTE, 10, 5.0, 55.0)
+    record = rig.cal.undo_record
+    assert record is not None
+    assert record.reset_seen == first
+    second = rig.run(first + 20 * HOUR, 10, 5.0, 55.0)
+    assert rig.cal.undo_record is record
+    assert record.reset_seen == first
+    assert second > first + 20 * HOUR
+    assert not rig.cal.undo_available(rig.model, first + 24 * HOUR + MINUTE)
+
+
+def test_restart_keeps_the_undo() -> None:
+    """The record and the model are saved: 5 minutes after the press, undo still restores u and T_avg."""
+    rig = undo_rig()
+    finish_draw(rig, T0 + 6 * MINUTE, 0.4)
+    before = rig.model.t_avg
+    assert press(rig, T0 + 9 * MINUTE).accepted
+    now = T0 + 14 * MINUTE
+    rig.call(now, "tick")
+    saved_model = json.loads(json.dumps(rig.model.to_dict()))
+    saved_cal = json.loads(json.dumps(rig.cal.to_dict()))
+    cal = Calibrator(make_options())
+    cal.restore(saved_cal)
+    model = TankModel.from_dict(cal.options, rig.sources, saved_model)
+    assert cal.undo_available(model, now)
+    done = cal.undo(model, now)
+    assert done is not None
+    assert model.options.usable_fraction == 0.85
+    assert model.t_avg == pytest.approx(before)
+
+
+def test_a_store_without_undo_loads() -> None:
+    """A calibration saved before the undo record existed loads with no record."""
+    rig = undo_rig()
+    saved = json.loads(json.dumps(rig.cal.to_dict()))
+    assert saved["undo"] is None
+    saved.pop("undo")
+    cal = Calibrator(make_options())
+    cal.restore(saved)
+    assert cal.undo_record is None
+    assert not cal.undo_available(rig.model, T0)
+
+
+def test_a_second_press_after_an_undo_applies_the_drop_again() -> None:
+    """With u locked: press, undo, press on the same draw. The undo put the reset marker back."""
+    rig = undo_rig()
+    rig.cal.set_locks({"usable_fraction"})
+    finish_draw(rig, T0 + 6 * MINUTE, 0.78)
+    before = rig.model.t_avg
+    first = press(rig, T0 + 9 * MINUTE)
+    assert first.drop == pytest.approx(0.07 * 43.0)
+    done = undo(rig, T0 + 10 * MINUTE)
+    assert done is not None
+    assert done.rise == pytest.approx(0.07 * 43.0)
+    assert rig.model.t_avg == pytest.approx(before)
+    second = press(rig, T0 + 11 * MINUTE)
+    assert second.accepted
+    assert second.drop == pytest.approx(0.07 * 43.0)
+    assert rig.model.t_avg == pytest.approx(before - 0.07 * 43.0)
+
+
+def test_a_locked_usable_fraction_is_not_touched_by_undo() -> None:
+    """A press that did not change u (locked) restores nothing for u, but still reverses D."""
+    rig = undo_rig()
+    rig.cal.set_locks({"usable_fraction"})
+    finish_draw(rig, T0 + 6 * MINUTE, 0.78)
+    assert press(rig, T0 + 9 * MINUTE).accepted
+    record = rig.cal.undo_record
+    assert record is not None
+    assert not record.usable_changed
+    assert undo(rig, T0 + 10 * MINUTE) is not None
+    assert rig.model.options.usable_fraction == 0.85
+    assert "usable_fraction" not in rig.cal.values
+
+
+def test_a_set_tank_state_after_a_press_makes_undo_restore_only_u() -> None:
+    """The set_tank_state action replaced T_avg after the press: raising it by D would distort it."""
+    rig = undo_rig()
+    rig.cal.set_locks({"usable_fraction"})
+    finish_draw(rig, T0 + 6 * MINUTE, 0.78)
+    assert press(rig, T0 + 9 * MINUTE).accepted
+    rig.model.set_state(T0 + 10 * MINUTE, t_avg=40.0)
+    done = undo(rig, T0 + 11 * MINUTE)
+    assert done is not None
+    assert done.after_reset
+    assert done.rise == 0.0
+    assert rig.model.t_avg == pytest.approx(40.0)
+
+
+def test_a_set_tank_state_after_a_press_restores_a_learned_u() -> None:
+    """A learned u comes back after a set_tank_state, within 24 hours of that action."""
+    rig = undo_rig()
+    finish_draw(rig, T0 + 6 * MINUTE, 0.6)
+    assert press(rig, T0 + 9 * MINUTE).accepted
+    rig.model.set_state(T0 + 10 * MINUTE, t_avg=40.0)
+    done = undo(rig, T0 + 20 * HOUR)
+    assert done is not None
+    assert rig.model.options.usable_fraction == 0.85
+    assert rig.model.t_avg == pytest.approx(40.0)
+
+
+def test_the_press_reset_is_not_a_reset_after_the_press() -> None:
+    """The record is timed by the model's own reset: a press with the model clock ahead of its time."""
+    rig = undo_rig()
+    finish_draw(rig, T0 + 6 * MINUTE, 0.6)
+    rig.call(
+        T0 + 10 * MINUTE, "tick"
+    )  # the model clock is ahead of the press time below
+    assert rig.cal.hot_water_ran_out(rig.model, T0 + 9 * MINUTE).accepted
+    record = rig.cal.undo_record
+    assert record is not None
+    assert record.time == T0 + 10 * MINUTE
+    assert record.time == rig.model.last_reset
+    rig.call(T0 + 11 * MINUTE, "tick")
+    assert record.reset_seen is None
+    assert rig.cal.undo_available(rig.model, T0 + 12 * MINUTE)

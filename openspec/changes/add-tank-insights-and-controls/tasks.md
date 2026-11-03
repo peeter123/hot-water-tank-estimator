@@ -138,17 +138,40 @@ Applies to every group:
 
 ## 3. Undo
 
-- [ ] 3.1 Implement the undo record and `Calibrator.undo` (design D5): before the next charge, after it for 24
+- [x] 3.1 Implement the undo record and `Calibrator.undo` (design D5): before the next charge, after it for 24
   hours, the last press only, and the record saved in the store. Verify:
   - tests for the calibration scenarios "Undo before the next charge", "Undo after a charge", "Nothing to undo" and
     "Restart keeps the undo";
   - a test that a recalibration keeps the record;
   - a test that a store without `undo` loads.
-- [ ] 3.2 Add the "Undo hot water ran out" button: available only while undo is possible, re-evaluated on model
+  - Done 2026-11-03: `UndoRecord` (press time, previous u with its source, whether the press changed u, D, the model's
+    `last_reset` from before, and the time of the first reset after the press) is `Calibrator.undo_record`, written by
+    an accepted press and saved under `undo` (None on load without it). `Calibrator.undo(model, now)` returns an
+    `UndoResult` or None; `undo_available(model, now)` is a query without side effects, and `observe` notes the first
+    reset and clears an expired record, so the runtime needs no extra call. The "learned from the button" marker is
+    the presence of u in `values` (u is learned nowhere else), so undo pops it when none was learned before. The
+    model gained `last_reset` and `restore_last_reset`. A recalibrate keeps the record: `setup_fit(previous=...)` and
+    `_apply_fit`, which takes the live record and, after a press or undo during the fit, the live u. The scenario
+    "Undo before the next charge" is a real press on a draw that ended at f 0.22, which clamps u at 0.5 and drops
+    T_avg by 0.28 * 43 K; the test compares the undone tank with a control that never had the press. The record
+    is timed by the model's own reset, and is dropped when the stored model is discarded.
+- [x] 3.2 Add the "Undo hot water ran out" button: available only while undo is possible, re-evaluated on model
   events and on the 5-minute tick, and logging the undo event. Verify: runtime tests that the button is unavailable
   before a press and after an undo, available after an accepted press, and that pressing it restores the state.
-- [ ] 3.3 Document undo in the README (the entity, and when it is available) and in `docs/model.md` (what it
+  The diagnostics' calibration state includes the undo record (integration-setup "Diagnostics"; added after the
+  group 3 review, 2026-11-03), with a diagnostics test.
+  - Done 2026-11-03: `UndoHotWaterRanOutButton` (key and translation key `undo_hot_water_ran_out`, icon `mdi:undo`),
+    available from `TankEstimator.undo_available()`, which the 5-minute tick and every model event re-evaluate through
+    the existing signal; after a restart the saved record gives the right state. A press ticks the model, calls
+    `Calibrator.undo`, logs `hot_water_ran_out` with `result: undone` (u, the T_avg rise, `after_reset`) and the
+    calibration change, saves and signals; with nothing to undo it raises a `ServiceValidationError` with the
+    translated message `nothing_to_undo`. An undo counts as a manual action for a running fit.
+    The diagnostics' calibration block has the record under `undo` (None or its dict).
+- [x] 3.3 Document undo in the README (the entity, and when it is available) and in `docs/model.md` (what it
   reverses and why it uses the drop D). Verify: `python scripts/lint.py`.
+  - Done 2026-11-03: README (entity table, "Tuning") and `docs/model.md` ("Usable fraction": what undo reverses, D
+    only, the u-only rule after a charge or `set_tank_state`, the 24 hours). `python scripts/lint.py` and `--hassfest`
+    are clean.
 
 ## 4. Shower flow
 

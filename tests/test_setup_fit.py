@@ -11,6 +11,7 @@ from custom_components.hot_water_tank_estimator.calibration import (
     CLOSURE,
     SENSOR_START,
     Calibrator,
+    UndoRecord,
 )
 from custom_components.hot_water_tank_estimator.model import ModelOptions
 from custom_components.hot_water_tank_estimator.setup_fit import (
@@ -127,6 +128,23 @@ def test_recalibrate_keeps_the_usable_fraction_from_the_button() -> None:
     assert again.options.usable_fraction == 0.72
     # The other parameters are refitted from the same history.
     assert again.parameters["startup_energy"] == before.parameters["startup_energy"]
+
+
+def test_recalibrate_keeps_the_undo_record() -> None:
+    """The undo of the last press is in no history: a recalibrate keeps the record."""
+    history, options = load("week")
+    before = setup_fit(history, options)
+    record = UndoRecord(
+        time=history.end,
+        usable_changed=True,
+        usable=0.9,
+        usable_source="learned",
+        drop=4.3,
+        last_reset=None,
+    )
+    before.calibrator.undo_record = record
+    again = setup_fit(history, options, previous=before.calibrator)
+    assert again.calibrator.undo_record == record
 
 
 def test_the_replay_starts_at_the_first_numeric_tank_reading() -> None:

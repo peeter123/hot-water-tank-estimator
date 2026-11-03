@@ -23,7 +23,7 @@ It provides:
 - the charged temperature and the estimated tank average temperature;
 - the cold water temperature used;
 - the standing heat loss of the tank, in W;
-- a shower detected binary sensor and a "Hot water ran out" button;
+- a shower detected binary sensor, a "Hot water ran out" button and an "Undo hot water ran out" button;
 - calibration diagnostics.
 
 ## What it is for
@@ -158,6 +158,7 @@ Each tank has one device with these entities. All names are translated.
 | Heat loss | W | The standing heat loss of the tank: the loss coefficient times the tank's heat capacity times the excess of the tank average over the ambient temperature in use. 0 W at or below the ambient temperature. |
 | Shower detected | | On while a shower or bath is detected. Unavailable when there are no humidity sensors and the long draw rule is off. |
 | Hot water ran out | | Button. Press it when hot water ran out earlier than predicted. See "Tuning". |
+| Undo hot water ran out | | Button. Undoes the last accepted press. Unavailable unless there is a press to undo. See "Tuning". |
 
 The calibration diagnostic sensors are listed under "Diagnostic sensors" below.
 
@@ -184,7 +185,7 @@ supported yet: the estimate then does not know that the heat goes into the upper
 | Action | Fields | What it does |
 |---|---|---|
 | `hot_water_tank_estimator.set_tank_state` | Tank average, Charged temperature | Sets the temperatures by hand. With neither given, the tank is charged to the reading of the tank sensor, and the action fails if the sensor is unavailable. With only the average given, the charged temperature stays. |
-| `hot_water_tank_estimator.recalibrate` | Days (1-30) | Fits the parameters again from the recorder history. Locked parameters and the usable fraction learned from the button stay. |
+| `hot_water_tank_estimator.recalibrate` | Days (1-30) | Fits the parameters again from the recorder history. Locked parameters, the usable fraction learned from the button and the undo record of the last press stay. |
 
 Both take a tank (an entity of the tank) as target. The temperatures of `set_tank_state` are in C.
 
@@ -284,6 +285,12 @@ showers:
   notification that says why, when no water was drawn in the last 20 minutes, or when the tank sensor still read
   within the sensor tolerance of the charged temperature when the last draw ended: then the cold water at the outlet
   was cold pipe water and not an empty tank. Check the sensor height first if the charge errors are biased.
+- **Pressed by mistake:** the "Undo hot water ran out" button undoes the last accepted press. It is available only
+  while there is something to undo, which is right after an accepted press and survives a restart. Before the tank
+  is charged again (or set by hand), undo restores the usable fraction and raises the tank back by the drop the press
+  applied, and the water drawn and the heat added since stay counted. After a charge or a set by hand it restores
+  only the usable fraction, for 24 hours after that charge, because the charge already replaced the tank average.
+  After that, or after an undo, the button is unavailable again. Only the last press can be undone.
 - **Usable fraction** (Options): lower it when showers run cold with litres left, raise it when water remains after
   the estimate reached zero. The button does this for you.
 - **Thermocline width** (Options): a wide layer makes the hot water run out more gradually. It is learned from the

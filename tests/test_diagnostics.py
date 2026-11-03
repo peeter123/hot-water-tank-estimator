@@ -110,7 +110,9 @@ async def test_download_diagnostics(hass: HomeAssistant, freezer) -> None:
         "closures",
         "quiet_estimates",
         "width_estimates",
+        "undo",
     }
+    assert calibration["undo"] is None
     assert set(calibration["parameters"]) == {
         "other_hot_share",
         "startup_energy",
@@ -171,6 +173,9 @@ async def test_an_accepted_press_is_in_the_events(hass: HomeAssistant, freezer) 
         event["change"]["cold_fraction"]
     )
     assert set(event["change"]) >= {"draw_end", "cold_fraction", "drop"}
+    undo = data["calibration"]["undo"]
+    assert undo["drop"] == event["change"]["drop"]
+    assert undo["usable"] is None
     json.dumps(data)
 
 

@@ -11,6 +11,9 @@
     "button": {
       "hot_water_ran_out": {
         "default": "mdi:water-thermometer-outline"
+      },
+      "undo_hot_water_ran_out": {
+        "default": "mdi:undo"
       }
     },
     "sensor": {

@@ -133,7 +133,7 @@ async def test_every_entity_is_on_one_device_with_a_translated_name(
     assert len(devices) == 1
     assert devices[0].name == TITLE
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
-    assert len(entities) == 8 + 8 + 1 + 1
+    assert len(entities) == 8 + 8 + 1 + 1 + 1
     assert {e.device_id for e in entities} == {devices[0].id}
     state = hass.states.get(entity_id(hass, entry, "sensor", "tank_litres"))
     assert state is not None
@@ -141,6 +141,10 @@ async def test_every_entity_is_on_one_device_with_a_translated_name(
     button = hass.states.get(entity_id(hass, entry, "button", "hot_water_ran_out"))
     assert button is not None
     assert button.attributes["friendly_name"] == "Hot water Hot water ran out"
+    undo = hass.states.get(entity_id(hass, entry, "button", "undo_hot_water_ran_out"))
+    assert undo is not None
+    assert undo.state == "unavailable"
+    assert undo.attributes["friendly_name"] == "Hot water Undo hot water ran out"
 
 
 async def test_two_tanks_have_two_devices(hass: HomeAssistant) -> None:

@@ -414,11 +414,29 @@ sensor there are no closures, and `k` comes from quiet windows only.
   runs cold when the outlet water at the tap is cold, while a shower with a thermostatic mixer turns cold once the hot
   side falls below the mix temperature. The model treats both as the moment `f` reached the limit `u`, so a tap and a
   shower teach the same parameter, and the difference is absorbed in the learned value.
+
+  **Undo.** The "Undo hot water ran out" button reverses the last accepted press. The press leaves a record: its time,
+  the `u` learned before it with its source (and whether one was learned at all, the marker that makes a recalibrate
+  keep a button-learned `u`), `D`, and the `t_avg` replacement time from before the press. Undo then depends on
+  whether `t_avg` was replaced after the press (a charge or the `set_tank_state` action; the press's own reset is at
+  the press time and does not count):
+  - Not replaced yet: `u` and its source are restored, `t_avg` is raised by `D` (within the physical bounds), and the
+    replacement time goes back to its value from before the press, so a later press on the same draw applies `D`
+    again, as if the undone press never happened. Only `D` is reversed, not the state at the press time: the draws
+    and the heat since the press stay counted, and restoring the old `t_avg` would lose them.
+  - Replaced since: only `u` and its source are restored. The new `t_avg` (a charged temperature, or the user's
+    value) has no error from the press left to reverse, and raising it by `D` would distort it. This holds for 24
+    hours after the first such replacement, because a wrong `u` shows at the next time the tank runs low, which in a
+    household with daily showers is within a day. After that the record is cleared.
+  - A press that did not change `u` (locked) restores nothing for `u`.
+
+  The record is cleared by an undo and replaced by the next accepted press, so only the last press can be undone. It
+  is saved with the calibration, and a recalibrate keeps it, as it keeps the `u` from the button.
 - **Precedence.** Option value, then the setup fit, then live learning, unless locked. Live learning changes a
   parameter the setup fit set from `setup_fit` to `learned`: `setup_fit` returns a calibrator that is already live
   (`Calibrator.go_live`), so only what the fit itself changed keeps the source `setup_fit`. A recalibrate replaces
-  the calibration state with the new fit, but keeps the usable fraction learned from the button (and its source),
-  which no replay can learn.
+  the calibration state with the new fit, but keeps the usable fraction learned from the button (and its source) and
+  the undo record of the last press, which no replay can learn.
 - **What the data can separate.** The loss sum and the other-draw sum of the closures move together (a correlation of
   0.93-0.96 in the development data), because both grow with the length of an interval. `S` is a constant per run,
   and `k` and `share` trade off against each other. Over a month (25 closures) all three separate; over a week

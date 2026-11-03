@@ -43,7 +43,8 @@ from custom_components.hot_water_tank_estimator.setup_fit import (
 from homeassistant.components import persistent_notification
 from homeassistant.components.persistent_notification import UpdateType
 from homeassistant.components.recorder import Recorder
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 
@@ -284,6 +285,7 @@ def notifications(hass: HomeAssistant) -> dict[str, dict]:
     """Collect the persistent notifications that are shown from now on, by notification ID."""
     shown: dict[str, dict] = {}
 
+    @callback
     def collect(update_type: UpdateType, current: dict) -> None:
         if update_type in (UpdateType.ADDED, UpdateType.UPDATED):
             shown.update(current)
@@ -842,3 +844,219 @@ def test_a_text_with_an_unknown_placeholder_still_formats() -> None:
     assert text.format_map(_Tolerant({"sensor": "55.8"})) == (
         "Ignored: 55.8 C and {other}."
     )
+
+
+async def press_undo(rig: Rig) -> None:
+    """Press the "Undo hot water ran out" button of the rig's entry."""
+    await rig.hass.services.async_call(
+        "button",
+        "press",
+        {
+            "entity_id": entity_id(
+                rig.hass, rig.entry, "button", "undo_hot_water_ran_out"
+            )
+        },
+        blocking=True,
+    )
+
+
+def undo_state(rig: Rig) -> str:
+    """Return the state of the undo button: unavailable, or the time of its last press."""
+    state = rig.hass.states.get(
+        entity_id(rig.hass, rig.entry, "button", "undo_hot_water_ran_out")
+    )
+    assert state is not None
+    return state.state
+
+
+async def pressed_at_the_floor(rig: Rig) -> float:
+    """Draw 1 L from a tank at a cold fraction of 0.4, press, and return T_avg before the press.
+
+    The tank sensor must read well above the average the draw leaves (the tests give it 35 C),
+    or its bound would raise the cold fraction above the usable fraction's floor.
+    """
+    estimator = rig.entry.runtime_data
+    t_cold = estimator.model.t_cold
+    await rig.hass.services.async_call(
+        DOMAIN,
+        "set_tank_state",
+        {
+            "entity_id": entity_id(rig.hass, rig.entry, "sensor", "tank_litres"),
+            "tank_average": 55 - 0.4 * (55 - t_cold),
+            "charged_temperature": 55,
+        },
+        blocking=True,
+    )
+    await draw_one_litre_and_wait(rig)
+    before = estimator.model.t_avg
+    await press_hot_water_ran_out(rig)
+    return before
+
+
+async def test_the_undo_button_follows_the_press(hass: HomeAssistant, freezer) -> None:
+    """Unavailable before a press, available after an accepted one, unavailable after an undo."""
+    rig = await Rig.start(hass, freezer, states={TANK: "35.0"})
+    estimator = rig.entry.runtime_data
+    assert undo_state(rig) == "unavailable"
+    before = await pressed_at_the_floor(rig)
+    assert estimator.model.t_avg < before
+    assert rig.read("sensor", "usable_fraction") == "50.0"
+    assert undo_state(rig) != "unavailable"
+    await press_undo(rig)
+    assert rig.read("sensor", "usable_fraction") == "85.0"
+    assert estimator.model.t_avg == pytest.approx(before)
+    assert undo_state(rig) == "unavailable"
+    state = hass.states.get(entity_id(hass, rig.entry, "sensor", "usable_fraction"))
+    assert state is not None
+    assert state.attributes["source"] == "option"
+    event = [
+        e for e in estimator.model.events if e.kind == EventKind.HOT_WATER_RAN_OUT
+    ][-1]
+    assert event.change["result"] == "undone"
+    assert event.change["usable_fraction"] == 0.85
+    assert event.change["rise"] > 0
+    assert event.change["after_reset"] is False
+    # Nothing is left to undo: a late call explains it.
+    with pytest.raises(ServiceValidationError):
+        await estimator.async_undo_hot_water_ran_out()
+
+
+async def test_the_undo_button_is_available_after_a_restart(
+    hass: HomeAssistant, freezer
+) -> None:
+    """The record is saved: after a reload the button is available and undo restores u."""
+    rig = await Rig.start(hass, freezer, states={TANK: "35.0"})
+    before = await pressed_at_the_floor(rig)
+    assert await hass.config_entries.async_reload(rig.entry.entry_id)
+    await hass.async_block_till_done()
+    assert undo_state(rig) != "unavailable"
+    await press_undo(rig)
+    assert rig.read("sensor", "usable_fraction") == "85.0"
+    assert rig.entry.runtime_data.model.t_avg == pytest.approx(before)
+
+
+async def test_the_undo_button_goes_when_its_time_runs_out(
+    hass: HomeAssistant, freezer
+) -> None:
+    """A reset after the press starts the 24 hours; the 5-minute tick then removes the button."""
+    rig = await Rig.start(hass, freezer, states={TANK: "35.0"})
+    await pressed_at_the_floor(rig)
+    await rig.tick(minutes=1)
+    await part_drawn(rig)  # a set_tank_state: undo now restores only u
+    assert undo_state(rig) != "unavailable"
+    await rig.tick(minutes=23 * 60)
+    assert undo_state(rig) != "unavailable"
+    await rig.tick(minutes=2 * 60)
+    assert undo_state(rig) == "unavailable"
+    assert rig.entry.runtime_data.calibrator.undo_record is None
+
+
+async def test_a_rejected_press_leaves_the_undo_button_unavailable(
+    hass: HomeAssistant, freezer
+) -> None:
+    """Only an accepted press can be undone."""
+    rig = await Rig.start(hass, freezer, states={TANK: "35.0"})
+    await draw_one_litre_and_wait(rig, minutes=25)
+    await press_hot_water_ran_out(rig)
+    assert undo_state(rig) == "unavailable"
+
+
+async def test_an_undo_during_a_fit_stays_undone(hass: HomeAssistant, freezer) -> None:
+    """A press made before a fit and undone while it ran: the fit does not bring u or the record back."""
+    gate, install = held_fit()
+    freezer.move_to(WEEK_END)
+    with install(hass):
+        entry = await start_while_fitting(hass, gate)
+        for reading in ("100.000", "100.001"):
+            hass.states.async_set(METER, reading, {"unit_of_measurement": "m³"})
+            await hass.async_block_till_done()
+        # The first fit is held: finish it, press, then hold the next one with a recalibrate.
+        gate.release.set()
+        await hass.async_block_till_done(wait_background_tasks=True)
+        await hass.services.async_call(
+            "button",
+            "press",
+            {"entity_id": entity_id(hass, entry, "button", "hot_water_ran_out")},
+            blocking=True,
+        )
+        assert value(hass, entry, "sensor", "usable_fraction") == "50.0"
+        gate.hold = True
+        gate.release.clear()
+        gate.started.clear()
+        task = hass.async_create_task(entry.runtime_data.async_setup_fit())
+        await gate.started.wait()
+        await hass.services.async_call(
+            "button",
+            "press",
+            {"entity_id": entity_id(hass, entry, "button", "undo_hot_water_ran_out")},
+            blocking=True,
+        )
+        assert value(hass, entry, "sensor", "usable_fraction") == "85.0"
+        gate.release.set()
+        await task
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert value(hass, entry, "sensor", "usable_fraction") == "85.0"
+    assert "usable_fraction" not in entry.runtime_data.calibrator.values
+    assert entry.runtime_data.calibrator.undo_record is None
+    state = hass.states.get(entity_id(hass, entry, "button", "undo_hot_water_ran_out"))
+    assert state is not None
+    assert state.state == "unavailable"
+
+
+async def test_a_press_during_a_fit_keeps_its_undo(
+    hass: HomeAssistant, freezer
+) -> None:
+    """The undo record of a press made while the fit ran survives the fit, and the button is available."""
+    gate, install = held_fit()
+    freezer.move_to(WEEK_END)
+    with install(hass):
+        entry = await start_while_fitting(hass, gate)
+        for reading in ("100.000", "100.001"):
+            hass.states.async_set(METER, reading, {"unit_of_measurement": "m³"})
+            await hass.async_block_till_done()
+        await hass.services.async_call(
+            "button",
+            "press",
+            {"entity_id": entity_id(hass, entry, "button", "hot_water_ran_out")},
+            blocking=True,
+        )
+        gate.release.set()
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert entry.runtime_data.calibrator.undo_record is not None
+    state = hass.states.get(entity_id(hass, entry, "button", "undo_hot_water_ran_out"))
+    assert state is not None
+    assert state.state != "unavailable"
+    await hass.services.async_call(
+        "button",
+        "press",
+        {"entity_id": entity_id(hass, entry, "button", "undo_hot_water_ran_out")},
+        blocking=True,
+    )
+    assert value(hass, entry, "sensor", "usable_fraction") == "85.0"
+
+
+async def test_a_discarded_model_drops_the_undo_record(
+    hass: HomeAssistant, hass_storage, freezer
+) -> None:
+    """When the stored model is unusable, the undo record cannot be applied to the fresh one."""
+    rig = await Rig.start(hass, freezer, states={TANK: "35.0"})
+    await pressed_at_the_floor(rig)
+    estimator = rig.entry.runtime_data
+    assert estimator.calibrator.undo_record is not None
+    saved = estimator.payload()
+    saved["model"] = {"broken": True}
+    hass_storage[f"{DOMAIN}.{rig.entry.entry_id}"] = {
+        "version": 1,
+        "minor_version": 1,
+        "key": f"{DOMAIN}.{rig.entry.entry_id}",
+        "data": json.loads(json.dumps(saved)),
+    }
+    assert await hass.config_entries.async_unload(rig.entry.entry_id)
+    hass_storage[f"{DOMAIN}.{rig.entry.entry_id}"]["data"] = json.loads(
+        json.dumps(saved)
+    )
+    assert await hass.config_entries.async_setup(rig.entry.entry_id)
+    await hass.async_block_till_done()
+    assert not rig.entry.runtime_data.model_restored
+    assert rig.entry.runtime_data.calibrator.undo_record is None
+    assert undo_state(rig) == "unavailable"

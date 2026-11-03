@@ -29,7 +29,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from .const import COUNTER_LAG_SECONDS, WATER_HEAT_CAPACITY_WH
-from .model import EventKind, ModelEvent, ModelOptions, TankModel
+from .model import EventKind, ModelEvent, ModelOptions, TankModel, _from_iso, _iso
 
 # The learned parameters, named as the `ModelOptions` fields, with their bounds.
 OTHER_HOT_SHARE = "other_hot_share"
@@ -87,6 +87,8 @@ REASON_UNAVAILABLE = "source_unavailable"
 
 # The "Hot water ran out" button applies to a draw that ended at most this long ago.
 PRESS_WINDOW = timedelta(minutes=20)
+# After the first reset that follows a press, undo restores only u for this long.
+UNDO_WINDOW = timedelta(hours=24)
 # Why a press is rejected.
 REJECT_NO_RECENT_DRAW = "no_recent_draw"
 REJECT_SENSOR_HOT = "sensor_hot"
@@ -109,6 +111,73 @@ class PressResult:
     reason: str | None = None
     values: dict[str, Any] = field(default_factory=dict)
     drop: float = 0.0
+
+
+@dataclass
+class UndoRecord:
+    """What the last accepted "Hot water ran out" press changed, so that it can be undone.
+
+    Attributes:
+        time: When the press happened.
+        usable_changed: Whether the press changed the usable fraction (not when it is locked).
+        usable: The usable fraction learned before the press, None when none was (the option
+            applied). A value here is the "learned from the button" marker that a
+            recalibration keeps.
+        usable_source: The source label of that value.
+        drop: The T_avg drop D in K that the press applied.
+        last_reset: The model's `last_reset` before the press.
+        reset_seen: When the first reset after the press happened, None until it is seen.
+    """
+
+    time: datetime
+    usable_changed: bool
+    usable: float | None
+    usable_source: str | None
+    drop: float
+    last_reset: datetime | None
+    reset_seen: datetime | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return the record as a JSON-compatible dict."""
+        return {
+            "time": self.time.isoformat(),
+            "usable_changed": self.usable_changed,
+            "usable": self.usable,
+            "usable_source": self.usable_source,
+            "drop": self.drop,
+            "last_reset": _iso(self.last_reset),
+            "reset_seen": _iso(self.reset_seen),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> UndoRecord:
+        """Create a record from `as_dict` output."""
+        usable = data["usable"]
+        source = data["usable_source"]
+        return cls(
+            time=datetime.fromisoformat(data["time"]),
+            usable_changed=bool(data["usable_changed"]),
+            usable=None if usable is None else float(usable),
+            usable_source=None if source is None else str(source),
+            drop=float(data["drop"]),
+            last_reset=_from_iso(data["last_reset"]),
+            reset_seen=_from_iso(data["reset_seen"]),
+        )
+
+
+@dataclass(frozen=True)
+class UndoResult:
+    """The outcome of an undo.
+
+    Attributes:
+        usable_fraction: The usable fraction in use after the undo.
+        rise: The T_avg rise in K that the undo applied, 0 after a reset.
+        after_reset: Whether T_avg was reset since the press, so only u was restored.
+    """
+
+    usable_fraction: float
+    rise: float
+    after_reset: bool
 
 
 def heat_capacity(volume: float) -> float:
@@ -405,6 +474,7 @@ class Calibrator:
         closures: The closures, newest last, at most `MAX_CLOSURES`.
         quiet_estimates: The last loss coefficients from quiet windows.
         width_estimates: The last thermocline widths from first sensor drops.
+        undo_record: What the last accepted press changed, None when there is nothing to undo.
     """
 
     base: ModelOptions
@@ -417,6 +487,7 @@ class Calibrator:
     closures: list[Closure] = field(default_factory=list)
     quiet_estimates: list[float] = field(default_factory=list)
     width_estimates: list[float] = field(default_factory=list)
+    undo_record: UndoRecord | None = None
     _pending: _Pending | None = field(default=None, repr=False)
     _unknown_start: str | None = field(default=None, repr=False)
     _last_run_end: datetime | None = field(default=None, repr=False)
@@ -530,6 +601,7 @@ class Calibrator:
         self._finalize_due(now)
         self._track_quiet(model, now, broke=broke)
         self._track_drop(model)
+        self._refresh_undo(model, now)
         return self.options != before
 
     def flush(self) -> bool:
@@ -813,9 +885,13 @@ class Calibrator:
                 },
             )
         # Nothing has changed yet: the previous usable fraction and its source are still
-        # readable here, for an undo record. The set_state below is a manual reset, not a
-        # heating-run charge: the undo of group 3 must not count it as "the next charge".
-        if USABLE_FRACTION not in self.locks:
+        # readable here, for the undo record. The set_state below resets at the press time,
+        # which the undo does not count as "the next charge" (it looks for a later reset).
+        usable_changed = USABLE_FRACTION not in self.locks
+        previous = self.values.get(USABLE_FRACTION)
+        previous_source = self.sources.get(USABLE_FRACTION)
+        reset_before = model.last_reset
+        if usable_changed:
             low, high = PARAMETER_BOUNDS[USABLE_FRACTION]
             self.values[USABLE_FRACTION] = min(max(record.cold_fraction, low), high)
             self.sources[USABLE_FRACTION] = SOURCE_LEARNED
@@ -831,6 +907,16 @@ class Calibrator:
             )
         events = model.set_state(now, t_avg=model.t_avg - drop)
         self.observe(model, events, now)
+        # The press's own reset counts as the press: timed by the model's reset, so a model
+        # clock ahead of `now` cannot make that reset look like one after the press.
+        self.undo_record = UndoRecord(
+            time=model.last_reset or now,
+            usable_changed=usable_changed,
+            usable=previous,
+            usable_source=previous_source,
+            drop=drop,
+            last_reset=reset_before,
+        )
         return PressResult(
             accepted=True,
             values={
@@ -840,6 +926,89 @@ class Calibrator:
                 "drop": drop,
             },
             drop=drop,
+        )
+
+    # ----- undo of the last press ---------------------------------------------------------
+
+    def _undo_state(
+        self, model: TankModel, now: datetime
+    ) -> tuple[UndoRecord, datetime | None] | None:
+        """Return the record and the time of the first reset after the press, None if void.
+
+        The record is void when there is none, or when the first reset after the press is
+        more than `UNDO_WINDOW` ago. Nothing is changed.
+        """
+        record = self.undo_record
+        if record is None:
+            return None
+        reset = record.reset_seen
+        if (
+            reset is None
+            and model.last_reset is not None
+            and model.last_reset > record.time
+        ):
+            reset = model.last_reset
+        if reset is not None and now - reset > UNDO_WINDOW:
+            return None
+        return record, reset
+
+    def _refresh_undo(self, model: TankModel, now: datetime) -> None:
+        """Note the first reset after the press, and clear the record when its time ran out."""
+        state = self._undo_state(model, now)
+        if state is None:
+            self.undo_record = None
+            return
+        record, reset = state
+        record.reset_seen = reset
+
+    def undo_available(self, model: TankModel, now: datetime) -> bool:
+        """Return whether `undo` would do something at `now`."""
+        return self._undo_state(model, now) is not None
+
+    def undo(self, model: TankModel, now: datetime) -> UndoResult | None:
+        """Undo the last accepted press.
+
+        Before any reset of T_avg since the press, it restores the usable fraction with its
+        source, raises T_avg by the press's drop D (within the physical bounds), so draws and
+        heat since stay counted, and puts the model's `last_reset` back to its value from
+        before the press. After a reset (a charge or a set_tank_state), it restores the usable
+        fraction only, until `UNDO_WINDOW` after that reset. The record is cleared afterwards.
+        The method observes the events of its own reset, so the caller must not pass them to
+        `observe` again.
+
+        Args:
+            model: The model, advanced to `now`.
+            now: The time of the button press.
+
+        Returns:
+            The outcome, None when there is nothing to undo.
+        """
+        state = self._undo_state(model, now)
+        if state is None:
+            self.undo_record = None
+            return None
+        record, reset = state
+        if record.usable_changed and USABLE_FRACTION not in self.locks:
+            if record.usable is None:
+                self.values.pop(USABLE_FRACTION, None)
+                self.sources.pop(USABLE_FRACTION, None)
+            else:
+                self.values[USABLE_FRACTION] = record.usable
+                self.sources[USABLE_FRACTION] = record.usable_source or SOURCE_LEARNED
+            model.set_options(self.options)
+        rise = 0.0
+        if reset is None:
+            before = model.t_avg
+            if record.drop > 0:
+                events = model.set_state(now, t_avg=before + record.drop)
+                self.observe(model, events, now)
+                rise = model.t_avg - before
+            model.restore_last_reset(record.last_reset)
+        self.undo_record = None
+        return UndoResult(
+            usable_fraction=model.options.usable_fraction,
+            rise=rise,
+            after_reset=reset is not None,
         )
 
     # ----- persistence --------------------------------------------------------------------
@@ -857,6 +1026,7 @@ class Calibrator:
             "last_run_end": (
                 None if self._last_run_end is None else self._last_run_end.isoformat()
             ),
+            "undo": None if self.undo_record is None else self.undo_record.as_dict(),
         }
 
     def restore(self, data: Mapping[str, Any]) -> None:
@@ -878,6 +1048,8 @@ class Calibrator:
             self._last_run_end = (
                 None if last_end is None else datetime.fromisoformat(last_end)
             )
+            undo = data.get("undo")
+            self.undo_record = None if undo is None else UndoRecord.from_dict(undo)
         except (KeyError, TypeError, AttributeError) as err:
             raise ValueError(f"Invalid calibration state: {err}") from err
 
@@ -890,9 +1062,12 @@ __all__ = [
     "REJECT_NO_RECENT_DRAW",
     "REJECT_SENSOR_HOT",
     "SENSOR_START",
+    "UNDO_WINDOW",
     "Calibrator",
     "Closure",
     "PressResult",
+    "UndoRecord",
+    "UndoResult",
     "bounded_step",
     "charge_error",
     "fit_closures",

@@ -355,7 +355,8 @@ def setup_fit(
         sources: Which sources are configured, by default those the history has.
         tick: The tick interval.
         previous: The calibrator this fit replaces (a recalibrate). The usable fraction it
-            learned from the button stays with its source, because no replay can learn it.
+            learned from the button stays with its source, because no replay can learn it, and
+            so does the undo record of the last press.
 
     Returns:
         The fitted options and the calibration state. The calibrator is ready for live
@@ -374,6 +375,9 @@ def setup_fit(
             calibrator.values[USABLE_FRACTION] = previous.values[USABLE_FRACTION]
             calibrator.sources[USABLE_FRACTION] = previous.sources[USABLE_FRACTION]
     replay(history, options, sources=sources, calibrator=calibrator, tick=tick)
+    if previous is not None:
+        # No replay can learn the undo of the last press either.
+        calibrator.undo_record = previous.undo_record
     calibrator.go_live()
     return SetupFit(calibrator.options, calibrator, calibrator.locks)
 

@@ -139,7 +139,8 @@ drop the press applied, so draws made since stay counted. After that charge, und
 fraction, for 24 hours after the charge. Undo SHALL act on the last accepted press only.
 
 #### Scenario: Undo before the next charge
-- **WHEN** a press lowered the usable fraction from 0.85 to 0.72 and T_avg by 12 K, and 30 L were drawn since
+- **WHEN** the last draw ended at a cold fraction of 0.22 with T_ch - T_cold 43 K, so a press lowered the usable
+  fraction from 0.85 to its lower bound 0.50 and T_avg by 0.28 * 43 = 12 K, and 30 L were drawn since
 - **THEN** undo restores the usable fraction to 0.85 and raises T_avg by 12 K, and the 30 L stay counted
 
 #### Scenario: Undo after a charge

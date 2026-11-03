@@ -173,6 +173,25 @@ following:
   temperature, so there is no T_avg error left to reverse.
 - **Afterwards:** clear the record. The record is also cleared after 24 hours past the next charge.
 
+Details settled before the group 3 implementation (2026-11-03):
+- **What counts as the next charge.** It is any reset of T_avg after the press, using the model's `last_reset` from
+  D4: a heating-run charge or the `set_tank_state` action. The press's own `set_state` is at the press time, so it
+  does not count. After a `set_tank_state`, raising T_avg by D would distort the value the user set, so the same
+  "u only" rule applies.
+- **When the 24 hours start.** The record keeps the time of the first reset after the press. The calibrator notes it
+  the first time it sees `last_reset` later than the press, which happens on every model event and tick. The window
+  runs from the reset's own time (`last_reset`), not from the moment the calibrator notices it. Without any reset
+  after the press, for example with the heater off for a holiday, the full undo stays available, because the spec
+  says "until the next charge".
+- **What u restores.** Everything the press changed about u: the value, its source, and the marker that keeps a
+  button-learned u through a recalibration. A press that did not change u, because u was locked, restores nothing
+  for u.
+- **The reset marker.** An undo before the next charge also restores `last_reset` to its value before the press, so
+  a later press on the same draw works as if the undone press never happened. Without this, the undo's own
+  `set_state` would make that later press skip D.
+- **The event.** Undo logs a `hot_water_ran_out` event with `result: undone`, giving the u and the T_avg rise it
+  restored.
+
 The undo button is available only while a record exists and undo is still possible. The runtime re-evaluates
 availability on every model event and on the 5-minute tick.
 

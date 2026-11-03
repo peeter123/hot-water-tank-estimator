@@ -39,6 +39,7 @@ from homeassistant.core import (
     State,
     callback,
 )
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
     async_track_state_change_event,
@@ -276,7 +277,10 @@ class TankEstimator:
             dt_util.utcnow(),
             self._first_temperature(),
         )
-        if self.model_restored:
+        if not self.model_restored:
+            # A fresh model (T_avg from the sensor) cannot take back a drop D of the old one.
+            self.calibrator.undo_record = None
+        else:
             # A replaced counter or meter entity starts a new baseline.
             current = self._baseline_entities()
             for role, source in _BASELINES.items():
@@ -529,6 +533,45 @@ class TankEstimator:
         self.save_soon()
         async_dispatcher_send(self.hass, self.signal)
 
+    def undo_available(self) -> bool:
+        """Return whether "Undo hot water ran out" would do something now."""
+        return self.calibrator.undo_available(self.model, dt_util.utcnow())
+
+    async def async_undo_hot_water_ran_out(self) -> None:
+        """Handle a press of "Undo hot water ran out".
+
+        Raises:
+            ServiceValidationError: There is nothing to undo (a race with the button's
+                availability).
+        """
+        now = dt_util.utcnow()
+        self._finish(self.model.tick(now), now)
+        before_options = self.calibrator.options
+        before = (self.model.t_avg, self.model.t_ch)
+        result = self.calibrator.undo(self.model, now)
+        if result is None:
+            self.save_soon()
+            async_dispatcher_send(self.hass, self.signal)
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="nothing_to_undo"
+            )
+        # A fit that was running keeps the undone usable fraction and the cleared record.
+        self._manual += 1
+        self.model.log_event(
+            now,
+            EventKind.HOT_WATER_RAN_OUT,
+            {
+                "result": "undone",
+                "usable_fraction": result.usable_fraction,
+                "rise": result.rise,
+                "after_reset": result.after_reset,
+            },
+            before,
+        )
+        self._log_calibration(now, "undo_hot_water_ran_out", before_options)
+        self.save_soon()
+        async_dispatcher_send(self.hass, self.signal)
+
     @property
     def _press_notification(self) -> str:
         """Return the notification ID of this tank's rejected press (one at a time)."""
@@ -626,13 +669,19 @@ class TankEstimator:
             state = calibrator.to_dict()
             state["unknown_start"] = live.to_dict()["unknown_start"]
             if (
-                USABLE_FRACTION in live.values
-                and live.values[USABLE_FRACTION] != previous.values.get(USABLE_FRACTION)
+                live.values.get(USABLE_FRACTION) != previous.values.get(USABLE_FRACTION)
                 and USABLE_FRACTION not in calibrator.locks
             ):
-                state["values"][USABLE_FRACTION] = live.values[USABLE_FRACTION]
-                state["sources"][USABLE_FRACTION] = live.sources[USABLE_FRACTION]
+                # Pressed or undone during the fit: the live value, or none, stays.
+                for key, source in (("values", live.values), ("sources", live.sources)):
+                    if USABLE_FRACTION in source:
+                        state[key][USABLE_FRACTION] = source[USABLE_FRACTION]
+                    else:
+                        state[key].pop(USABLE_FRACTION, None)
             calibrator.restore(state)
+        # The record of the last press is the live one: a press or an undo during the fit,
+        # or the first reset it has seen since, is not in the replay's copy.
+        calibrator.undo_record = live.undo_record
         self.calibrator = calibrator
         self._fit_done = True
         self._ambient_fitted = self._ambient_entity()

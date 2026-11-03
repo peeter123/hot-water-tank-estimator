@@ -340,6 +340,9 @@
     "button": {
       "hot_water_ran_out": {
         "name": "Hot water ran out"
+      },
+      "undo_hot_water_ran_out": {
+        "name": "Undo hot water ran out"
       }
     }
   },
@@ -378,6 +381,9 @@
     },
     "no_history": {
       "message": "There is no recorder history to fit."
+    },
+    "nothing_to_undo": {
+      "message": "There is no \"Hot water ran out\" press to undo."
     },
     "press_ignored_no_recent_draw": {
       "message": "Ignored: no water was drawn in the last {minutes} minutes."
