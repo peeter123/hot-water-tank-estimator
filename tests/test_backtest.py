@@ -110,3 +110,10 @@ def test_an_export_folder_needs_a_mapping_and_a_volume(tmp_path: Path) -> None:
         script.main([str(tmp_path)])  # no volume
     with pytest.raises(SystemExit):
         script.read_history(pure, tmp_path / "missing")
+    # The ambient sensor is a role of the map file.
+    (tmp_path / "room.json").write_text(json.dumps(rows), encoding="utf-8")
+    history, _ = script.read_history(
+        pure, tmp_path, stem_roles={"room": "ambient_temperature"}
+    )
+    assert "ambient_temperature" in {s.role for s in history.series}
+    assert pure.setup_fit.sources_for(history).ambient_sensor

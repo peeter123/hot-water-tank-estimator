@@ -48,6 +48,7 @@ from homeassistant.util import dt as dt_util
 
 from .calibration import PARAMETER_BOUNDS, USABLE_FRACTION, Calibrator
 from .const import (
+    CONF_AMBIENT_SENSOR,
     CONF_COLD_SENSOR,
     CONF_ENERGY_COUNTER,
     CONF_FLOW_SENSOR,
@@ -74,6 +75,7 @@ from .history import async_read_history
 from .model import EventKind, ModelEvent, ModelOptions, Sources, TankModel
 from .readings import convert_reading
 from .setup_fit import (
+    AMBIENT_TEMPERATURE,
     BATHROOM_HUMIDITY,
     COLD_WATER_TEMPERATURE,
     DHW_ENERGY,
@@ -153,6 +155,7 @@ class TankConfig:
                 data.get(CONF_FLOW_SENSOR) and data.get(CONF_RETURN_SENSOR)
             ),
             cold_sensor=bool(data.get(CONF_COLD_SENSOR)),
+            ambient_sensor=bool(data.get(CONF_AMBIENT_SENSOR)),
             humidity_sensors=humidity,
         )
         pairs: list[tuple[str, str]] = [
@@ -164,6 +167,7 @@ class TankConfig:
             (CONF_POWER_SENSOR, DHW_POWER),
             (CONF_HEATING_ACTIVE, DHW_HEATING),
             (CONF_COLD_SENSOR, COLD_WATER_TEMPERATURE),
+            (CONF_AMBIENT_SENSOR, AMBIENT_TEMPERATURE),
         )
         pairs += [(data[key], role) for key, role in optional if data.get(key)]
         if sources.flow_return:
@@ -218,6 +222,9 @@ class TankEstimator:
         self._flow: float | None = None
         self._return: float | None = None
         self._fit_done = False
+        # The ambient sensor entity the calibration was fitted with (None for none). A fit
+        # against another one is due, because the loss coefficient depends on the ambient.
+        self._ambient_fitted: str | None = None
         self.model_restored = False
         self._stopped = False
         self._save_pending = False
@@ -236,6 +243,7 @@ class TankEstimator:
             stored_locks = stored.get("locks", ())
             calibration = stored.get("calibrator")
             self._fit_done = bool(stored.get("fit_done", False))
+            self._ambient_fitted = stored.get("ambient_fit")
         self.calibrator = Calibrator(
             config.options,
             locks=frozenset(stored_locks),
@@ -307,6 +315,17 @@ class TankEstimator:
             if role in _BASELINES
         }
 
+    def _ambient_entity(self) -> str | None:
+        """Return the configured ambient sensor entity, None when there is none."""
+        return next(
+            (
+                entity_id
+                for entity_id, roles in self.config.routes.items()
+                if AMBIENT_TEMPERATURE in roles
+            ),
+            None,
+        )
+
     @callback
     def async_start(self) -> None:
         """Feed the current states to the model, listen to the sources and start the interval."""
@@ -328,7 +347,7 @@ class TankEstimator:
                 name=f"{DOMAIN} tick",
             )
         )
-        if not self._fit_done:
+        if not self._fit_done or self._ambient_fitted != self._ambient_entity():
             self.entry.async_create_background_task(
                 self.hass, self.async_setup_fit(), f"{DOMAIN} setup fit"
             )
@@ -394,6 +413,8 @@ class TankEstimator:
                     events += model.on_humidity(now, entity_id, value)
                 case "cold_water_temperature":
                     events += model.on_cold_water_sensor(now, value)
+                case "ambient_temperature":
+                    events += model.on_ambient_sensor(now, value)
         return events
 
     @callback
@@ -435,6 +456,7 @@ class TankEstimator:
             "calibrator": self.calibrator.to_dict(),
             "locks": sorted(self.calibrator.locks),
             "fit_done": self._fit_done,
+            "ambient_fit": self._ambient_fitted,
         }
 
     def _payload_for_save(self) -> dict[str, Any]:
@@ -525,6 +547,7 @@ class TankEstimator:
             if not any(series.states for series in history.series):
                 _LOGGER.info("No history to fit for %s", self.entry.title)
                 self._fit_done = True
+                self._ambient_fitted = self._ambient_entity()
                 self.save_soon()
                 return None
             fit = await self.hass.async_add_executor_job(
@@ -566,6 +589,7 @@ class TankEstimator:
             calibrator.restore(state)
         self.calibrator = calibrator
         self._fit_done = True
+        self._ambient_fitted = self._ambient_entity()
         self.model.set_options(calibrator.options)
         self._log_calibration(now, "setup_fit", before)
         self.save_soon()

@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from custom_components.hot_water_tank_estimator.const import (
+    CONF_AMBIENT_SENSOR,
     CONF_COLD_SENSOR,
     CONF_ENERGY_COUNTER,
     CONF_FLOW_SENSOR,
@@ -27,6 +28,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
 
 from .common import (
+    AMBIENT,
     COLD,
     ENERGY,
     FLOW,
@@ -66,10 +68,10 @@ async def start(hass: HomeAssistant) -> str:
 
 
 async def to_step(hass: HomeAssistant, step: str, tank: dict[str, Any] | None = None):
-    """Walk a new flow up to a step (water_meter, heat, detection or cold)."""
+    """Walk a new flow up to a step (water_meter, heat, detection or temperatures)."""
     set_sources(hass)
     flow_id = await start(hass)
-    steps = ["water_meter", "heat", "detection", "cold"]
+    steps = ["water_meter", "heat", "detection", "temperatures"]
     inputs = {
         "user": tank or TANK_STEP,
         "water_meter": {CONF_WATER_METER: METER},
@@ -107,9 +109,9 @@ async def test_full_flow_creates_an_entry(hass: HomeAssistant) -> None:
     result = await hass.config_entries.flow.async_configure(
         flow_id, {CONF_HUMIDITY_SENSORS: [HUMIDITY]}
     )
-    assert result["step_id"] == "cold"
+    assert result["step_id"] == "temperatures"
     result = await hass.config_entries.flow.async_configure(
-        flow_id, {CONF_COLD_SENSOR: COLD}
+        flow_id, {CONF_COLD_SENSOR: COLD, CONF_AMBIENT_SENSOR: AMBIENT}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Upstairs"
@@ -124,6 +126,7 @@ async def test_full_flow_creates_an_entry(hass: HomeAssistant) -> None:
         CONF_RETURN_SENSOR: RETURN,
         CONF_HUMIDITY_SENSORS: [HUMIDITY],
         CONF_COLD_SENSOR: COLD,
+        CONF_AMBIENT_SENSOR: AMBIENT,
     }
 
 
@@ -131,17 +134,19 @@ async def test_a_minimal_entry_needs_only_the_required_sources(
     hass: HomeAssistant,
 ) -> None:
     """The tank, the meter and one heat input are enough."""
-    flow_id = await to_step(hass, "cold")
+    flow_id = await to_step(hass, "temperatures")
     result = await hass.config_entries.flow.async_configure(flow_id, {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     entries = hass.config_entries.async_entries(DOMAIN)
     assert len(entries) == 1
     assert CONF_COLD_SENSOR not in entries[0].options
+    assert CONF_AMBIENT_SENSOR not in entries[0].options
+    assert not TankConfig.from_options(entries[0].options).sources.ambient_sensor
 
 
 async def test_fresh_entry_temperature_and_shape_defaults(hass: HomeAssistant) -> None:
     """A fresh entry runs with the default temperatures and tank shape."""
-    flow_id = await to_step(hass, "cold")
+    flow_id = await to_step(hass, "temperatures")
     result = await hass.config_entries.flow.async_configure(flow_id, {})
     options = TankConfig.from_options(result["options"]).options
     assert options.sensor_height == 0.5
@@ -152,6 +157,7 @@ async def test_fresh_entry_temperature_and_shape_defaults(hass: HomeAssistant) -
     assert options.sensor_tolerance == 1.5
     assert options.sensor_margin == 2
     assert options.ambient_temperature == 20
+    assert options.ambient_fallback == 3
     assert options.cold_mean == 12.5
     assert options.cold_amplitude == 5
     assert options.cold_coldest_day == 46
@@ -159,7 +165,7 @@ async def test_fresh_entry_temperature_and_shape_defaults(hass: HomeAssistant) -
 
 async def test_fresh_entry_draw_and_heat_defaults(hass: HomeAssistant) -> None:
     """A fresh entry runs with the default draw, loss and heat values."""
-    flow_id = await to_step(hass, "cold")
+    flow_id = await to_step(hass, "temperatures")
     result = await hass.config_entries.flow.async_configure(flow_id, {})
     options = TankConfig.from_options(result["options"]).options
     defaults = ModelOptions(volume=281.0)
@@ -335,7 +341,7 @@ async def test_two_tanks(hass: HomeAssistant) -> None:
 
 async def test_the_same_tank_sensor_twice_is_aborted(hass: HomeAssistant) -> None:
     """A tank sensor that another entry uses aborts the flow."""
-    flow_id = await to_step(hass, "cold")
+    flow_id = await to_step(hass, "temperatures")
     await hass.config_entries.flow.async_configure(flow_id, {})
     flow_id = await start(hass)
     result = await hass.config_entries.flow.async_configure(flow_id, TANK_STEP)

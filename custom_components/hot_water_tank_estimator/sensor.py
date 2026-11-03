@@ -13,12 +13,14 @@ from homeassistant.const import (
     PERCENTAGE,
     EntityCategory,
     UnitOfEnergy,
+    UnitOfPower,
     UnitOfTemperature,
     UnitOfTime,
     UnitOfVolume,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from .calibration import (
     LOSS_COEFFICIENT,
@@ -26,6 +28,7 @@ from .calibration import (
     STARTUP_ENERGY,
     THERMOCLINE_WIDTH,
     USABLE_FRACTION,
+    heat_capacity,
 )
 from .entity import TankEntity
 from .estimator import TankConfigEntry, TankEstimator
@@ -40,6 +43,16 @@ class TankSensorDescription(SensorEntityDescription):
     value_fn: Callable[[TankEstimator], float | int | None]
     parameter: str | None = (
         None  # the learned parameter shown, for the source attribute
+    )
+
+
+def _heat_loss(estimator: TankEstimator) -> int:
+    """Return the standing loss in W: k * C * max(0, t_avg - t_ambient) * 1000."""
+    model = estimator.model
+    options = model.options
+    excess = max(0.0, model.t_avg - model.ambient_temperature(dt_util.utcnow()))
+    return round(
+        options.loss_coefficient * heat_capacity(options.volume) * excess * 1000
     )
 
 
@@ -78,6 +91,15 @@ ESTIMATE_SENSORS: tuple[TankSensorDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=0,
         value_fn=lambda e: e.model.outputs.shower_minutes,
+    ),
+    TankSensorDescription(
+        key="heat_loss",
+        translation_key="heat_loss",
+        device_class=SensorDeviceClass.POWER,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
+        value_fn=_heat_loss,
     ),
     TankSensorDescription(
         key="charged_temperature",

@@ -58,6 +58,9 @@
       },
       "mean_charge_error": {
         "default": "mdi:delta"
+      },
+      "heat_loss": {
+        "default": "mdi:radiator"
       }
     }
   },

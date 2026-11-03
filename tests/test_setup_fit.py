@@ -1,13 +1,17 @@
 """Tests for the setup fit: the replay of recorded history with live learning."""
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from functools import cache
 import json
 from pathlib import Path
 
 import pytest
 
-from custom_components.hot_water_tank_estimator.calibration import CLOSURE, SENSOR_START
+from custom_components.hot_water_tank_estimator.calibration import (
+    CLOSURE,
+    SENSOR_START,
+    Calibrator,
+)
 from custom_components.hot_water_tank_estimator.model import ModelOptions
 from custom_components.hot_water_tank_estimator.setup_fit import (
     History,
@@ -138,6 +142,64 @@ def test_the_replay_starts_at_the_first_numeric_tank_reading() -> None:
     short = History(start, start + timedelta(minutes=30), [tank])
     result = replay(short, options)
     assert result.model.t_avg == pytest.approx(42.0, abs=0.5)
+
+
+def quiet_night(ambient: list[tuple[datetime, str]] | None) -> History:
+    """A tank sensor that falls from 57.0 to 55.9 C in 8 hours, then drops to 50 C.
+
+    With `ambient`, the history has an ambient sensor with those rows.
+    """
+    start = datetime(2026, 10, 1, 22, 0, tzinfo=UTC)
+    hour = timedelta(hours=1)
+    rows = [(start + n * hour, str(57.0 - 1.1 * n / 8)) for n in range(9)]
+    rows.append((start + 8 * hour + timedelta(minutes=1), "50.0"))
+    series = [Series("tank_temperature", "sensor.tank", "C", rows)]
+    if ambient is not None:
+        series.append(Series("ambient_temperature", "sensor.ambient", "C", ambient))
+    return History(start, start + 10 * hour, series)
+
+
+def test_the_replay_uses_the_ambient_series_in_the_loss() -> None:
+    """An ambient sensor at 10 C cools the replayed tank more than the 20 C of the options."""
+    start = datetime(2026, 10, 1, 22, 0, tzinfo=UTC)
+    options = ModelOptions(volume=281.0, loss_coefficient=0.004)
+    plain = replay(quiet_night(None), options)
+    cold = replay(quiet_night([(start, "10.0")]), options)
+    assert sources_for(quiet_night([(start, "10.0")])).ambient_sensor
+    assert not sources_for(quiet_night(None)).ambient_sensor
+    assert 57.0 - plain.model.t_ch > 0
+    # (57 - 10) / (57 - 20) times the fall: both fall by the same fraction of the excess.
+    assert (57.0 - cold.model.t_ch) / (57.0 - plain.model.t_ch) == pytest.approx(
+        (57 - 10) / (57 - 20), rel=0.02
+    )
+
+
+def test_the_replay_uses_the_ambient_series_in_the_quiet_windows() -> None:
+    """Ambient readings that average 16 C give 0.1375 / 40.45 = 0.0034, not 0.1375 / 36.45."""
+    start = datetime(2026, 10, 1, 22, 0, tzinfo=UTC)
+    options = ModelOptions(volume=281.0)
+    estimates = {}
+    for name, ambient in (
+        ("option", None),
+        ("sensor", [(start, "16.0")]),
+    ):
+        cal = Calibrator(options, measures_heat=False)
+        replay(quiet_night(ambient), options, calibrator=cal)
+        (estimates[name],) = cal.quiet_estimates
+    assert estimates["option"] == pytest.approx(0.1375 / 36.45, abs=0.0001)
+    assert estimates["sensor"] == pytest.approx(0.1375 / 40.45, abs=0.0001)
+
+
+def test_the_option_is_used_before_the_first_ambient_reading() -> None:
+    """An ambient series that starts late leaves the earlier hours on the option."""
+    start = datetime(2026, 10, 1, 22, 0, tzinfo=UTC)
+    options = ModelOptions(volume=281.0)
+    late = [(start + timedelta(hours=6), "16.0")]
+    cal = Calibrator(options, measures_heat=False)
+    replay(quiet_night(late), options, calibrator=cal)
+    (estimate,) = cal.quiet_estimates
+    # 6 hours at the option (20 C) and 2 hours at 16 C average 19.0 C.
+    assert estimate == pytest.approx(0.1375 / (56.45 - 19.0), abs=0.0002)
 
 
 def test_a_locked_parameter_is_not_fitted() -> None:

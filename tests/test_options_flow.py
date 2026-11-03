@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
@@ -11,6 +12,7 @@ from custom_components.hot_water_tank_estimator.config_flow import (
     SHAPE_TUNING,
 )
 from custom_components.hot_water_tank_estimator.const import (
+    CONF_AMBIENT_SENSOR,
     CONF_COLD_SENSOR,
     CONF_ENERGY_COUNTER,
     CONF_FLOW_SENSOR,
@@ -24,19 +26,27 @@ from custom_components.hot_water_tank_estimator.const import (
     CONF_WATER_METER,
     DOMAIN,
 )
-from custom_components.hot_water_tank_estimator.estimator import TankConfig
+from custom_components.hot_water_tank_estimator.estimator import (
+    TankConfig,
+    TankEstimator,
+)
+from custom_components.hot_water_tank_estimator.setup_fit import History
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
+from homeassistant.util import dt as dt_util
 
 from .common import (
+    AMBIENT,
     COLD,
     FLOW,
+    FULL_OPTIONS,
     HUMIDITY,
     RETURN,
     Rig,
     entity_id,
     set_sources,
     setup_entry,
+    setup_fitted_entry,
 )
 
 TANK_FIELDS = {CONF_SENSOR_HEIGHT: 50}
@@ -230,6 +240,118 @@ async def test_adding_a_source(hass: HomeAssistant) -> None:
     await hass.async_block_till_done()
     assert entry.runtime_data.config.sources.cold_sensor
     assert entry.runtime_data.model.t_cold == 11.0
+
+
+async def test_add_an_ambient_sensor(hass: HomeAssistant, hass_storage) -> None:
+    """T_avg 52 C stays 52 C when an ambient sensor is added, and a recalibration runs."""
+    set_sources(hass)
+    hass.states.async_set(AMBIENT, "19.5", {"unit_of_measurement": "°C"})
+    entry = await setup_fitted_entry(hass, hass_storage)
+    await hass.services.async_call(
+        DOMAIN,
+        "set_tank_state",
+        {
+            "entity_id": entity_id(hass, entry, "sensor", "tank_litres"),
+            "tank_average": 52,
+            "charged_temperature": 55,
+        },
+        blocking=True,
+    )
+    hass.config.components.add("recorder")
+    now = dt_util.utcnow()
+    read = AsyncMock(return_value=History(now - timedelta(days=30), now, []))
+    with patch(
+        "custom_components.hot_water_tank_estimator.estimator.async_read_history", read
+    ):
+        result = await walk(
+            hass,
+            entry.entry_id,
+            sources={**SOURCE_FIELDS, CONF_AMBIENT_SENSOR: AMBIENT},
+        )
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+        await hass.async_block_till_done()
+    # The recalibration read the history of the configured sources, the ambient sensor's too.
+    read.assert_awaited_once()
+    _, config, start, end = read.await_args.args
+    assert config.routes[AMBIENT] == ("ambient_temperature",)
+    assert end - start == timedelta(days=config.history_days)
+    assert entry.runtime_data.payload()["ambient_fit"] == AMBIENT
+    model = entry.runtime_data.model
+    assert entry.runtime_data.config.sources.ambient_sensor
+    assert model.ambient_temperature(dt_util.utcnow()) == 19.5
+    assert model.t_avg == pytest.approx(52.0, abs=0.01)
+
+
+async def test_a_save_without_an_ambient_change_starts_no_recalibration(
+    hass: HomeAssistant, hass_storage
+) -> None:
+    """Saving the options with the same ambient sensor, or none, runs no fit."""
+    set_sources(hass)
+    hass.states.async_set(AMBIENT, "19.5", {"unit_of_measurement": "°C"})
+    entry = await setup_fitted_entry(
+        hass, hass_storage, {**FULL_OPTIONS, CONF_AMBIENT_SENSOR: AMBIENT}, AMBIENT
+    )
+    with patch.object(
+        TankEstimator, "async_setup_fit", new=AsyncMock(return_value=None)
+    ) as fit:
+        await walk(
+            hass,
+            entry.entry_id,
+            sources={**SOURCE_FIELDS, CONF_AMBIENT_SENSOR: AMBIENT},
+        )
+        await hass.async_block_till_done()
+        fit.assert_not_awaited()
+    hass_storage.clear()
+    await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+    without = await setup_fitted_entry(hass, hass_storage)
+    with patch.object(
+        TankEstimator, "async_setup_fit", new=AsyncMock(return_value=None)
+    ) as fit:
+        await walk(hass, without.entry_id)
+        await hass.async_block_till_done()
+        fit.assert_not_awaited()
+
+
+@pytest.mark.parametrize("change", ["remove", "replace"])
+async def test_removing_or_replacing_the_ambient_sensor_recalibrates(
+    hass: HomeAssistant, hass_storage, change: str
+) -> None:
+    """Clearing the ambient sensor or choosing another one starts a recalibration."""
+    set_sources(hass)
+    hass.states.async_set(AMBIENT, "19.5", {"unit_of_measurement": "°C"})
+    entry = await setup_fitted_entry(
+        hass, hass_storage, {**FULL_OPTIONS, CONF_AMBIENT_SENSOR: AMBIENT}, AMBIENT
+    )
+    hass.states.async_set("sensor.other_ambient", "18", {"unit_of_measurement": "°C"})
+    new = {} if change == "remove" else {CONF_AMBIENT_SENSOR: "sensor.other_ambient"}
+    with patch.object(
+        TankEstimator, "async_setup_fit", new=AsyncMock(return_value=None)
+    ) as fit:
+        await walk(hass, entry.entry_id, sources={**SOURCE_FIELDS, **new})
+        await hass.async_block_till_done()
+        fit.assert_awaited_once_with()
+        model = entry.runtime_data.model
+        expected = 20.0 if change == "remove" else 18.0
+        assert model.ambient_temperature(dt_util.utcnow()) == expected
+
+
+async def test_the_ambient_fallback_is_a_tuning_value(hass: HomeAssistant) -> None:
+    """The fallback time is saved in hours and reaches the model."""
+    set_sources(hass)
+    entry = await setup_entry(hass)
+    shape = {t.key: t.default for t in SHAPE_TUNING} | {"ambient_fallback": 6.0}
+    result = await walk(hass, entry.entry_id, tank={CONF_SENSOR_HEIGHT: 50, **shape})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    assert entry.runtime_data.model.options.ambient_fallback == 6.0
+    for bad in (-1, 25):
+        with pytest.raises(InvalidData):
+            await walk(
+                hass,
+                entry.entry_id,
+                tank={CONF_SENSOR_HEIGHT: 50, **shape, "ambient_fallback": bad},
+            )
 
 
 async def test_options_validation(hass: HomeAssistant) -> None:

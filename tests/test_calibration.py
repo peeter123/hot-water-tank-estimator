@@ -407,6 +407,26 @@ def test_a_source_unavailable_for_over_ten_percent_is_excluded() -> None:
     assert rig.cal.closures[-1].status == CLOSURE
 
 
+def test_an_ambient_outage_does_not_exclude_a_closure() -> None:
+    """The ambient sensor was unavailable for 2 of 10 hours: the interval is still a closure."""
+    rig = Rig(
+        Sources(
+            energy_counter=True,
+            heating_binary=True,
+            flow_return=True,
+            ambient_sensor=True,
+        )
+    )
+    rig.call(T0, "on_ambient_sensor", 19.0)
+    end = rig.run(T0 + HOUR, 60, 5.0, 55.0)
+    rig.call(end + HOUR, "on_ambient_sensor", None)
+    rig.call(end + 3 * HOUR, "on_ambient_sensor", 19.0)
+    rig.call(end + 8 * HOUR, "tick")
+    rig.run(end + 9 * HOUR, 60, 5.0, 55.0)
+    rig.cal.flush()
+    assert rig.cal.closures[-1].status == CLOSURE
+
+
 def test_the_cold_shower_button_excludes_the_interval() -> None:
     """The reset of the model by the button makes the interval, and the one it starts, no closure."""
     rig = Rig(t_avg=57.0)
@@ -626,6 +646,45 @@ def test_quiet_night() -> None:
     # There are no closures yet, so the estimate is the loss coefficient in use.
     assert rig.cal.options.loss_coefficient == pytest.approx(estimate)
     assert rig.cal.source_of("loss_coefficient") == "learned"
+
+
+def ambient_quiet_rig(first: float) -> Rig:
+    """A charged tank at 57 C with an ambient sensor reading `first` C, sensor reading 57.0 C."""
+    rig = Rig(
+        Sources(
+            energy_counter=True,
+            heating_binary=True,
+            flow_return=True,
+            ambient_sensor=True,
+        ),
+        sensor_tolerance=1.5,
+    )
+    rig.call(T0, "on_ambient_sensor", first)
+    rig.call(T0, "on_tank_sensor", 57.0)
+    return rig
+
+
+def test_quiet_night_with_an_ambient_sensor() -> None:
+    """Ambient readings that average 16.0 C: k is 0.1375 / 40.45 = 0.0034 per hour."""
+    rig = ambient_quiet_rig(16.0)
+    for hour in range(1, 9):
+        rig.call(T0 + hour * HOUR, "on_tank_sensor", 57.0 - 1.1 * hour / 8)
+    rig.draw(T0 + 8 * HOUR, 5.0)
+    (estimate,) = rig.cal.quiet_estimates
+    assert estimate == pytest.approx(0.1375 / 40.45, abs=0.00005)
+    assert estimate == pytest.approx(0.0034, abs=0.0001)
+
+
+def test_the_quiet_window_uses_the_time_weighted_mean_ambient() -> None:
+    """14 C for the first 2 hours and 18 C for the last 6 average 17.0 C over the 8 hours."""
+    rig = ambient_quiet_rig(14.0)
+    for hour in range(1, 9):
+        if hour == 2:
+            rig.call(T0 + hour * HOUR, "on_ambient_sensor", 18.0)
+        rig.call(T0 + hour * HOUR, "on_tank_sensor", 57.0 - 1.1 * hour / 8)
+    rig.draw(T0 + 8 * HOUR, 5.0)
+    (estimate,) = rig.cal.quiet_estimates
+    assert estimate == pytest.approx(0.1375 / (56.45 - 17.0), abs=0.00005)
 
 
 def test_a_window_with_a_draw_is_skipped() -> None:

@@ -200,6 +200,131 @@ def test_one_hour_of_standing_loss() -> None:
     assert 57 - model.t_ch == pytest.approx(0.148)
 
 
+def ambient_model(**overrides: float) -> TankModel:
+    """A charged 57 C model with an ambient sensor reading 19.5 C and k 0.004 per hour."""
+    model = make_model(
+        Sources(energy_counter=True, ambient_sensor=True),
+        t_avg=57.0,
+        t_ch=57.0,
+        loss_coefficient=0.004,
+        **overrides,
+    )
+    model.on_ambient_sensor(T0, 19.5)
+    return model
+
+
+def test_cooler_room_from_an_ambient_sensor() -> None:
+    """An ambient sensor at 15 C: one hour at k 0.004 per hour drops both by 0.004 * 42."""
+    model = ambient_model()
+    model.on_ambient_sensor(T0, 15.0)
+    model.tick(T0 + HOUR)
+    assert 57 - model.t_avg == pytest.approx(0.004 * 42)
+    assert 57 - model.t_ch == pytest.approx(0.168)
+
+
+def test_ambient_sensor_available() -> None:
+    """The sensor reading 19.5 C is in use, not the configured 20 C."""
+    model = ambient_model()
+    assert model.options.ambient_temperature == 20.0
+    assert model.ambient_temperature(T0) == 19.5
+
+
+def test_ambient_short_outage() -> None:
+    """The sensor last read 18.0 C and is unavailable for 1 hour: 18.0 C stays in use."""
+    model = ambient_model()
+    model.on_ambient_sensor(T0, 18.0)
+    model.on_ambient_sensor(T0 + 5 * MINUTE, None)
+    assert model.ambient_temperature(T0 + 5 * MINUTE + HOUR) == 18.0
+    model.tick(T0 + 5 * MINUTE + HOUR)
+    assert 57 - model.t_avg > 0
+    assert model.ambient_temperature(T0 + 5 * MINUTE + 3 * HOUR - SECOND) == 18.0
+
+
+def test_ambient_long_outage() -> None:
+    """Unavailable for 4 hours: the configured 20 C is in use again, after the 3 hour fallback."""
+    model = ambient_model()
+    model.on_ambient_sensor(T0, 18.0)
+    model.on_ambient_sensor(T0 + 5 * MINUTE, None)
+    assert model.ambient_temperature(T0 + 5 * MINUTE + 4 * HOUR) == 20.0
+    assert model.ambient_temperature(T0 + 5 * MINUTE + 3 * HOUR) == 20.0
+
+
+def test_ambient_fallback_is_a_tuning_value() -> None:
+    """A fallback of 0 hours uses the configured value at once, 24 hours holds a day."""
+    short = ambient_model(ambient_fallback=0.0)
+    short.on_ambient_sensor(T0, None)
+    assert short.ambient_temperature(T0 + SECOND) == 20.0
+    long = ambient_model(ambient_fallback=24.0)
+    long.on_ambient_sensor(T0, None)
+    assert long.ambient_temperature(T0 + 23 * HOUR) == 19.5
+
+
+def test_ambient_loss_uses_the_value_in_use_over_each_step() -> None:
+    """The loss of a step uses the ambient in force during it: the reading before a change."""
+    model = ambient_model()
+    model.on_ambient_sensor(T0 + HOUR, 15.0)
+    assert 57 - model.t_avg == pytest.approx(0.004 * 37.5)
+
+
+def test_ambient_state_survives_a_round_trip() -> None:
+    """The reading and the last reading are saved and restored."""
+    model = ambient_model()
+    model.on_ambient_sensor(T0 + MINUTE, None)
+    restored = TankModel.from_dict(
+        make_options(loss_coefficient=0.004),
+        model.sources,
+        json.loads(json.dumps(model.to_dict())),
+    )
+    assert restored.to_dict() == model.to_dict()
+    assert restored.ambient_temperature(T0 + HOUR) == 19.5
+
+
+def test_a_removed_ambient_sensor_has_no_say() -> None:
+    """A model saved with an ambient reading of 15.0 C and restored without the source uses 20 C."""
+    model = ambient_model()
+    model.on_ambient_sensor(T0, 15.0)
+    saved = json.loads(json.dumps(model.to_dict()))
+    restored = TankModel.from_dict(make_options(), Sources(energy_counter=True), saved)
+    assert restored.ambient_temperature(T0 + MINUTE) == 20.0
+    # Even a model that still holds the reading ignores it once the source is off.
+    model.sources = Sources(energy_counter=True)
+    assert model.ambient_temperature(T0 + MINUTE) == 20.0
+
+
+def test_a_removed_cold_water_sensor_has_no_say() -> None:
+    """A model saved with a cold sensor reading of 10 C and restored without it uses the curve."""
+    sources = Sources(energy_counter=True, cold_sensor=True)
+    options = make_options()
+    model = TankModel(options, sources, T0, 50.0, 57.0, cold_sensor=10.0)
+    assert model.t_cold == 10.0
+    restored = TankModel.from_dict(
+        options, Sources(energy_counter=True), json.loads(json.dumps(model.to_dict()))
+    )
+    assert restored.t_cold == 14.0  # the curve of make_options: 14 C all year
+
+
+def test_an_outage_after_a_restore_starts_at_the_saved_time() -> None:
+    """If the first ambient input after a restart is unavailable, the outage began at the saved time."""
+    model = ambient_model()
+    model.on_ambient_sensor(T0, 18.0)
+    saved = json.loads(json.dumps(model.to_dict()))
+    restored = TankModel.from_dict(make_options(), model.sources, saved)
+    restart = T0 + 10 * HOUR
+    restored.on_ambient_sensor(restart, None)
+    # The 3 hour fallback ran out long before the restart.
+    assert restored.ambient_temperature(restart + MINUTE) == 20.0
+
+
+def test_a_state_saved_before_the_ambient_sensor_loads() -> None:
+    """A store without ambient_sensor and ambient_last loads, with the option in use."""
+    model = ambient_model()
+    saved = json.loads(json.dumps(model.to_dict()))
+    saved.pop("ambient_sensor")
+    saved.pop("ambient_last")
+    restored = TankModel.from_dict(make_options(), model.sources, saved)
+    assert restored.ambient_temperature(T0 + HOUR) == 20.0
+
+
 def test_no_standing_loss_below_ambient() -> None:
     """A tank at or below T_ambient does not cool further."""
     model = make_model(t_avg=18.0, t_ch=18.0, loss_coefficient=0.004)

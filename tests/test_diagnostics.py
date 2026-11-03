@@ -38,6 +38,7 @@ async def test_download_diagnostics(hass: HomeAssistant, freezer) -> None:
     assert state["t_ch"] == rig.entry.runtime_data.model.t_ch
     assert {
         "t_cold",
+        "t_ambient",
         "cold_fraction",
         "outputs",
         "heating",

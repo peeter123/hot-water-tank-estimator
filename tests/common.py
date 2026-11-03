@@ -20,6 +20,7 @@ from custom_components.hot_water_tank_estimator.const import (
     CONF_VOLUME,
     CONF_WATER_METER,
     DOMAIN,
+    STORAGE_VERSION,
 )
 from custom_components.hot_water_tank_estimator.estimator import TankConfig
 from custom_components.hot_water_tank_estimator.model import (
@@ -40,6 +41,7 @@ FLOW = "sensor.flow_temperature"
 RETURN = "sensor.return_temperature"
 HUMIDITY = "sensor.bathroom_humidity"
 COLD = "sensor.cold_water_temperature"
+AMBIENT = "sensor.tank_ambient"
 
 TITLE = "Hot water"
 CELSIUS = {"unit_of_measurement": "°C", "device_class": "temperature"}
@@ -54,6 +56,7 @@ ATTRIBUTES: dict[str, dict[str, Any]] = {
     RETURN: CELSIUS,
     HUMIDITY: {"unit_of_measurement": "%", "device_class": "humidity"},
     COLD: CELSIUS,
+    AMBIENT: CELSIUS,
 }
 
 FULL_OPTIONS: dict[str, Any] = {
@@ -96,6 +99,26 @@ def set_sources(hass: HomeAssistant, **overrides: str) -> None:
     values.update(overrides)
     for entity_id, state in values.items():
         hass.states.async_set(entity_id, state, ATTRIBUTES.get(entity_id, {}))
+
+
+async def setup_fitted_entry(
+    hass: HomeAssistant,
+    hass_storage: dict[str, Any],
+    options: dict[str, Any] | None = None,
+    ambient_fitted: str | None = None,
+) -> MockConfigEntry:
+    """Set up an entry whose store says that the setup fit is done with `ambient_fitted`.
+
+    A reload then starts a fit only when the ambient sensor of the options is another one.
+    """
+    entry_id = "fitted-entry-id"
+    hass_storage[f"{DOMAIN}.{entry_id}"] = {
+        "version": STORAGE_VERSION,
+        "minor_version": 1,
+        "key": f"{DOMAIN}.{entry_id}",
+        "data": {"fit_done": True, "ambient_fit": ambient_fitted},
+    }
+    return await setup_entry(hass, options, entry_id=entry_id)
 
 
 async def setup_entry(
@@ -176,6 +199,8 @@ class Oracle:
                 model.on_humidity(now, HUMIDITY, number)
             case _ if entity == COLD:
                 model.on_cold_water_sensor(now, number)
+            case _ if entity == AMBIENT:
+                model.on_ambient_sensor(now, number)
 
 
 def _float(text: str) -> float | None:

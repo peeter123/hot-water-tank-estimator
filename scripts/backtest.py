@@ -109,6 +109,7 @@ def read_history(
         setup_fit.RETURN_TEMPERATURE,
         setup_fit.BATHROOM_HUMIDITY,
         setup_fit.COLD_WATER_TEMPERATURE,
+        setup_fit.AMBIENT_TEMPERATURE,
     }
     series = []
     for file in sorted(path.glob("*.json")):

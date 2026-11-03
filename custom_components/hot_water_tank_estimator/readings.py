@@ -12,6 +12,7 @@ from homeassistant.util.unit_conversion import (
 )
 
 from .setup_fit import (
+    AMBIENT_TEMPERATURE,
     COLD_WATER_TEMPERATURE,
     DHW_ENERGY,
     DHW_POWER,
@@ -25,6 +26,7 @@ _TEMPERATURE_ROLES = {
     FLOW_TEMPERATURE,
     RETURN_TEMPERATURE,
     COLD_WATER_TEMPERATURE,
+    AMBIENT_TEMPERATURE,
 }
 
 

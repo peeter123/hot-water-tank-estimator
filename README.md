@@ -22,6 +22,7 @@ It provides:
 - shower minutes left;
 - the charged temperature and the estimated tank average temperature;
 - the cold water temperature used;
+- the standing heat loss of the tank, in W;
 - a shower detected binary sensor and a "Shower ran cold" button;
 - calibration diagnostics.
 
@@ -39,8 +40,8 @@ displays; it does not control the heater. It needs no tank flow meter, only sens
   - a thermal energy counter for heating the tank;
   - a heat power sensor;
   - a binary sensor that is on while the tank is heating.
-- Optional: the heater's flow and return temperatures, one or more bathroom humidity sensors, and a cold water
-  temperature sensor.
+- Optional: the heater's flow and return temperatures, one or more bathroom humidity sensors, a cold water
+  temperature sensor, and an ambient temperature sensor for the air around the tank.
 
 ## Installation
 
@@ -76,7 +77,8 @@ device class (the heating active binary sensor is filtered by domain only).
 | Heat input | Flow temperature sensor | The flow temperature of the heater. Give it with the return temperature. |
 | Heat input | Return temperature sensor | The return temperature of the heater. Give it with the flow temperature. |
 | Shower detection | Bathroom humidity sensors | One or more humidity sensors. A rise tells a shower or bath from other draws. |
-| Cold water | Cold water temperature sensor | The cold supply water. Without it, a seasonal curve is used. |
+| Temperatures | Cold water temperature sensor | The cold supply water. Without it, a seasonal curve is used. |
+| Temperatures | Ambient temperature sensor | The air around the tank, for the standing loss. Without it, the Ambient temperature of the options is used. See "Ambient temperature sensor". |
 
 At least one of the energy counter, the power sensor and the heating active binary sensor is needed. Without
 flow and return, the tank sensor gives the charged temperature at the end of a heating run. A tank sensor can
@@ -91,7 +93,8 @@ To change the tank or its sources later, open the entry under Settings, Devices 
 and Reconfigure. One form shows the tank volume, the tank sensor, the sensor height and all the sources, with the same
 checks as the setup. It is the only place to change the volume, the tank sensor, the water meter and the heat
 inputs. A tank sensor that another entry uses is refused. The entry, its device, the model state and the
-calibration stay, and the entry reloads. The tuning values are in the options.
+calibration stay, and the entry reloads. The tuning values are in the options. Adding, removing or replacing the
+ambient sensor here starts a recalibration in the background.
 
 ### Finding the sensor height
 
@@ -119,11 +122,12 @@ entry and keeps the model state (the tank average, the charged temperature and t
 | Tank and temperatures | Maximum temperature | 95 C | The highest temperature the model accepts. |
 | Tank and temperatures | Sensor tolerance | 1.5 K | How far below the charged temperature the sensor may read before the cold layer counts as reached. |
 | Tank and temperatures | Sensor margin | 2 K | How far the tank average may stay above the value the sensor gives. |
-| Tank and temperatures | Ambient temperature | 20 C | The temperature around the tank, for the standing loss. |
+| Tank and temperatures | Ambient temperature | 20 C | The temperature around the tank, for the standing loss. Used without an ambient sensor, and when the sensor has been unavailable longer than the fallback time. |
+| Tank and temperatures | Ambient sensor fallback time | 3 h | How long the last ambient sensor reading stays in use after the sensor becomes unavailable, 0-24. |
 | Tank and temperatures | Cold water mean temperature | 12.5 C | Yearly mean of the cold water, used without a cold water sensor. |
 | Tank and temperatures | Cold water amplitude | 5 K | Seasonal swing around the mean. |
 | Tank and temperatures | Coldest day of the year | 46 | Day of the year with the coldest cold water. |
-| Sources | Flow and return temperature sensors, Bathroom humidity sensors, Cold water temperature sensor | as set | As in the config flow. Clear a field to remove the source. Give flow and return together. |
+| Sources | Flow and return temperature sensors, Bathroom humidity sensors, Cold water temperature sensor, Ambient temperature sensor | as set | As in the config flow. Clear a field to remove the source. Give flow and return together. Adding, removing or replacing the ambient sensor starts a recalibration in the background. |
 | Draws, losses and heat | Loss coefficient | 0.004 per hour | Standing loss. Learned. |
 | Draws, losses and heat | Other draws hot share | 0.2 | Share of the litres outside a shower that comes from the tank. Learned. |
 | Draws, losses and heat | Start-up energy per run | 0 kWh | Energy of each run that does not reach the tank. Learned. |
@@ -151,6 +155,7 @@ Each tank has one device with these entities. All names are translated.
 | Charged temperature | C | The temperature of the hot layer. |
 | Tank average temperature | C | The estimated average temperature of the tank. |
 | Cold water temperature | C | The cold water temperature in use: the sensor, or the seasonal curve. |
+| Heat loss | W | The standing heat loss of the tank: the loss coefficient times the tank's heat capacity times the excess of the tank average over the ambient temperature in use. 0 W at or below the ambient temperature. |
 | Shower detected | | On while a shower or bath is detected. Unavailable when there are no humidity sensors and the long draw rule is off. |
 | Shower ran cold | | Button. Press it when a shower ran cold earlier than predicted. |
 
@@ -195,7 +200,11 @@ The integration fits its parameters to your tank, so the defaults are only a sta
 - At the end of every heating run the run's energy shows how far the model was off at the start of the run. This
   needs an energy counter or a power sensor. The share, the start-up energy and the loss coefficient are refitted
   from the last runs. Each update moves a value by at most a quarter of its range.
-- Quiet nights, with no draw and no heating, give the loss coefficient from the fall of the tank sensor.
+- Quiet nights, with no draw and no heating, give the loss coefficient from the fall of the tank sensor, against the
+  mean ambient temperature of the night.
+- Adding, removing or replacing the ambient sensor (in the options or in Reconfigure) recalibrates the tank in the
+  background after the reload, because the loss coefficient fitted against a sensor is not the one fitted against
+  the fixed ambient temperature. The tank average and the charged temperature are kept.
 - The first fall of the tank sensor after a charge gives the thermocline width.
 - The "Shower ran cold" button sets the usable fraction to the current cold fraction and empties the model.
 - A locked parameter keeps its value from the options and is never learned. Removing a lock discards what was
@@ -226,10 +235,10 @@ and reason.
 
 ## How the estimate updates
 
-Nothing is polled. Every state change of a source (water meter, tank sensor, heat input, humidity, cold water) goes
-to the model at once, and a 5-minute timer lets the standing loss and the cold layer move when nothing changes. The
-entities update after each of those. The model state and the calibration are stored per entry every minute or so
-and at shutdown, so a restart continues where it stopped.
+Nothing is polled. Every state change of a source (water meter, tank sensor, heat input, humidity, cold water,
+ambient) goes to the model at once, and a 5-minute timer lets the standing loss and the cold layer move when nothing
+changes. The entities update after each of those. The model state and the calibration are stored per entry every
+minute or so and at shutdown, so a restart continues where it stopped.
 
 ## The model in short
 
@@ -242,6 +251,22 @@ The tank is a hot layer above a cold one, with a thermocline between them:
 - the usable fraction of the tank is what can be drawn before the outlet runs lukewarm.
 
 Every formula, unit, default and the reason for it is in [docs/model.md](docs/model.md).
+
+## Ambient temperature sensor
+
+An ambient temperature sensor is optional and replaces the fixed Ambient temperature of the options in the standing
+loss, in the quiet nights that give the loss coefficient, and in the Heat loss sensor. Without one, a room that is
+not at 20 C biases the loss coefficient and the heat loss a little.
+- **Where to put it:** in the air around the tank, at the tank. A sensor in sun, next to the heater or in another
+  room measures another temperature. The loss coefficient is fitted against that sensor, so it absorbs a constant
+  offset, but not a swing that does not follow the tank's surroundings.
+- **Outages:** while the sensor is unavailable, its last reading stays in use for the Ambient sensor fallback time (3
+  hours). A longer outage falls back to the Ambient temperature of the options, because a reading many hours old
+  may belong to another part of the day.
+- **History:** the setup fit and the recalibrate action replay the sensor's recorder history. Before its first
+  recorded reading, the replay uses the Ambient temperature of the options.
+- **Removing a sensor:** the last reading of a removed cold water or ambient sensor is dropped, so the seasonal curve,
+  or the Ambient temperature of the options, applies at once.
 
 ## Tuning
 
@@ -264,6 +289,11 @@ history export (`scripts/history.py`) or a fixture:
 uv run --no-project scripts/backtest.py EXPORT_DIR --volume 200 --map-file MAPPING.json \
   --options '{"usable_fraction": 0.8}'
 ```
+
+The roles of an export are the names of the setup fit: `tank_temperature`, `water_meter`, `dhw_energy`, `dhw_power`,
+`dhw_heating`, `flow_temperature`, `return_temperature`, `bathroom_humidity`, `cold_water_temperature` and
+`ambient_temperature`. The map file maps each file name (without `.json`) to its role. An export with an
+`ambient_temperature` file replays the ambient sensor, one without it uses the fixed ambient temperature.
 
 It prints the charge error at every heating run and the outputs through every shower, once with your options and once
 with the fitted ones. The usage, all arguments and what the numbers mean are in

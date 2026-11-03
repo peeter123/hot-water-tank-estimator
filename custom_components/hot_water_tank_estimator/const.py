@@ -15,6 +15,7 @@ DEFAULT_MAX_TEMPERATURE = 95.0  # C
 DEFAULT_SENSOR_TOLERANCE = 1.5  # K
 DEFAULT_SENSOR_MARGIN = 2.0  # K
 DEFAULT_AMBIENT_TEMPERATURE = 20.0  # C
+DEFAULT_AMBIENT_FALLBACK = 3.0  # hours the last ambient sensor reading holds
 DEFAULT_COLD_MEAN = 12.5  # C
 DEFAULT_COLD_AMPLITUDE = 5.0  # K
 DEFAULT_COLD_COLDEST_DAY = 46  # day of the year
@@ -58,6 +59,7 @@ CONF_FLOW_SENSOR = "flow_sensor"
 CONF_RETURN_SENSOR = "return_sensor"
 CONF_HUMIDITY_SENSORS = "humidity_sensors"
 CONF_COLD_SENSOR = "cold_sensor"
+CONF_AMBIENT_SENSOR = "ambient_sensor"
 CONF_THERMOCLINE_WIDTH = "thermocline_width"  # percent
 CONF_LOCKS = "locks"
 CONF_HISTORY_DAYS = "history_days"
@@ -72,6 +74,7 @@ SOURCE_KEYS = (
     CONF_FLOW_SENSOR,
     CONF_RETURN_SENSOR,
     CONF_COLD_SENSOR,
+    CONF_AMBIENT_SENSOR,
 )
 
 # Limits of the config flow.

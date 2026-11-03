@@ -13,7 +13,7 @@ shower water). Both are pure Python and use the symbols below. The defaults are 
 | `t_cold` | Cold water temperature | C |
 | `t_mix` | Mix temperature of the shower | C |
 | `t_max` | Maximum tank temperature | C |
-| `t_ambient` | Temperature around the tank | C |
+| `t_ambient` | Ambient temperature in use: the temperature around the tank | C |
 | `V` | Tank volume | L |
 | `f` | Cold fraction | 0-1 |
 | `h` | Tank sensor height, from the bottom | fraction of the tank |
@@ -137,6 +137,43 @@ t -= k * (t - t_ambient) * dt          for t_avg and t_ch, dt in hours
 There is no loss below `t_ambient`. The default `k = 0.004` per hour is the median of quiet windows (5-10 hours with
 no draw and no heating, where the tank sensor fell 0.08-0.24 K/h). Higher values follow evenings with draws, when the
 cold layer was already near the sensor.
+
+### Ambient temperature in use
+
+`t_ambient` is not a fixed value when an ambient temperature sensor is configured. The model's
+`ambient_temperature(now)` returns:
+- the sensor's reading, while it is available;
+- its last reading, for `ambient_fallback` hours after the sensor became unavailable (default 3, range 0-24);
+- the `ambient_temperature` option otherwise, which is also the value without a sensor, and the value before the first
+  reading of a history that starts late.
+
+The loss step, the loss sums of the calibration intervals, the quiet-window estimate and the heat loss output all call
+it, so they cannot disagree about the room. The loss of a step uses the value in force during the step (the reading
+before a change arrives).
+
+Why 3 hours. Over a month, an air sensor next to a tank in a basement read within a 2.5 K span (18.7-21.25 C), moved at
+most 1.3 K within one day, and its daily mean drifted 1.5 K over the month. A reading 3 hours old is therefore within
+about 1 K of the true room temperature, which against a tank-to-room difference near 38 K is under 3 % of the loss
+rate. That covers the short radio or battery outages of wireless sensors. After a longer outage the reading may belong
+to another part of the day, so the configured value is the better guess. 0 turns the hold off and 24 holds a day.
+
+A removed cold water or ambient sensor has no say: its last reading is dropped, so the seasonal curve, or the
+`ambient_temperature` option, applies at once.
+
+Changing the ambient source recalibrates, because `k` fitted against a fixed 20 C and `k` fitted against a sensor are
+different parameters: the loss coefficient is defined against `t_ambient`, so keeping the old value would bias it.
+
+### Heat loss output
+
+```text
+heat_loss_w = k * C * max(0, t_avg - t_ambient) * 1000        C = 1.163 * V / 1000 in kWh per K
+```
+
+`k` per hour times `C` in kWh per K times the excess in K is kW; `* 1000` gives W. It uses `t_avg`, not `t_ch`, because
+the loss acts on the whole tank and the loss step applies the same rate to `t_avg`. For a 285 L tank with `k = 0.0039`
+per hour at 58 C in a 19.5 C room it is `0.0039 * 0.331 * 38.5 * 1000 = 50` W. It is a main sensor rather than a
+diagnostic one, because it answers what keeping the tank hot costs. On the development installation it reads about
+50 W, against a rated 58 W at that temperature difference: the learned `k` sits a little below the rated value.
 
 ## The tank sensor as a measurement
 
@@ -315,7 +352,9 @@ A closure is excluded from the fit and from the error statistics when:
 - the run lasted less than 15 minutes, because a short run does not mix the tank;
 - a source was unavailable for more than 10 % of the interval. The model counts the unavailable seconds of every
   source it was given: water meter, energy counter, power, heating sensor, flow and return, tank sensor, cold water
-  sensor and each humidity sensor;
+  sensor and each humidity sensor. The ambient sensor does not count: the model always has an ambient value (the
+  sensor, its last reading or the option), and it enters only the loss term, where a 1 K error moves a closure by
+  about 0.03 K over 8 hours;
 - the "Shower ran cold" button reset the model in the interval or at its start. The model then starts from a guessed
   state, so the interval has no charged start;
 - the run has no charged temperature (no flow and return and no tank sensor). The model keeps its values, and the
@@ -341,7 +380,8 @@ sensor there are no closures, and `k` comes from quiet windows only.
 - **Loss from quiet windows.** A window is a stretch of at least 5 hours with no draw and no heating, in which the
   tank sensor reads within `delta` of `t_ch`. A window opens no earlier than 1 hour after a run end, because the
   sensor still settles then (windows opened at the run end gave estimates about half of the others). Then
-  `k = rate / (t_mean - t_ambient)`, with the sensor's fall in K/h and its time-weighted mean reading. The last 10
+  `k = rate / (t_mean - t_ambient)`, with the sensor's fall in K/h, its time-weighted mean reading, and the
+  time-weighted mean of the ambient temperature in use over the window. The last 10
   windows are averaged. From 3 estimates on their mean is the loss coefficient in use, and the closure fit holds it.
   With fewer, the closure fit sets `k` once 5 closures are stored (without a heat measurement, the quiet windows
   always do). Any draw ends a window, even one litre, so busy households get few windows.
@@ -381,7 +421,13 @@ has run once (a recorder that is missing or holds no history does not count). So
 weaken it, because their rows are missing. The live model does not take the replay's end state: it keeps its own
 state, which starts at the tank sensor's reading, and only the calibration comes from the fit.
 
-The replay starts the model at the tank sensor's first numeric reading and ticks every 5 minutes. It applies each
+The fit also runs at the first start after the configured ambient sensor differs from the one the calibration was
+fitted with (added, removed or replaced), because `k` depends on it. The entry stores the ambient entity of its last
+fit, and the fit repeats at each start until it completes or finds no history.
+
+The replay starts the model at the tank sensor's first numeric reading and ticks every 5 minutes. A history with an
+ambient series feeds it to the model like the cold water sensor, so the loss and the quiet windows of the replay use
+the ambient in use (see "Ambient temperature in use"). It applies each
 learned change to the model as it goes, so the fit of a long history converges the way live learning does. A parameter
 with too little data keeps its option value: with fewer than 5 closures the share and `S` stay, and `k` may still come
 from quiet windows.
@@ -408,5 +454,17 @@ uv run --no-project scripts/backtest.py EXPORT_DIR --volume 281 --map-file MAPPI
 - `--lock PARAMETER` keeps a parameter at its option value.
 - `--days N` fits the last N days only.
 - `--sensor-height` (default 0.5) and `--water-unit` (default m3) are for an export.
+
+The roles of an export are the names of the setup fit (`tank_temperature`, `water_meter`, `dhw_energy`, `dhw_power`,
+`dhw_heating`, `flow_temperature`, `return_temperature`, `bathroom_humidity`, `cold_water_temperature` and
+`ambient_temperature`). An export with an `ambient_temperature` file replays the ambient sensor; without it the
+`ambient_temperature` option is used all through. Before the ambient sensor's first row the replay uses the option too.
+
+Ambient sensor evidence. On a month of history, the same fit with and without the ambient sensor (a basement air
+sensor averaging 19.6 C, against the 20 C default) gave quiet-window estimates that were about 0.0001 per hour lower
+(0.0039 against 0.0040 per hour for `k`), and no change in the charge errors (mean absolute error 1.52 against 1.51 K
+with the fitted options). In a room close to the default the sensor is not an accuracy gain, but it removes the guess
+and keeps `k` right in a room that is not at 20 C: a 4 K cooler room moves a quiet-window estimate by about 10 %
+(`0.1375 / 36.45` against `0.1375 / 40.45`).
 
 A rising mean charge error points at a wrong sensor height or a changed household: check the sensor height first.

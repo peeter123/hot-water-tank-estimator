@@ -3,6 +3,7 @@
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from .calibration import PARAMETER_BOUNDS
 from .estimator import TankConfigEntry
@@ -21,6 +22,7 @@ async def async_get_config_entry_diagnostics(
             "t_avg": model.t_avg,
             "t_ch": model.t_ch,
             "t_cold": model.t_cold,
+            "t_ambient": model.ambient_temperature(dt_util.utcnow()),
             "cold_fraction": model.cold_fraction,
             "outputs": {
                 "tank_litres": model.outputs.tank_litres,

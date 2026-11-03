@@ -39,6 +39,7 @@ from homeassistant.helpers import selector
 from .calibration import PARAMETER_BOUNDS
 from .classification import litres_from_meter
 from .const import (
+    CONF_AMBIENT_SENSOR,
     CONF_COLD_SENSOR,
     CONF_ENERGY_COUNTER,
     CONF_FLOW_SENSOR,
@@ -53,6 +54,7 @@ from .const import (
     CONF_THERMOCLINE_WIDTH,
     CONF_VOLUME,
     CONF_WATER_METER,
+    DEFAULT_AMBIENT_FALLBACK,
     DEFAULT_AMBIENT_TEMPERATURE,
     DEFAULT_COLD_AMPLITUDE,
     DEFAULT_COLD_COLDEST_DAY,
@@ -130,6 +132,14 @@ SHAPE_TUNING = (
         0.5,
         UnitOfTemperature.CELSIUS,
     ),
+    Tuning(
+        "ambient_fallback",
+        DEFAULT_AMBIENT_FALLBACK,
+        0,
+        24,
+        0.5,
+        UnitOfTime.HOURS,
+    ),
     Tuning("cold_mean", DEFAULT_COLD_MEAN, 0, 30, 0.5, UnitOfTemperature.CELSIUS),
     Tuning("cold_amplitude", DEFAULT_COLD_AMPLITUDE, 0, 15, 0.5, "K"),
     Tuning("cold_coldest_day", DEFAULT_COLD_COLDEST_DAY, 1, 365, 1, "day"),
@@ -169,6 +179,7 @@ OPTIONAL_SOURCES = (
     CONF_RETURN_SENSOR,
     CONF_HUMIDITY_SENSORS,
     CONF_COLD_SENSOR,
+    CONF_AMBIENT_SENSOR,
 )
 
 
@@ -276,9 +287,12 @@ def _detection_fields() -> dict[Any, Any]:
     }
 
 
-def _cold_fields() -> dict[Any, Any]:
-    """Return the field of the cold water step."""
-    return {probatio.Optional(CONF_COLD_SENSOR): _temperature()}
+def _temperature_fields() -> dict[Any, Any]:
+    """Return the fields of the temperatures step: the cold water and ambient sensors."""
+    return {
+        probatio.Optional(CONF_COLD_SENSOR): _temperature(),
+        probatio.Optional(CONF_AMBIENT_SENSOR): _temperature(),
+    }
 
 
 def _learning_fields() -> dict[Any, Any]:
@@ -436,19 +450,19 @@ class HotWaterTankEstimatorConfigFlow(ConfigFlow, domain=DOMAIN):
         """Step 4: the bathroom humidity sensors."""
         if user_input is not None:
             self._options.update(user_input)
-            return await self.async_step_cold()
+            return await self.async_step_temperatures()
         return self._form("detection", _detection_fields(), user_input)
 
-    async def async_step_cold(
+    async def async_step_temperatures(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Step 5: the cold water sensor. This creates the entry."""
+        """Step 5: the cold water and ambient sensors. This creates the entry."""
         if user_input is not None:
             self._options.update(user_input)
             return self.async_create_entry(
                 title=self._name, data={}, options=self._options
             )
-        return self._form("cold", _cold_fields(), user_input)
+        return self._form("temperatures", _temperature_fields(), user_input)
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
@@ -464,7 +478,7 @@ class HotWaterTankEstimatorConfigFlow(ConfigFlow, domain=DOMAIN):
             **_meter_fields(),
             **_heat_fields(),
             **_detection_fields(),
-            **_cold_fields(),
+            **_temperature_fields(),
         }
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -547,11 +561,11 @@ class HotWaterTankEstimatorOptionsFlow(OptionsFlowWithReload):
     async def async_step_sources(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """The optional sources: flow and return, humidity and cold water."""
+        """The optional sources: flow and return, humidity, cold water and ambient."""
         fields = {
             **_flow_return_fields(),
             **_detection_fields(),
-            **_cold_fields(),
+            **_temperature_fields(),
         }
         errors: dict[str, str] = {}
         if user_input is not None:

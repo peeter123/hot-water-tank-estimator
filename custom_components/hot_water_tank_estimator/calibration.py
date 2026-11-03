@@ -57,6 +57,8 @@ SOURCE_LOCKED = "locked"
 FORGETTING_FACTOR = 0.95  # weight of an interval relative to the next one
 MIN_INTERVALS = 5  # intervals needed before the closure fit is applied
 MIN_RUN_MINUTES = 15.0  # shorter runs do not mix the tank
+# The ambient sensor never excludes a closure: the model always has an ambient value.
+AMBIENT_SOURCE = "ambient_sensor"
 MAX_UNAVAILABLE_FRACTION = 0.1  # of an interval, for any one source
 QUIET_WINDOW_HOURS = 5.0  # shortest window for a loss estimate
 QUIET_KEEP = 10  # loss estimates from quiet windows that are averaged
@@ -357,6 +359,8 @@ class _QuietWindow:
     value: float  # reading in force in C
     since: datetime  # when `value` came in force
     integral: float = 0.0  # C*s of the readings before `since`
+    ambient: float = 0.0  # ambient temperature in use in C, since `since`
+    ambient_integral: float = 0.0  # C*s of the ambient in use before `since`
 
 
 @dataclass
@@ -589,7 +593,11 @@ class Calibrator:
                 status, reason = EXCLUDED, REASON_SHORT_RUN
         if status != EXCLUDED and hours > 0:
             source, seconds = max(
-                change["unavailable_seconds"].items(),
+                (
+                    item
+                    for item in change["unavailable_seconds"].items()
+                    if item[0] != AMBIENT_SOURCE
+                ),
                 key=lambda item: item[1],
                 default=("", 0.0),
             )
@@ -665,27 +673,36 @@ class Calibrator:
             and sensor >= model.t_ch - options.sensor_tolerance
         )
         if window is not None:
-            window.integral += window.value * (now - window.since).total_seconds()
+            elapsed = (now - window.since).total_seconds()
+            window.integral += window.value * elapsed
+            window.ambient_integral += window.ambient * elapsed
             window.since = now
             if broke or not ok:
-                self._close_window(window, options.ambient_temperature)
+                self._close_window(window)
                 window = self._window = None
             elif sensor is not None:
                 window.value = sensor
+                window.ambient = model.ambient_temperature(now)
         settled = self._last_run_end is None or now - self._last_run_end >= timedelta(
             hours=QUIET_SETTLE_HOURS
         )
         if window is None and ok and settled and sensor is not None:
-            self._window = _QuietWindow(now, sensor, sensor, now)
+            self._window = _QuietWindow(
+                now, sensor, sensor, now, ambient=model.ambient_temperature(now)
+            )
 
-    def _close_window(self, window: _QuietWindow, ambient: float) -> None:
-        """Estimate `k = rate / (t_mean - t_ambient)` from a window of at least 5 hours."""
+    def _close_window(self, window: _QuietWindow) -> None:
+        """Estimate `k = rate / (t_mean - t_ambient)` from a window of at least 5 hours.
+
+        t_ambient is the time-weighted mean of the ambient temperature in use over the window.
+        """
         seconds = (window.since - window.start).total_seconds()
         hours = seconds / 3600
         if hours < QUIET_WINDOW_HOURS:
             return
         rate = (window.first - window.value) / hours  # K per hour
         mean = window.integral / seconds
+        ambient = window.ambient_integral / seconds
         if rate <= 0 or mean <= ambient:
             return
         self.quiet_estimates.append(rate / (mean - ambient))

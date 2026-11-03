@@ -46,6 +46,7 @@ FLOW_TEMPERATURE = "flow_temperature"
 RETURN_TEMPERATURE = "return_temperature"
 BATHROOM_HUMIDITY = "bathroom_humidity"
 COLD_WATER_TEMPERATURE = "cold_water_temperature"
+AMBIENT_TEMPERATURE = "ambient_temperature"
 
 
 @dataclass(frozen=True)
@@ -118,7 +119,7 @@ def history_from_fixture(data: Mapping[str, Any]) -> History:
 
 
 def sources_for(history: History) -> Sources:
-    """Return which sources the history has: the heat input, flow and return, humidity, cold."""
+    """Return which sources the history has: the heat input, flow and return, humidity, cold, ambient."""
     roles = {series.role for series in history.series}
     return Sources(
         energy_counter=DHW_ENERGY in roles,
@@ -126,6 +127,7 @@ def sources_for(history: History) -> Sources:
         heating_binary=DHW_HEATING in roles,
         flow_return=FLOW_TEMPERATURE in roles and RETURN_TEMPERATURE in roles,
         cold_sensor=COLD_WATER_TEMPERATURE in roles,
+        ambient_sensor=AMBIENT_TEMPERATURE in roles,
         humidity_sensors=tuple(
             series.entity_id
             for series in history.series
@@ -286,6 +288,8 @@ def replay(
                 new = model.on_humidity(time, series.entity_id, value)
             case "cold_water_temperature":
                 new = model.on_cold_water_sensor(time, value)
+            case "ambient_temperature":
+                new = model.on_ambient_sensor(time, value)
             case _:
                 raise ValueError(f"Unknown role {series.role}")
         step(time, new)

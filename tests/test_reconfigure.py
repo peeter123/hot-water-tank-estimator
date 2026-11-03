@@ -1,10 +1,12 @@
 """Tests for the reconfigure step: it changes the tank and the sources and keeps the entry and its state."""
 
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from custom_components.hot_water_tank_estimator.const import (
+    CONF_AMBIENT_SENSOR,
     CONF_COLD_SENSOR,
     CONF_ENERGY_COUNTER,
     CONF_FLOW_SENSOR,
@@ -20,10 +22,12 @@ from custom_components.hot_water_tank_estimator.const import (
     CONF_WATER_METER,
     DOMAIN,
 )
+from custom_components.hot_water_tank_estimator.estimator import TankEstimator
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
 from .common import (
+    AMBIENT,
     COLD,
     FULL_OPTIONS,
     METER,
@@ -32,6 +36,7 @@ from .common import (
     entity_id,
     set_sources,
     setup_entry,
+    setup_fitted_entry,
     value,
 )
 from .test_calibration import make_closure
@@ -118,6 +123,41 @@ async def test_replace_the_water_meter(hass: HomeAssistant) -> None:
     assert value(hass, entry, "sensor", "calibration_samples") == "1"
     assert entity_id(hass, entry, "sensor", "tank_litres") == tank_litres
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "runs"),
+    [
+        (None, AMBIENT, True),
+        (AMBIENT, None, True),
+        (AMBIENT, "sensor.other_ambient", True),
+        (AMBIENT, AMBIENT, False),
+        (None, None, False),
+    ],
+)
+async def test_reconfigure_recalibrates_only_when_the_ambient_sensor_changes(
+    hass: HomeAssistant,
+    hass_storage,
+    before: str | None,
+    after: str | None,
+    runs: bool,
+) -> None:
+    """Adding, removing or replacing the ambient sensor starts a fit after the reload."""
+    set_sources(hass)
+    for sensor in (AMBIENT, "sensor.other_ambient"):
+        hass.states.async_set(sensor, "19.5", {"unit_of_measurement": "°C"})
+    options = {**FULL_OPTIONS} | ({CONF_AMBIENT_SENSOR: before} if before else {})
+    entry = await setup_fitted_entry(hass, hass_storage, options, before)
+    result = await start(hass, entry)
+    form = {**FORM} | ({CONF_AMBIENT_SENSOR: after} if after else {})
+    with patch.object(
+        TankEstimator, "async_setup_fit", new=AsyncMock(return_value=None)
+    ) as fit:
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], form)
+        assert result["reason"] == "reconfigure_successful"
+        await hass.async_block_till_done()
+        assert (fit.await_count == 1) is runs
+    assert entry.options.get(CONF_AMBIENT_SENSOR) == after
 
 
 async def test_reconfigure_can_keep_the_same_tank_sensor(hass: HomeAssistant) -> None:

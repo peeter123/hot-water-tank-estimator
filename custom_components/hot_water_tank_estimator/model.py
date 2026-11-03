@@ -26,6 +26,7 @@ from .classification import ClassifierOptions, DrawClassifier
 from .const import (
     CHARGE_WINDOW_SECONDS,
     COUNTER_LAG_SECONDS,
+    DEFAULT_AMBIENT_FALLBACK,
     DEFAULT_AMBIENT_TEMPERATURE,
     DEFAULT_COLD_AMPLITUDE,
     DEFAULT_COLD_COLDEST_DAY,
@@ -120,6 +121,7 @@ class ModelOptions:
     sensor_tolerance: float = DEFAULT_SENSOR_TOLERANCE  # delta, K
     sensor_margin: float = DEFAULT_SENSOR_MARGIN  # m, K
     ambient_temperature: float = DEFAULT_AMBIENT_TEMPERATURE  # t_ambient, C
+    ambient_fallback: float = DEFAULT_AMBIENT_FALLBACK  # hours
     cold_mean: float = DEFAULT_COLD_MEAN  # C
     cold_amplitude: float = DEFAULT_COLD_AMPLITUDE  # K
     cold_coldest_day: int = DEFAULT_COLD_COLDEST_DAY  # day of the year
@@ -154,7 +156,8 @@ class Sources:
     """Which heat sources and optional sensors are configured.
 
     The rules differ per combination: counter, power or binary-only heat, flow and return or
-    not, a cold water sensor or not. The tank sensor and the water meter are always present.
+    not, a cold water sensor or not, an ambient sensor or not. The tank sensor and the water
+    meter are always present.
     """
 
     energy_counter: bool = False
@@ -162,6 +165,7 @@ class Sources:
     heating_binary: bool = False
     flow_return: bool = False
     cold_sensor: bool = False
+    ambient_sensor: bool = False
     humidity_sensors: tuple[str, ...] = ()
 
 
@@ -262,6 +266,7 @@ class TankModel:
         *,
         max_events: int = 500,
         cold_sensor: float | None = None,
+        ambient_sensor: float | None = None,
     ) -> None:
         """Create a model that is charged (or, with `t_ch` above `t_avg`, part drawn).
 
@@ -273,6 +278,7 @@ class TankModel:
             t_ch: The charged temperature in C, `t_avg` when omitted.
             max_events: Size of the event log.
             cold_sensor: The cold water sensor reading in C, if one is available now.
+            ambient_sensor: The ambient sensor reading in C, if one is available now.
         """
         self.options = options
         self.sources = sources
@@ -287,6 +293,14 @@ class TankModel:
 
         self._tank_sensor: float | None = None
         self._cold_sensor: float | None = cold_sensor
+        self._ambient_sensor: float | None = ambient_sensor
+        # Set on restore: when the restored sensor reading was last known good.
+        self._ambient_restored: datetime | None = None
+        # The last ambient reading and the time it was last known good (when the sensor went
+        # unavailable): it stays in use for `ambient_fallback` hours after that.
+        self._ambient_last: tuple[float, datetime] | None = (
+            None if ambient_sensor is None else (ambient_sensor, now)
+        )
         self._binary: bool | None = None
         # When the detecting sources last became unavailable (the model start counts).
         self._binary_lost = now
@@ -452,6 +466,22 @@ class TankModel:
         self._mark("cold_sensor", _finite(value), now)
         self._cold_sensor = float(value) if _finite(value) else None
         events += self._refresh_cold(now)
+        return events
+
+    def on_ambient_sensor(self, now: datetime, value: float | None) -> list[ModelEvent]:
+        """Process the ambient temperature sensor in C, None when unavailable."""
+        now, events = self._begin(now)
+        self._mark("ambient_sensor", _finite(value), now)
+        if _finite(value):
+            self._ambient_sensor = float(value)
+            self._ambient_last = (self._ambient_sensor, now)
+        else:
+            if self._ambient_sensor is not None:
+                # After a restore the outage began at the saved time, not at the restart.
+                lost = self._ambient_restored or now
+                self._ambient_last = (self._ambient_sensor, lost)
+            self._ambient_sensor = None
+        self._ambient_restored = None
         return events
 
     def tick(self, now: datetime) -> list[ModelEvent]:
@@ -635,6 +665,23 @@ class TankModel:
         """Return the event log, oldest first."""
         return list(self._events)
 
+    def ambient_temperature(self, now: datetime) -> float:
+        """Return t_ambient in use at a time.
+
+        The sensor's reading while it is available; its last reading for `ambient_fallback`
+        hours after it went unavailable; the `ambient_temperature` option otherwise.
+        """
+        if not self.sources.ambient_sensor:
+            return self.options.ambient_temperature
+        if self._ambient_sensor is not None:
+            return self._ambient_sensor
+        last = self._ambient_last
+        if last is not None and now - last[1] < timedelta(
+            hours=self.options.ambient_fallback
+        ):
+            return last[0]
+        return self.options.ambient_temperature
+
     def cold_water_temperature(self, now: datetime) -> float:
         """Return t_cold at a time: the sensor when available, else the seasonal curve."""
         return self._cold_at(now)
@@ -664,7 +711,7 @@ class TankModel:
 
     def _cold_at(self, now: datetime) -> float:
         """Return t_cold = mean - amplitude * cos(2 pi (doy - coldest_day) / 365)."""
-        if self._cold_sensor is not None:
+        if self.sources.cold_sensor and self._cold_sensor is not None:
             return self._cold_sensor
         o = self.options
         day = now.timetuple().tm_yday
@@ -738,7 +785,7 @@ class TankModel:
         before = self._temps()
         o = self.options
         factor = min(1.0, o.loss_coefficient * hours)
-        amb = o.ambient_temperature
+        amb = self.ambient_temperature(now)
         self._sums.hours += hours
         self._sums.loss += max(0.0, self._bal_avg - amb) * hours
         self.t_avg -= factor * max(0.0, self.t_avg - amb)
@@ -1114,6 +1161,13 @@ class TankModel:
             "now": self._now.isoformat(),
             "tank_sensor": self._tank_sensor,
             "cold_sensor": self._cold_sensor,
+            "ambient_sensor": self._ambient_sensor,
+            "ambient_last": None
+            if self._ambient_last is None
+            else {
+                "value": self._ambient_last[0],
+                "time": self._ambient_last[1].isoformat(),
+            },
             "binary": self._binary,
             "power": self._power,
             "draw_log": [[t.isoformat(), dv, kind] for t, dv, kind in self._draw_log],
@@ -1172,8 +1226,21 @@ class TankModel:
                 float(data["t_avg"]),
                 float(data["t_ch"]),
                 max_events=max_events,
-                cold_sensor=data["cold_sensor"],
+                # A source that is no longer configured has no say: its reading is dropped.
+                cold_sensor=data["cold_sensor"] if sources.cold_sensor else None,
+                ambient_sensor=data.get("ambient_sensor")
+                if sources.ambient_sensor
+                else None,
             )
+            # Added with the ambient sensor: older saved states lack it.
+            if sources.ambient_sensor:
+                if (last := data.get("ambient_last")) is not None:
+                    model._ambient_last = (
+                        float(last["value"]),
+                        datetime.fromisoformat(last["time"]),
+                    )
+                if model._ambient_sensor is not None:
+                    model._ambient_restored = model._now
             model._bal_avg = float(data["bal_avg"])
             model._bal_ch = float(data["bal_ch"])
             model._tank_sensor = data["tank_sensor"]

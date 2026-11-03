@@ -6,6 +6,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.hot_water_tank_estimator.const import (
+    CONF_AMBIENT_SENSOR,
     CONF_HUMIDITY_SENSORS,
     DOMAIN,
     STORAGE_VERSION,
@@ -16,6 +17,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .common import (
+    AMBIENT,
     ATTRIBUTES,
     FULL_OPTIONS,
     FULL_SOURCES,
@@ -38,6 +40,7 @@ SENSORS = {
     "charged_temperature": ("°C", "temperature", "measurement"),
     "tank_average": ("°C", "temperature", "measurement"),
     "cold_water_temperature": ("°C", "temperature", "measurement"),
+    "heat_loss": ("W", "power", "measurement"),
 }
 PARAMETER_SENSORS = {
     "other_hot_share": None,
@@ -60,6 +63,36 @@ async def test_units_and_classes(hass: HomeAssistant) -> None:
         assert state.attributes.get("unit_of_measurement") == unit, key
         assert state.attributes.get("device_class") == device_class, key
         assert state.attributes.get("state_class") == state_class, key
+
+
+async def test_standing_loss_of_a_charged_tank(hass: HomeAssistant) -> None:
+    """V 285 L, k 0.0039, T_avg 58 C and T_ambient 19.5 C: 0.0039 * 0.331 * 38.5 * 1000 = 50 W."""
+    set_sources(hass)
+    hass.states.async_set(AMBIENT, "19.5", ATTRIBUTES[AMBIENT])
+    entry = await setup_entry(
+        hass,
+        {
+            **FULL_OPTIONS,
+            "volume": 285.0,
+            "loss_coefficient": 0.0039,
+            CONF_AMBIENT_SENSOR: AMBIENT,
+        },
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "set_tank_state",
+        {
+            "entity_id": entity_id(hass, entry, "sensor", "tank_litres"),
+            "tank_average": 58,
+            "charged_temperature": 58,
+        },
+        blocking=True,
+    )
+    assert value(hass, entry, "sensor", "heat_loss") == "50"
+    # At or below the ambient temperature there is no loss.
+    hass.states.async_set(AMBIENT, "60", ATTRIBUTES[AMBIENT])
+    await hass.async_block_till_done()
+    assert value(hass, entry, "sensor", "heat_loss") == "0"
 
 
 async def test_diagnostic_sensors_and_their_source(hass: HomeAssistant) -> None:
@@ -100,7 +133,7 @@ async def test_every_entity_is_on_one_device_with_a_translated_name(
     assert len(devices) == 1
     assert devices[0].name == TITLE
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
-    assert len(entities) == 7 + 8 + 1 + 1
+    assert len(entities) == 8 + 8 + 1 + 1
     assert {e.device_id for e in entities} == {devices[0].id}
     state = hass.states.get(entity_id(hass, entry, "sensor", "tank_litres"))
     assert state is not None

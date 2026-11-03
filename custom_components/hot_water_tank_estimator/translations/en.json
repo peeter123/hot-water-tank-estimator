@@ -55,14 +55,16 @@
           "humidity_sensors": "A rise in humidity tells a shower or bath from other draws. Leave empty to detect showers by the long draw duration only."
         }
       },
-      "cold": {
-        "title": "Cold water",
-        "description": "Choose a cold water temperature sensor, if you have one.",
+      "temperatures": {
+        "title": "Temperatures",
+        "description": "Choose a cold water temperature sensor and an ambient temperature sensor, if you have them.",
         "data": {
-          "cold_sensor": "Cold water temperature sensor"
+          "cold_sensor": "Cold water temperature sensor",
+          "ambient_sensor": "Ambient temperature sensor"
         },
         "data_description": {
-          "cold_sensor": "The temperature of the cold supply water. Leave empty to use the seasonal curve of the options."
+          "cold_sensor": "The temperature of the cold supply water. Leave empty to use the seasonal curve of the options.",
+          "ambient_sensor": "The air temperature next to the tank, for the standing loss. Leave empty to use the ambient temperature of the options. Place the sensor in the air around the tank, away from sun and heat sources."
         }
       },
       "reconfigure": {
@@ -79,7 +81,8 @@
           "flow_sensor": "Flow temperature sensor",
           "return_sensor": "Return temperature sensor",
           "humidity_sensors": "Bathroom humidity sensors",
-          "cold_sensor": "Cold water temperature sensor"
+          "cold_sensor": "Cold water temperature sensor",
+          "ambient_sensor": "Ambient temperature sensor"
         },
         "data_description": {
           "volume": "The effective volume of the tank, 20-2000 L.",
@@ -92,7 +95,8 @@
           "flow_sensor": "The flow temperature of the heater. Give it together with the return temperature.",
           "return_sensor": "The return temperature of the heater. Give it together with the flow temperature.",
           "humidity_sensors": "A rise in humidity tells a shower or bath from other draws. Leave empty to detect showers by the long draw duration only.",
-          "cold_sensor": "The temperature of the cold supply water. Leave empty to use the seasonal curve of the options."
+          "cold_sensor": "The temperature of the cold supply water. Leave empty to use the seasonal curve of the options.",
+          "ambient_sensor": "The air temperature next to the tank, for the standing loss. Leave empty to use the ambient temperature of the options. Place the sensor in the air around the tank, away from sun and heat sources."
         }
       }
     },
@@ -124,7 +128,8 @@
           "ambient_temperature": "Ambient temperature",
           "cold_mean": "Cold water mean temperature",
           "cold_amplitude": "Cold water amplitude",
-          "cold_coldest_day": "Coldest day of the year"
+          "cold_coldest_day": "Coldest day of the year",
+          "ambient_fallback": "Ambient sensor fallback time"
         },
         "data_description": {
           "sensor_height": "Share of the tank's water below the sensor, in % (20-80). See the README for how to work it out from the data sheet.",
@@ -134,26 +139,29 @@
           "max_temperature": "The highest temperature the model accepts for the tank.",
           "sensor_tolerance": "How far below the charged temperature the tank sensor may read before the cold layer is taken to have reached it.",
           "sensor_margin": "How far the tank average may stay above the value the tank sensor gives.",
-          "ambient_temperature": "The temperature around the tank, for the standing loss.",
+          "ambient_temperature": "The temperature around the tank, for the standing loss. Used without an ambient sensor, and while the sensor has been unavailable longer than the fallback time.",
           "cold_mean": "The yearly mean of the cold water temperature, used without a cold water sensor.",
           "cold_amplitude": "The seasonal swing of the cold water temperature around its mean.",
-          "cold_coldest_day": "The day of the year (1-365) on which the cold water is coldest."
+          "cold_coldest_day": "The day of the year (1-365) on which the cold water is coldest.",
+          "ambient_fallback": "How many hours the last ambient sensor reading stays in use after the sensor becomes unavailable, 0-24. After that the ambient temperature above is used."
         }
       },
       "sources": {
         "title": "Sources",
-        "description": "The flow and return temperatures, the humidity sensors and the cold water sensor. The water meter and the heat inputs change in Reconfigure.",
+        "description": "The flow and return temperatures, the humidity sensors, the cold water sensor and the ambient temperature sensor. The water meter and the heat inputs change in Reconfigure. Adding, removing or replacing the ambient sensor recalibrates the tank in the background.",
         "data": {
           "flow_sensor": "Flow temperature sensor",
           "return_sensor": "Return temperature sensor",
           "humidity_sensors": "Bathroom humidity sensors",
-          "cold_sensor": "Cold water temperature sensor"
+          "cold_sensor": "Cold water temperature sensor",
+          "ambient_sensor": "Ambient temperature sensor"
         },
         "data_description": {
           "flow_sensor": "The flow temperature of the heater. Give it together with the return temperature.",
           "return_sensor": "The return temperature of the heater. Give it together with the flow temperature.",
           "humidity_sensors": "A rise in humidity tells a shower or bath from other draws. Leave empty to detect showers by the long draw duration only.",
-          "cold_sensor": "The temperature of the cold supply water. Leave empty to use the seasonal curve of the options."
+          "cold_sensor": "The temperature of the cold supply water. Leave empty to use the seasonal curve of the options.",
+          "ambient_sensor": "The air temperature next to the tank, for the standing loss. Leave empty to use the ambient temperature of the options. Place the sensor in the air around the tank, away from sun and heat sources."
         }
       },
       "draws": {
@@ -319,6 +327,9 @@
       },
       "mean_charge_error": {
         "name": "Mean charge error"
+      },
+      "heat_loss": {
+        "name": "Heat loss"
       }
     },
     "binary_sensor": {
