@@ -35,6 +35,9 @@ The user reviewed the first live rollout of the estimator on 2026-11-03 and aske
     showering sees the minutes at their own flow.
   - A "Shower flow" number entity shows the flow in use. Setting it locks the learned flow. The `shower_flow` tuning
     option is replaced by that lock.
+  - A "Shower flow locked" switch shows the lock and turns it on or off next to the number, so the way back to the
+    learned flow does not go through the options. Added at the user's request after the rollout review on
+    2026-11-03.
 - **Docs.** The README and `docs/model.md` describe all of the above. They also note that a high-flow shower can make
   a tank run cold a little earlier, which the model does not represent.
 
@@ -74,7 +77,7 @@ These capabilities are added by `add-hot-water-estimator`, which must be archive
     the minutes range;
   - `calibration.py`: the press, undo, the ambient in quiet windows, the shower flow learning, the setup fit replay;
   - `estimator.py` and `button.py`;
-  - a new `number.py`;
+  - a new `number.py` and a new `switch.py`;
   - `sensor.py`, `config_flow.py`, `const.py`, the strings and translations, `icons.json`, `diagnostics.py`;
   - `scripts/history.py` and `scripts/backtest.py`, for the ambient sensor.
 - **Tests:** the model, calibration, button, number and options-flow tests, the replay fixtures where the ambient

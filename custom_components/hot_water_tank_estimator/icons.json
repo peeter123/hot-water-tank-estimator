@@ -70,6 +70,14 @@
       "shower_flow": {
         "default": "mdi:shower-head"
       }
+    },
+    "switch": {
+      "shower_flow_locked": {
+        "default": "mdi:lock-open-variant",
+        "state": {
+          "on": "mdi:lock"
+        }
+      }
     }
   },
   "services": {

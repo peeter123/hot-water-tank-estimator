@@ -348,6 +348,11 @@
       "shower_flow": {
         "name": "Shower flow"
       }
+    },
+    "switch": {
+      "shower_flow_locked": {
+        "name": "Shower flow locked"
+      }
     }
   },
   "services": {

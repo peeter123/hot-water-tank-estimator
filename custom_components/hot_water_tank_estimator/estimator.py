@@ -600,6 +600,43 @@ class TankEstimator:
         self.save_soon()
         async_dispatcher_send(self.hass, self.signal)
 
+    async def async_set_shower_flow_locked(self, locked: bool) -> None:
+        """Lock the shower flow in use, or unlock it back to the median of the history.
+
+        It is the lock of the number and of the options flow: the calibrator's locks and the
+        entry options' lock list, written without a reload. Locking holds the flow in use at
+        that moment. Unlocking does what removing the lock in the options does.
+        """
+        calibrator = self.calibrator
+        if (SHOWER_FLOW in calibrator.locks) == locked:
+            return
+        now = dt_util.utcnow()
+        if locked:
+            calibrator.set_locks(calibrator.locks | {SHOWER_FLOW})
+        else:
+            calibrator.set_locks(calibrator.locks - {SHOWER_FLOW})
+        self.model.set_options(calibrator.options)
+        locks = set(self.entry.options.get(CONF_LOCKS) or ())
+        locks = locks | {SHOWER_FLOW} if locked else locks - {SHOWER_FLOW}
+        self.hass.config_entries.async_update_entry(
+            self.entry, options={**self.entry.options, CONF_LOCKS: sorted(locks)}
+        )
+        locks = self.config.locks
+        self.config = replace(
+            self.config,
+            locks=locks | {SHOWER_FLOW} if locked else locks - {SHOWER_FLOW},
+        )
+        self.model.log_event(
+            now,
+            EventKind.SHOWER_FLOW,
+            {
+                "result": "locked" if locked else "unlocked",
+                "flow": calibrator.value_of(SHOWER_FLOW),
+            },
+        )
+        self.save_soon()
+        async_dispatcher_send(self.hass, self.signal)
+
     @property
     def _press_notification(self) -> str:
         """Return the notification ID of this tank's rejected press (one at a time)."""
@@ -709,7 +746,7 @@ class TankEstimator:
                         state[key].pop(USABLE_FRACTION, None)
             calibrator.restore(state)
         # A shower learned during the fit is not in the replay: its sample is added to the
-        # replay's history. A flow set by hand during the fit stays locked.
+        # replay's history. A flow set by hand during the fit stays locked, and a lock removed during it stays removed.
         added = live.shower_added - previous.shower_added
         if added > 0:
             calibrator.shower_flows.extend(live.shower_flows[-added:])
@@ -717,6 +754,9 @@ class TankEstimator:
         if SHOWER_FLOW in live.locks and SHOWER_FLOW in live.values:
             calibrator.values[SHOWER_FLOW] = live.values[SHOWER_FLOW]
             calibrator.locks = calibrator.locks | {SHOWER_FLOW}
+        elif SHOWER_FLOW not in live.locks and SHOWER_FLOW in calibrator.locks:
+            # The lock was removed during the fit: it stays removed, and the held value goes.
+            calibrator.set_locks(calibrator.locks - {SHOWER_FLOW})
         # The record of the last press is the live one: a press or an undo during the fit,
         # or the first reset it has seen since, is not in the replay's copy.
         calibrator.undo_record = live.undo_record

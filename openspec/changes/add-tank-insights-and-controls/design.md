@@ -294,6 +294,38 @@ Diagnostics already dump these dicts, so the new state appears there without new
 - **Export and backtest.** `scripts/history.py` needs no change, because roles are generic. The backtest's map file
   documents the `ambient_temperature` role, and the README's backtest example names it.
 
+### D9: The shower flow lock switch
+
+The user asked for it after the rollout on 2026-11-03. Setting the number locked the flow, but the lock showed only
+as the number's `source` attribute, and the way back was the options flow.
+
+- **Entity.** A new `switch.py` with a "Shower flow locked" switch: key `shower_flow_locked`, entity category
+  config, and a lock icon that follows the state.
+- **One lock.** The switch reads and writes the same `shower_flow` lock as the number and the options flow:
+  - the calibrator's locks;
+  - the entry options' lock list, written without a reload, as the number does (D6).
+
+  So the three can never disagree, and a restart or reload restores the switch from the stored lock.
+- **On.** It locks the flow in use at that moment, which is the median or the default. This is what turning the lock
+  on in the options does.
+- **Off.** It removes the lock and the held value, so the flow in use is the median of the history again, with
+  source learned. While the history is empty it is the default, with source default. This is what removing the lock
+  in the options does. The number shows the new value at once.
+- **Number.** Setting the number locks it, as before, so the switch turns on.
+- **Events.** Each toggle logs a `shower_flow` event with `result: locked` or `result: unlocked` and the flow, like
+  the number's `set` event.
+- **During a background fit.** The fit's calibrator starts from the locks at the snapshot, so its shower flow lock
+  SHALL follow the live lock in both directions when the fit is applied: a lock added during the fit is kept with
+  its held value, and a lock removed during the fit stays removed. Before the switch, a lock could only be removed
+  by the options flow, which reloads the entry and stops the fit (group 6 review, 2026-11-03).
+- **Risk.** The same as for the number: an options flow that is open while the switch is toggled writes back its
+  own copy of the locks when it finishes. That is accepted, as in D6.
+
+**Alternatives considered:**
+- A lock attribute or a select on the number. Rejected: a switch is the standard Home Assistant control for an
+  on/off setting, and it can sit on a dashboard next to the number.
+- Leaving it in the options only. Rejected by the user as not transparent.
+
 ## Risks / Trade-offs
 
 - [The tank sensor reads hot, but the outlet really ran cold, for example with a sensor high in a tank with a very

@@ -127,7 +127,7 @@ rules:
     comment: One device per entry, created and removed with the entry; no devices appear or disappear at runtime.
   entity-category:
     status: done
-    comment: The calibration sensors have the diagnostic category.
+    comment: The calibration sensors have the diagnostic category and the lock switch the config category.
   entity-device-class:
     status: done
     comment: The sensors set the volume storage, duration and temperature device classes where one fits.

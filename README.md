@@ -138,7 +138,7 @@ entry and keeps the model state (the tank average, the charged temperature and t
 | Draws, losses and heat | Session gap | 60 s | Draws closer than this belong to one session. |
 | Draws, losses and heat | Maximum draw per reading | 100 L | A larger rise of the meter in one reading is ignored. |
 | Draws, losses and heat | Power threshold | 100 W | Heat power above this counts as heating. |
-| Learning | Locked parameters | none | Parameters that keep their value from these options and are never learned. The shower flow is one of them: it keeps the value set with the Shower flow number, or, when you lock it here, the flow in use at that moment. |
+| Learning | Locked parameters | none | Parameters that keep their value from these options and are never learned. The shower flow is one of them: it keeps the value set with the Shower flow number, or, when you lock it here or turn on the Shower flow locked switch, the flow in use at that moment. Both are the same lock. |
 | Learning | Days of history for the setup fit | 30 days | History replayed at setup and by the recalibrate action, 1-30. |
 
 ## Entities
@@ -158,7 +158,8 @@ Each tank has one device with these entities. All names are translated.
 | Shower detected | | On while a shower or bath is detected. Unavailable when there are no humidity sensors and the long draw rule is off. |
 | Hot water ran out | | Button. Press it when hot water ran out earlier than predicted. See "Tuning". |
 | Undo hot water ran out | | Button. Undoes the last accepted press. Unavailable unless there is a press to undo. See "Tuning". |
-| Shower flow | L/min | Number, 3-20. The flow that turns shower water into minutes: the median of your last 10 showers, 7.5 L/min until the first one. Setting it locks it. Attributes: `source` (default, learned or locked), and `low` and `high` (the lowest and highest flow of the last showers). See "Tuning". |
+| Shower flow | L/min | Number, 3-20. The flow that turns shower water into minutes: the median of your last 10 showers, 7.5 L/min until the first one. Setting it turns the Shower flow locked switch on. Attributes: `source` (default, learned or locked), and `low` and `high` (the lowest and highest flow of the last showers). See "Tuning". |
+| Shower flow locked | | Switch, in the configuration category. On when the shower flow is locked: it is the same lock as in the options, so the switch, the Shower flow number and the options always agree. Turning it on locks the flow in use now. Turning it off returns the flow to the median of your last showers, or to the starting value (7.5 L/min, or one an older version kept in the options) while there are none. See "Tuning". |
 
 The calibration diagnostic sensors are listed under "Diagnostic sensors" below.
 
@@ -213,8 +214,8 @@ The integration fits its parameters to your tank, so the defaults are only a sta
 - The "Hot water ran out" button sets the usable fraction to the cold fraction at the end of the last draw and
   empties the model there (see "Tuning").
 - A locked parameter keeps its value from the options and is never learned. Removing a lock discards what was
-  learned before it. The exception is the shower flow: removing its lock returns to the median of the history,
-  which kept filling while it was locked.
+  learned before it. The exception is the shower flow: removing its lock (in the options or with the Shower flow locked
+  switch) returns to the median of the history, which kept filling while it was locked.
 
 The formulas and the reasons are in [docs/model.md](docs/model.md). The learned values are kept per entry, so they
 survive restarts and reloads.
@@ -300,9 +301,13 @@ showers:
   follows the one who showers most often, and the `minutes_low` and `minutes_high` attributes of the Shower
   time remaining sensor show the minutes at the highest and the lowest flow of the last showers. While a
   shower runs, the minutes use that shower's flow over its last 2 minutes (`flow_basis` is `current_shower`),
-  once it has run for a minute. To fix the flow, set the Shower flow number: it locks the flow at that value
-  (the same lock as in the options), and later showers still fill the history, so `low` and `high` stay
-  current. Turn the lock off in the options to return to the median.
+  once it has run for a minute. To fix the flow, set the Shower flow number: it locks the flow at that value and
+  turns the Shower flow locked switch on. To hold the flow the integration learned, turn the switch on without
+  setting the number. Later showers still fill the history while it is locked, so `low` and `high` stay current.
+  To return to the learned flow, turn the switch off (or remove the lock in the options): the flow is the median of
+  your last showers again, with the source `learned`, or the starting value (7.5 L/min, or the value an older
+  version kept in the options) with the source `default` while there are none.
+  The number and the switch are the same lock as the one in the options, also after a restart.
 - **Usable fraction** (Options): lower it when showers run cold with litres left, raise it when water remains after
   the estimate reached zero. The button does this for you.
 - **Thermocline width** (Options): a wide layer makes the hot water run out more gradually. It is learned from the
@@ -410,6 +415,11 @@ cards:
   - type: tile
     entity: number.hot_water_tank_shower_flow
     name: Shower flow
+    grid_options:
+      columns: 6
+  - type: tile
+    entity: switch.hot_water_tank_shower_flow_locked
+    name: Shower flow locked
     grid_options:
       columns: 6
   - type: tile

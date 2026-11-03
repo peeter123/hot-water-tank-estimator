@@ -89,10 +89,10 @@ Each tank SHALL provide sensors (state class measurement) for:
 - charged temperature, tank average and cold water temperature (C).
 
 It SHALL also provide a shower detected binary sensor, a "Hot water ran out" button, an "Undo hot water ran out"
-button, a "Shower flow" number (L/min) and the calibration diagnostic sensors. Names SHALL be translated, without
-emoji. The user-facing names differ from the model's vocabulary where the model's terms read wrongly: "tank water"
-alone does not say that it is hot, and "percent charged" at 100 % beside fewer litres than the tank holds reads as
-an error, while "charge level" compares with the last charge.
+button, a "Shower flow" number (L/min), a "Shower flow locked" switch and the calibration diagnostic sensors.
+Names SHALL be translated, without emoji. The user-facing names differ from the model's vocabulary where the
+model's terms read wrongly: "tank water" alone does not say that it is hot, and "percent charged" at 100 % beside
+fewer litres than the tank holds reads as an error, while "charge level" compares with the last charge.
 
 #### Scenario: Units shown
 - **WHEN** the entities are listed
@@ -129,8 +129,8 @@ reason, or undone) and shower flow.
 ### Requirement: Shower flow number
 The "Shower flow" number SHALL show the shower flow in use, with a `source` attribute (default, learned or locked),
 and `low` and `high` attributes with the lowest and highest flow in the shower flow history. Setting it SHALL set
-the shower flow to that value, within the bounds of 3-20 L/min, and lock it. The lock in the options SHALL turn
-learning back on.
+the shower flow to that value, within the bounds of 3-20 L/min, and lock it. Turning the lock off, with the "Shower
+flow locked" switch or in the options, SHALL turn learning back on.
 
 #### Scenario: Set the shower flow
 - **WHEN** the learned shower flow is 7.65 L/min and the user sets the number to 9
@@ -140,6 +140,35 @@ learning back on.
 #### Scenario: Unlock in the options
 - **WHEN** the shower flow is locked at 9 L/min and the user turns its lock off in the options
 - **THEN** the shower flow in use is the median of the history again, with source learned
+
+### Requirement: Shower flow lock switch
+The "Shower flow locked" switch SHALL show whether the shower flow is locked. It is the same lock as the shower flow
+lock in the options, so the switch, the options and the number's `source` always agree, also after a restart or a
+reload. Turning the switch on SHALL lock the shower flow at the flow in use at that moment. Turning it off SHALL
+return the shower flow to the median of the history, within its bounds, with source learned, or to the default
+while the history is empty. Setting the "Shower flow" number SHALL turn the switch on. The history SHALL keep
+filling while the switch is on.
+
+#### Scenario: Lock the learned flow
+- **WHEN** the learned shower flow is 7.65 L/min and the user turns the switch on
+- **THEN** the shower flow in use stays 7.65 L/min with source locked, and later showers do not change it
+
+#### Scenario: Setting the number turns the switch on
+- **WHEN** the switch is off and the user sets the number to 9
+- **THEN** the switch is on, and the shower flow in use is 9 L/min with source locked
+
+#### Scenario: Unlock with the switch
+- **WHEN** the shower flow is locked at 9 L/min, the history's median is 7.65 L/min, and the user turns the switch
+  off
+- **THEN** the number shows 7.65 L/min with source learned, and the shower flow lock in the options is off
+
+#### Scenario: Unlock with an empty history
+- **WHEN** the shower flow is locked at 9 L/min, the history is empty, and the user turns the switch off
+- **THEN** the number shows the default of 7.5 L/min with source default
+
+#### Scenario: Lock in the options
+- **WHEN** the user turns the shower flow lock on in the options
+- **THEN** the switch is on after the reload
 
 ### Requirement: Heat loss sensor
 The "Heat loss" sensor SHALL show the standing heat loss of the tank in W as `k * C * (T_avg - T_ambient) * 1000`,

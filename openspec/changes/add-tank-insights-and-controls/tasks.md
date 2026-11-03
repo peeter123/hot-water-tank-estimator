@@ -280,6 +280,40 @@ Applies to every group:
 
   Record the decision with its date in this task, and update the docs if a default changes.
 
+## 6. Shower flow lock switch (added 2026-11-03 at the user's request)
+
+- [x] 6.1 Add the "Shower flow locked" switch (design D9, `switch.py`). It is the same lock as the number and the
+  options, it locks the flow in use when turned on, and it returns to the median or the default when turned off. It
+  also logs the `shower_flow` events `locked` and `unlocked`, and needs translations and the state icons. Verify:
+  - tests for the integration-setup scenarios "Lock the learned flow", "Setting the number turns the switch on",
+    "Unlock with the switch", "Unlock with an empty history" and "Lock in the options";
+  - a test that the switch is restored after a reload;
+  - the entity count and name tests;
+  - `python scripts/lint.py --hassfest`.
+  - Done 2026-11-03: `switch.py`, `TankEstimator.async_set_shower_flow_locked` (reuses `Calibrator.set_locks`), icons,
+    translations, 9 new tests; a lock removed during a background fit stays removed in `_apply_fit`; lint clean
+    (439 passed), hassfest clean.
+- [x] 6.2 Document the switch:
+  - in the README: the entity, how the number and the switch work together, the way back to the learned flow, and
+    the dashboard example;
+  - in `docs/model.md`: the lock and what unlocking returns to.
+
+  Verify: `python scripts/lint.py`.
+  - Done 2026-11-03: README entity row, Tuning text, dashboard tile and unlock wording; `docs/model.md` lock
+    paragraph; lint clean.
+- [x] 6.3 With authorization, deploy and restart from master after the group is merged. Verify through the
+  home-assistant MCP server:
+  - the switch exists and is off, with the number's source learned;
+  - turning it on and off locks and unlocks the number;
+  - the system log has no entries for the integration.
+
+  With authorization, add the switch to the "Hot Water" dashboard block next to the Shower flow tile. Record the
+  result in `private/installation.md`.
+  - Done 2026-11-03 at about 20:19-20:27, from master at `272545c`, with the user's authorization. The switch is
+    off after the restart and the number reads 6.83 L/min learned. Turning the switch on locked the number at 6.83
+    and set the options lock; turning it off returned to learned, with no lock. The system log is clean, and the
+    switch tile is on the dashboard after the Shower flow tile.
+
 ## Workflow follow-up
 
 - Before starting group 1, archive `add-hot-water-estimator`, so that the modified capabilities exist under

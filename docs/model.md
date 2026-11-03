@@ -351,7 +351,12 @@ The value in use is the option value until a parameter has been learned, then th
 user locks keeps its option value and is never learned; removing the lock discards the value learned before it, so
 the option value applies until the next fit. The source of a value is option, setup fit, learned or locked. The
 shower flow is the exception that a lock holds the value set with the "Shower flow" number (or the value in use when
-the lock was turned on), and that removing the lock returns to the median.
+the lock was turned on), and that removing the lock returns to the median of the history within 3-20 L/min, or to
+the starting value (the 7.5 L/min default, or the value an older version kept in the options) while the history is
+empty. There is one lock: the "Shower flow locked" switch, the number and the options all read and write the same
+entry in the lock list and the calibrator's locks, so they share one lock.
+Turning the switch on holds the value in use at that moment; turning it off does what removing the lock in the options
+does.
 
 ### The charge closure
 
@@ -517,7 +522,7 @@ state, which starts at the tank sensor's reading, and only the calibration comes
 
 The replay feeds the ends of the showers it finds to the calibrator, so a fit or a recalibrate fills the shower flow
 history, and replaces the history before it. A shower detected while a background fit ran is added to the replay's
-history, and a flow set by hand stays locked.
+history, a flow set by hand stays locked, and a lock removed during the fit stays removed.
 
 The fit also runs at the first start after the configured ambient sensor differs from the one the calibration was
 fitted with (added, removed or replaced), because `k` depends on it. The entry stores the ambient entity of its last
