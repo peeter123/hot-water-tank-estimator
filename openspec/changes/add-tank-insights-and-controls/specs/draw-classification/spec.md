@@ -3,18 +3,26 @@
 ## ADDED Requirements
 
 ### Requirement: A detected shower reports its litres and minutes of flow
-When a detected shower or bath ends, the integration SHALL report its mixed litres and its minutes of flow. Minutes
-of flow are the summed duration of the draw sessions within the shower, so a pause longer than the session gap does
-not count. Calibration learns the shower flow from them.
+When a detected shower or bath ends, the integration SHALL report its minutes of flow and the mixed litres drawn in
+them. Minutes of flow are the summed duration of the draw sessions within the shower, each from its first to its
+last increase, so a pause longer than the session gap does not count. The litres of each session's first increase
+flowed before that increase, outside the minutes of flow, so they SHALL be left out. Calibration learns the shower
+flow from them.
 
 #### Scenario: Shower with a pause
-- **WHEN** a detected shower has a session of 5 minutes, a 3-minute pause and a session of 3 minutes, with 60 L in
-  total
+- **WHEN** a detected shower has a session of 5 minutes, a 3-minute pause and a session of 3 minutes, and draws 60 L
+  after the first increase of each session
 - **THEN** it reports 60 L over 8 minutes of flow
 
 #### Scenario: Shower detected by the long-draw rule
-- **WHEN** the long-draw rule detects a shower in a session that lasts 9 minutes and draws 70 L
+- **WHEN** the long-draw rule detects a shower in a session that lasts 9 minutes and draws 70 L after its first
+  increase
 - **THEN** it reports 70 L over 9 minutes of flow
+
+#### Scenario: Polled meter
+- **WHEN** a detected shower is one 8-minute session from a meter read every 30 s, with 3.75 L per reading
+- **THEN** it reports 16 * 3.75 = 60 L over 8 minutes of flow, leaving out the first reading's 3.75 L, so its flow
+  is 7.5 L/min and not 8.0
 
 ### Requirement: A shower in progress reports its rolling flow
 While a shower or bath is detected, the integration SHALL report its rolling flow: the mixed litres over the last 2

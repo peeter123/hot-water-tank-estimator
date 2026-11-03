@@ -26,9 +26,15 @@ with `TankModel.set_options` whenever `observe` returns True.
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
+from statistics import median
 from typing import Any
 
-from .const import COUNTER_LAG_SECONDS, WATER_HEAT_CAPACITY_WH
+from .const import (
+    COUNTER_LAG_SECONDS,
+    SHOWER_HISTORY,
+    SHOWER_MIN_MINUTES,
+    WATER_HEAT_CAPACITY_WH,
+)
 from .model import EventKind, ModelEvent, ModelOptions, TankModel, _from_iso, _iso
 
 # The learned parameters, named as the `ModelOptions` fields, with their bounds.
@@ -37,6 +43,7 @@ STARTUP_ENERGY = "startup_energy"
 LOSS_COEFFICIENT = "loss_coefficient"
 THERMOCLINE_WIDTH = "thermocline_width"
 USABLE_FRACTION = "usable_fraction"
+SHOWER_FLOW = "shower_flow"
 
 PARAMETER_BOUNDS: dict[str, tuple[float, float]] = {
     OTHER_HOT_SHARE: (0.0, 0.6),
@@ -44,6 +51,7 @@ PARAMETER_BOUNDS: dict[str, tuple[float, float]] = {
     LOSS_COEFFICIENT: (0.001, 0.015),  # per hour
     THERMOCLINE_WIDTH: (0.1, 0.6),
     USABLE_FRACTION: (0.5, 0.98),
+    SHOWER_FLOW: (3.0, 20.0),  # L/min
 }
 # The three parameters of the closure fit.
 CLOSURE_PARAMETERS = (LOSS_COEFFICIENT, OTHER_HOT_SHARE, STARTUP_ENERGY)
@@ -474,6 +482,8 @@ class Calibrator:
         closures: The closures, newest last, at most `MAX_CLOSURES`.
         quiet_estimates: The last loss coefficients from quiet windows.
         width_estimates: The last thermocline widths from first sensor drops.
+        shower_flows: The flows of the last detected showers in L/min, newest last, at most
+            `SHOWER_HISTORY`. The shower flow in use is their median unless it is locked.
         undo_record: What the last accepted press changed, None when there is nothing to undo.
     """
 
@@ -487,7 +497,10 @@ class Calibrator:
     closures: list[Closure] = field(default_factory=list)
     quiet_estimates: list[float] = field(default_factory=list)
     width_estimates: list[float] = field(default_factory=list)
+    shower_flows: list[float] = field(default_factory=list)
     undo_record: UndoRecord | None = None
+    # Showers added since this object was made (not saved): a fit tells which are new.
+    shower_added: int = field(default=0, repr=False)
     _pending: _Pending | None = field(default=None, repr=False)
     _unknown_start: str | None = field(default=None, repr=False)
     _last_run_end: datetime | None = field(default=None, repr=False)
@@ -499,13 +512,38 @@ class Calibrator:
     @property
     def options(self) -> ModelOptions:
         """Return the options with the learned values applied (locked ones keep the option)."""
-        learned = {n: v for n, v in self.values.items() if n not in self.locks}
-        return replace(self.base, **learned)
+        learned = {
+            n: v
+            for n, v in self.values.items()
+            if n not in self.locks and n != SHOWER_FLOW
+        }
+        flows = self.shower_flows
+        return replace(
+            self.base,
+            **learned,
+            shower_flow=self._shower_flow(),
+            shower_flow_range=(min(flows), max(flows)) if flows else None,
+        )
+
+    def _shower_flow(self) -> float:
+        """Return the shower flow in use in L/min.
+
+        It is the locked value, else the median of the history within its bounds, else the
+        configured option (the default, or the value an older version kept in the options).
+        """
+        low, high = PARAMETER_BOUNDS[SHOWER_FLOW]
+        if SHOWER_FLOW in self.locks and SHOWER_FLOW in self.values:
+            return self.values[SHOWER_FLOW]
+        if SHOWER_FLOW not in self.locks and self.shower_flows:
+            return min(max(median(self.shower_flows), low), high)
+        return min(max(self.base.shower_flow, low), high)
 
     def source_of(self, name: str) -> str:
         """Return where the value of a parameter comes from: option, setup fit, learned, locked."""
         if name in self.locks:
             return SOURCE_LOCKED
+        if name == SHOWER_FLOW:
+            return SOURCE_LEARNED if self.shower_flows else SOURCE_OPTION
         return (
             self.sources.get(name, SOURCE_OPTION)
             if name in self.values
@@ -529,10 +567,50 @@ class Calibrator:
         applies until the next fit, not a value learned long ago.
         """
         new = frozenset(locks)
+        if SHOWER_FLOW in new - self.locks and SHOWER_FLOW not in self.values:
+            # The shower flow keeps its value in use when it is locked in the options.
+            self.values[SHOWER_FLOW] = self._shower_flow()
         for name in self.locks - new:
             self.values.pop(name, None)
             self.sources.pop(name, None)
         self.locks = new
+
+    def set_shower_flow(self, value: float) -> float:
+        """Set the shower flow by hand: the value is kept, locked, within its bounds.
+
+        Detected showers still add to the history. Removing the lock returns to its median.
+
+        Args:
+            value: The flow in L/min.
+
+        Returns:
+            The flow now in use, limited to the bounds.
+        """
+        low, high = PARAMETER_BOUNDS[SHOWER_FLOW]
+        value = min(max(float(value), low), high)
+        self.values[SHOWER_FLOW] = value
+        self.locks |= {SHOWER_FLOW}
+        return value
+
+    def on_shower(self, litres: float, minutes: float) -> bool:
+        """Add a detected shower to the shower flow history.
+
+        A shower with less than `SHOWER_MIN_MINUTES` of flow is no sample. The history keeps
+        the last `SHOWER_HISTORY` flows, also while the flow is locked.
+
+        Args:
+            litres: The mixed litres of the shower.
+            minutes: Its minutes of flow.
+
+        Returns:
+            Whether a sample was added.
+        """
+        if not self.learn or minutes < SHOWER_MIN_MINUTES or litres <= 0:
+            return False
+        self.shower_flows.append(litres / minutes)
+        self.shower_added += 1
+        del self.shower_flows[:-SHOWER_HISTORY]
+        return True
 
     def go_live(self) -> None:
         """Label further changes as learned instead of setup fit.
@@ -639,6 +717,9 @@ class Calibrator:
                 return True
             case EventKind.DRAW:
                 return True
+            case EventKind.SHOWER_FLOW:
+                if "litres" in change:
+                    self.on_shower(change["litres"], change["minutes"])
         return False
 
     def _on_charge(self, event: ModelEvent) -> None:
@@ -1021,6 +1102,7 @@ class Calibrator:
             "closures": [c.as_dict() for c in self.closures],
             "quiet_estimates": list(self.quiet_estimates),
             "width_estimates": list(self.width_estimates),
+            "shower_flow_history": list(self.shower_flows),
             "pending": None if self._pending is None else self._pending.as_dict(),
             "unknown_start": self._unknown_start,
             "last_run_end": (
@@ -1041,6 +1123,9 @@ class Calibrator:
             self.closures = [Closure.from_dict(c) for c in data["closures"]]
             self.quiet_estimates = [float(v) for v in data["quiet_estimates"]]
             self.width_estimates = [float(v) for v in data["width_estimates"]]
+            self.shower_flows = [float(v) for v in data.get("shower_flow_history", ())][
+                -SHOWER_HISTORY:
+            ]
             pending = data.get("pending")
             self._pending = None if pending is None else _Pending.from_dict(pending)
             self._unknown_start = data.get("unknown_start")
@@ -1062,6 +1147,7 @@ __all__ = [
     "REJECT_NO_RECENT_DRAW",
     "REJECT_SENSOR_HOT",
     "SENSOR_START",
+    "SHOWER_FLOW",
     "UNDO_WINDOW",
     "Calibrator",
     "Closure",

@@ -152,8 +152,9 @@ fraction, for 24 hours after the charge. Undo SHALL act on the last accepted pre
 - **THEN** the undo button is unavailable
 
 ### Requirement: Shower flow from detected showers
-Each detected shower with at least 3 minutes of flow SHALL add its flow to the shower flow history: its mixed litres
-divided by its minutes of flow, leaving out pauses longer than the session gap. The history SHALL keep the last 10
+Each detected shower with at least 3 minutes of flow SHALL add its flow to the shower flow history: the litres
+drawn in its minutes of flow divided by those minutes (see draw-classification), leaving out pauses longer than the
+session gap. The history SHALL keep the last 10
 flows, also while the shower flow is locked. The shower flow in use SHALL be the median of the history, within its
 bounds, unless it is locked.
 

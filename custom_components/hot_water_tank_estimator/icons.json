@@ -65,6 +65,11 @@
       "heat_loss": {
         "default": "mdi:radiator"
       }
+    },
+    "number": {
+      "shower_flow": {
+        "default": "mdi:shower-head"
+      }
     }
   },
   "services": {

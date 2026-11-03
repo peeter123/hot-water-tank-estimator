@@ -32,6 +32,15 @@ DEFAULT_SESSION_GAP = 60.0  # seconds
 DEFAULT_MAX_DRAW = 100.0  # litres per reading
 DEFAULT_POWER_THRESHOLD = 100.0  # W
 
+# Shower flow (design D6): a detected shower with at least this many minutes of flow is a sample
+# of the shower flow history, which keeps the last `SHOWER_HISTORY` samples. The rolling flow of
+# a shower in progress covers its last `ROLLING_FLOW_SECONDS` of flow and needs
+# `ROLLING_FLOW_MIN_SECONDS` of flow in the shower.
+SHOWER_MIN_MINUTES = 3.0
+SHOWER_HISTORY = 10
+ROLLING_FLOW_SECONDS = 120.0
+ROLLING_FLOW_MIN_SECONDS = 60.0
+
 # Fixed model constants, not options.
 # The counter timeout finds the end of a run this long after the last energy counter increase;
 # the run itself ended at that increase.

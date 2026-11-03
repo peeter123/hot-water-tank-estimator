@@ -171,7 +171,6 @@
           "loss_coefficient": "Loss coefficient",
           "other_hot_share": "Other draws hot share",
           "startup_energy": "Start-up energy per run",
-          "shower_flow": "Shower flow",
           "humidity_rise": "Humidity rise",
           "humidity_window": "Humidity window",
           "long_draw_minutes": "Long draw duration",
@@ -184,7 +183,6 @@
           "loss_coefficient": "The standing loss, as a fraction per hour of the excess of the tank over the ambient temperature. Learned from quiet nights and charges.",
           "other_hot_share": "The share of the litres drawn outside a shower that comes from the tank. Learned from charges.",
           "startup_energy": "The energy of each heating run that does not reach the tank. Learned from charges.",
-          "shower_flow": "The flow of a shower, to turn litres into minutes.",
           "humidity_rise": "The rise in bathroom humidity, in percentage points above the lowest value of the window, that counts as a shower.",
           "humidity_window": "The window over which the lowest humidity is taken.",
           "long_draw_minutes": "A draw that lasts this long counts as a shower. 0 turns the rule off.",
@@ -202,7 +200,7 @@
           "history_days": "Days of history for the setup fit"
         },
         "data_description": {
-          "locks": "A locked parameter keeps its value from these options and is never learned.",
+          "locks": "A locked parameter keeps its value from these options and is never learned. The shower flow keeps the value set with the Shower flow number, or, when locked here, the flow in use at that moment.",
           "history_days": "How many days of recorder history the setup fit and the recalibrate action replay, 1-30."
         }
       }
@@ -222,7 +220,8 @@
         "startup_energy": "Start-up energy",
         "loss_coefficient": "Loss coefficient",
         "thermocline_width": "Thermocline width",
-        "usable_fraction": "Usable fraction"
+        "usable_fraction": "Usable fraction",
+        "shower_flow": "Shower flow"
       }
     }
   },
@@ -343,6 +342,11 @@
       },
       "undo_hot_water_ran_out": {
         "name": "Undo hot water ran out"
+      }
+    },
+    "number": {
+      "shower_flow": {
+        "name": "Shower flow"
       }
     }
   },

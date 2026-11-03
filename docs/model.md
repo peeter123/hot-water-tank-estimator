@@ -237,12 +237,14 @@ other rules at its ends. When neither is limited, `f_s = h + w / 2 - s * w`.
 | Tank water (shown as hot water remaining) | `max(0, V * (u - f))` | L, whole litres |
 | Shower water | tank water `* (t_ch - t_cold) / (t_mix - t_cold)`; equal to tank water when `t_ch <= t_mix` | L, whole litres |
 | Percent charged (shown as charge level) | `(u - f) / u * 100`, limited to 0-100 | %, whole percent |
-| Shower minutes | shower water / shower flow | min, whole minutes |
+| Shower minutes | shower water / flow, see "Shower flow" | min, whole minutes |
 
 - `u` is the usable fraction: the cold fraction at which the outlet runs cold. It covers the thermocline and the
   outlet position. The default 0.85 is just above a drain that was still warm at about 0.78, and below 1, the limit
   of an ideal tank. A tank with a worse thermocline runs cold earlier, so the "Hot water ran out" button lowers `u`
   after hot water ran out early.
+  A fast draw also mixes more cold inflow into the tank, so a high-flow shower can run cold a little earlier than
+  its litres suggest; the model counts litres, not flow, and does not represent that.
 - Right after a charge `f` is 0, so tank water is `V * u`, less than the tank volume `V`. The unusable `1 - u`
   covers the lukewarm layer that cold inflow mixes at the bottom during draws and, for a coil low in the tank, the
   colder water below the coil, which cannot be drawn hot. The energy that this colder water lacks is not in `u`: the
@@ -255,8 +257,8 @@ other rules at its ends. When neither is limited, `f_s = h + w / 2 - s * w`.
   start-up energy. A coil or element high up in the tank, or a second heat source such as an electric element, is not
   supported yet: the charged state assumes that the run heats the whole tank from one heater.
 - The default shower flow 7.5 L/min is a round value near the median flow of single showers (about 7.3 L/min;
-  6.2-10.0 L/min for single showers). The default mix
-  temperature 38 C is a common thermostatic setting.
+  6.2-10.0 L/min for single showers). It applies until the first shower is learned (see "Shower flow"). The default
+  mix temperature 38 C is a common thermostatic setting.
 
 ## Cold water temperature
 
@@ -302,6 +304,34 @@ mixed draw while a shower or bath is detected, and an other draw otherwise.
   window still bounds the reclassification, so a long session in which other draws ran into a shower does not take
   mix energy for all of it. The data had no such session, so this is a safeguard, not evidence.
 
+### Shower flow
+
+A shower in the history or in progress is a group of draw sessions, from the rise of detection to its fall (the
+humidity or the long-draw session). The classifier reports, when it ends:
+- the **mixed litres** drawn within those minutes: those reclassified at detection included, the first increase of
+  each session left out, because it was drawn before the session began;
+- the **minutes of flow**: the summed duration of its sessions, each from its first to its last increase. A pause
+  longer than the session gap is no flow, so a shower with a 3-minute pause in the middle counts its two sessions
+  only. Sixty litres in sessions of 5 and 3 minutes are 8 minutes of flow, which is 7.5 L/min and not the 5.5 L/min
+  that the 11 minutes on the wall clock would give. A meter read every 30 s at 3.75 L per reading gives 17 readings
+  in an 8-minute session: 16 count, so 60 L over 8 minutes is 7.5 L/min, and not the 8.0 that counting the first
+  reading would give.
+
+While a shower is detected the classifier also gives its **rolling flow**: the mixed litres over the last 2 minutes
+of flow, divided by those minutes. Only the time between the increases of a session counts, so a pause with the water
+off neither dilutes the flow nor ends it, and the litre of a session's first increase, drawn before the session
+began, is left out of the window. With less than 1 minute of flow in the shower there are too few litres for a flow,
+and there is none. Two minutes are about 15 L at 7.5 L/min: a meter that counts whole litres then resolves the flow
+to about 7 %, and a change at the tap still shows within a minute or two. The rolling flow is for display only; at
+the shower's end the whole-shower flow goes to the learner (see "Learning").
+
+The shower minutes divide the shower water by the **flow in use**: the rolling flow while a shower is detected and has
+1 minute of flow, otherwise the shower flow in use (the median of the history, or the locked value). The sensor says
+which in its `flow` and `flow_basis` attributes (`current_shower` or `median`), and gives the minutes at the highest
+and the lowest flow of the history as `minutes_low` and `minutes_high` (the state itself when the history is empty).
+The meter's resolution shows: with whole litres the rolling flow steps by about 0.5 L/min, so the minutes can change
+by 1 between two readings.
+
 ## Calibration and backtest
 
 The code is `calibration.py` (closures, the fitter, quiet windows, the width) and `setup_fit.py` (the replay of
@@ -315,10 +345,13 @@ energy of the plumbing, the insulation and the thermocline differ per house. The
 | loss coefficient `k` | 0.001-0.015 per hour | charge closures, quiet windows |
 | thermocline width `w` | 0.1-0.6 | first sensor drop after a charge |
 | usable fraction `u` | 0.5-0.98 | the "Hot water ran out" button |
+| shower flow | 3-20 L/min | the median of the last detected showers |
 
 The value in use is the option value until a parameter has been learned, then the learned value. A parameter the
 user locks keeps its option value and is never learned; removing the lock discards the value learned before it, so
-the option value applies until the next fit. The source of a value is option, setup fit, learned or locked.
+the option value applies until the next fit. The source of a value is option, setup fit, learned or locked. The
+shower flow is the exception that a lock holds the value set with the "Shower flow" number (or the value in use when
+the lock was turned on), and that removing the lock returns to the median.
 
 ### The charge closure
 
@@ -374,9 +407,10 @@ sensor there are no closures, and `k` comes from quiet windows only.
   with at least 5 closures stored. From 3 quiet-window estimates on, `k` is held at their mean and counts as locked
   here, so the closures fit only `share` and `S` (see below why).
 - **Bounds and steps.** Every update of a learned parameter (closure fit, quiet-window `k` and width alike) is first
-  limited to the bounds, then moves from the value in use by at most a quarter of the bound range. The button is
-  the exception: it is the user's observation. A share of 0.2 and a fit of 0.5 give 0.35. One odd interval (a guest's
-  bath, a leaking tap) cannot throw the values off, and a fit that wanders needs several updates to get anywhere.
+  limited to the bounds, then moves from the value in use by at most a quarter of the bound range. A share of 0.2
+  and a fit of 0.5 give 0.35. One odd interval (a guest's bath, a leaking tap) cannot throw the values off, and a fit
+  that wanders needs several updates to get anywhere. The button is an exception: it is the user's observation. The
+  shower flow is the other: it is the median of recent showers, and one odd shower cannot move a median of ten.
 - **Loss from quiet windows.** A window is a stretch of at least 5 hours with no draw and no heating, in which the
   tank sensor reads within `delta` of `t_ch`. A window opens no earlier than 1 hour after a run end, because the
   sensor still settles then (windows opened at the run end gave estimates about half of the others). Then
@@ -447,6 +481,25 @@ sensor there are no closures, and `k` comes from quiet windows only.
   closures too; expect the first weeks to move the values then. The step limit and the minimum of 5 closures
   limit the damage of any single fit.
 
+- **Shower flow.** A detected shower with at least 3 minutes of flow adds `litres / minutes` to a history of the last
+  10 flows (also while the flow is locked). The value in use is the median of the history, within 3-20 L/min, and the
+  default 7.5 L/min (or the value an older version kept in the options) until the first sample. Why these values:
+  - The median, not a mean: two people at 7.5 and 12 L/min give a median that sits with the majority and not between
+    them, and a bath fill, a detected "shower" at tap flow, does not pull it. An exponential average like the other
+    parameters would swing between the two people's flows.
+  - At least 3 minutes of flow: shorter detected draws are mostly a washbasin during a humidity rise, not a shower
+    setting.
+  - 3-20 L/min spans water-saving heads at about 5-6 L/min up to large rain heads.
+  - 10 showers are about a week for two people, so a new shower head is followed within a week.
+
+  Because the median is robust, the quarter-range step limit does not apply to it. The number sets the flow by hand,
+  which locks it. A long shower of 239 L on the development installation drew 7-8 L/min.
+
+  The first increase of each session is left out of the litres, because the time before it is not in the minutes of
+  flow. Counting it would bias every sample high by about one reading's litres per session, a systematic error that
+  grows with the litres per reading (3.75 L per reading in an 8-minute session is 6 %), and a median cannot remove a
+  bias that all samples share.
+
 ### The setup fit
 
 When an entry is created, and when the recalibrate action runs, the history of the sources (the configured number of
@@ -461,6 +514,10 @@ In the integration the fit runs in the background when an entry is first set up,
 has run once (a recorder that is missing or holds no history does not count). Sources excluded from the recorder
 weaken it, because their rows are missing. The live model does not take the replay's end state: it keeps its own
 state, which starts at the tank sensor's reading, and only the calibration comes from the fit.
+
+The replay feeds the ends of the showers it finds to the calibrator, so a fit or a recalibrate fills the shower flow
+history, and replaces the history before it. A shower detected while a background fit ran is added to the replay's
+history, and a flow set by hand stays locked.
 
 The fit also runs at the first start after the configured ambient sensor differs from the one the calibration was
 fitted with (added, removed or replaced), because `k` depends on it. The entry stores the ambient entity of its last

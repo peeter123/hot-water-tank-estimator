@@ -175,22 +175,42 @@ Applies to every group:
 
 ## 4. Shower flow
 
-- [ ] 4.1 Report each detected shower's mixed litres and minutes of flow from `classification.py`, for humidity and
+- [x] 4.1 Report each detected shower's mixed litres and minutes of flow from `classification.py`, for humidity and
   long-draw detection. While a shower is detected, also report its rolling flow over the last 2 minutes of flow
   (design D6). Verify: tests for the draw-classification scenarios "Shower with a pause", "Shower detected by the
-  long-draw rule", "Steady shower", "Pause in the shower" and "Too little flow yet".
-- [ ] 4.2 Add the shower flow history and the median (design D6) to the calibrator: the 3-minute minimum, the 3-20
+  long-draw rule", "Polled meter", "Steady shower", "Pause in the shower" and "Too little flow yet".
+  - Done 2026-11-03: `DrawClassifier` keeps the detected shower from the rise of detection to its fall (the reclassified
+    litres are its first increases) and `take_shower_end()` reports a `ShowerReport(litres, minutes)` once; minutes
+    are the sum of the seconds between the increases of one session (first to last increase), and the litres leave
+    out the first increase of each session, like the rolling flow (settled after the group 4 review). The
+    `rolling_flow` property takes the increases of the last 2 minutes of flow, newest first, and leaves out the
+    litre of a session's first increase (it was drawn before the session). The shower in progress is saved with a
+    default on load.
+- [x] 4.2 Add the shower flow history and the median (design D6) to the calibrator: the 3-minute minimum, the 3-20
   L/min bounds, the lock, and the history kept while locked. It is saved in the store and filled by the setup
   fit's replay. Verify:
   - tests for the calibration scenarios "Two people, two flows", "Short draw is no shower flow sample", "Shower
     with a pause" and "Showers in the history";
   - a test that a store without the history loads;
   - a test that an old `shower_flow` option value is the starting value while the history is empty.
-- [ ] 4.3 Compute shower minutes from the flow in use, or from the current shower's rolling flow while a shower is
+  - Done 2026-11-03: `Calibrator.shower_flows` (10 entries, saved as `shower_flow_history`), `on_shower(litres,
+    minutes)` and `shower_flow` as a parameter with the bounds 3-20 (so locks, the options selector, diagnostics
+    and the calibration event cover it). The model emits a `shower_flow` event for a shower with 3 minutes of
+    flow, the calibrator takes it in `observe`, and the replay does the same. `Calibrator.options` carries the
+    flow in use (`ModelOptions.shower_flow`) and the history's lowest and highest flow
+    (`ModelOptions.shower_flow_range`), so the model stays pure and the replay and backtest need no change. A
+    background fit adds the showers learned while it ran to the replay's history, and keeps a flow set while it ran.
+    An option value outside 3-20 is limited like the median, and a `shower_flow` event without litres (a set) is no
+    sample.
+- [x] 4.3 Compute shower minutes from the flow in use, or from the current shower's rolling flow while a shower is
   detected. Add the attributes `flow`, `flow_basis`, `minutes_low` and `minutes_high`, and update the sensor on
   every meter reading during a shower. Verify: tests for the tank-model scenarios "Minutes from litres", "Minutes
   for two people", "Minutes during a high-flow shower" and "First minute of a shower".
-- [ ] 4.4 Add the "Shower flow" number (`number.py`):
+  - Done 2026-11-03: `TankModel.shower_time` gives the minutes, the flow, its basis and the low and high minutes;
+    `outputs.shower_minutes` is its `minutes`. The sensor shows them as `flow`, `flow_basis`, `minutes_low` and
+    `minutes_high`. The estimator sends the dispatcher signal after every source state, so a meter reading
+    during a shower updates the sensor (a test counts the signals).
+- [x] 4.4 Add the "Shower flow" number (`number.py`):
   - its value, with the attributes `source`, `low` and `high`;
   - setting it locks the flow;
   - the `shower_flow` lock in the options;
@@ -202,13 +222,21 @@ Applies to every group:
     "Names shown";
   - the options-flow tests;
   - `python scripts/lint.py --hassfest`.
-- [ ] 4.5 Document the shower flow:
+  - Done 2026-11-03: `number.py`, `Calibrator.set_shower_flow` and `TankEstimator.async_set_shower_flow`, which
+    also writes `shower_flow` to the lock list of the entry options (no reload), so the options flow shows it and
+    the store and the options agree at the next start. A lock turned on in the options holds the flow in use at
+    that moment. The `shower_flow` tuning value is gone from the draws step; an old value in the options is still
+    read as the starting value. `python scripts/lint.py --hassfest` is clean.
+- [x] 4.5 Document the shower flow:
   - in `docs/model.md`: the median, its window and bounds, and the reasons;
   - in the README: the number and its lock, the minutes range attributes, the live minutes during a shower (the
     `flow` and `flow_basis` attributes), and an updated dashboard example with the new entities;
   - the high-flow shower limitation, in the README Limitations.
 
   Verify: `python scripts/lint.py`.
+  - Done 2026-11-03: `docs/model.md` has a "Shower flow" section and the Learning, bounds and setup fit text;
+    the README has the number, the lock, the attributes, the dashboard entities (heat loss, both buttons, shower
+    flow), the Tuning entry and the high-flow limitation. The `shower_flow` option row is removed.
 
 ## 5. Rollout on the development installation (each step needs the user's authorization)
 
@@ -246,7 +274,9 @@ Applies to every group:
   - the 20-minute window;
   - the 3-hour fallback;
   - the 3-minute minimum;
-  - the 24-hour undo after a charge.
+  - the 24-hour undo after a charge;
+  - whether two showers in one humidity detection should be split into two shower flow samples at a long pause,
+    and at what pause (design, Risks).
 
   Record the decision with its date in this task, and update the docs if a default changes.
 

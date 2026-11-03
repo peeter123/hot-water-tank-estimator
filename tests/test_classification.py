@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+import json
 import logging
 
 import pytest
@@ -347,3 +348,173 @@ def test_a_new_draw_after_the_gap_reports_the_old_session_end() -> None:
     classifier.on_meter(T0 + 5 * MINUTE, 1002.0, "L")
     assert classifier.take_session_end() == T0 + 10 * SECOND
     assert classifier.session_active
+
+
+def _detect_by_humidity(classifier: DrawClassifier) -> None:
+    """Make the classifier detect a shower: 55 % and, a second later, 70 %."""
+    classifier.on_humidity(T0, "bath", 55.0)
+    classifier.on_humidity(T0 + SECOND, "bath", 70.0)
+    assert classifier.detected
+
+
+def _draw(
+    classifier: DrawClassifier, meter: float, seconds: float, litres: float
+) -> float:
+    """Draw `litres` at `seconds` after T0 and return the new meter reading."""
+    meter += litres
+    classifier.on_meter(T0 + timedelta(seconds=seconds), meter, "L")
+    return meter
+
+
+def test_shower_with_a_pause() -> None:
+    """A session of 5 minutes, a 3-minute pause and a session of 3 minutes: 60 L over 8 minutes of flow."""
+    classifier = DrawClassifier(ClassifierOptions())
+    classifier.on_meter(T0, 1000.0, "L")
+    _detect_by_humidity(classifier)
+    meter = 1000.0
+    meter = _draw(classifier, meter, 10, 1.0)  # first increase of a session
+    for seconds in (70, 130, 190, 250, 310):  # 5 minutes, 30 L after the first
+        meter = _draw(classifier, meter, seconds, 6.0)
+    meter = _draw(classifier, meter, 490, 1.0)  # after a 3-minute pause: 3 minutes
+    for seconds in (550, 610, 670):  # 30 L after the first increase
+        meter = _draw(classifier, meter, seconds, 10.0)
+    assert classifier.take_shower_end() is None
+    classifier.on_humidity(T0 + 700 * SECOND, "bath", 55.0)
+    report = classifier.take_shower_end()
+    assert report is not None
+    assert report.litres == pytest.approx(60.0)
+    assert report.minutes == pytest.approx(8.0)
+    assert classifier.take_shower_end() is None
+    assert classifier.rolling_flow is None
+
+
+def test_shower_detected_by_the_long_draw_rule() -> None:
+    """A session of 9 minutes that draws 70 L, detected by the long-draw rule: 70 L over 9 minutes."""
+    classifier = DrawClassifier(ClassifierOptions(long_draw_minutes=3.0))
+    classifier.on_meter(T0, 1000.0, "L")
+    meter = 1000.0
+    for step in range(16):  # every 36 s for 9 minutes: 70 L after the first increase
+        meter = _draw(classifier, meter, 10 + 36 * step, 3.0 if step == 0 else 70 / 15)
+    assert classifier.detected
+    assert classifier.take_shower_end() is None
+    classifier.update(T0 + 10 * SECOND + 9 * MINUTE + 61 * SECOND)
+    report = classifier.take_shower_end()
+    assert report is not None
+    assert report.litres == pytest.approx(70.0)
+    assert report.minutes == pytest.approx(9.0)
+
+
+def test_polled_meter() -> None:
+    """One 8-minute session read every 30 s at 3.75 L per reading: 60 L over 8 minutes, 7.5 L/min."""
+    classifier = DrawClassifier(ClassifierOptions())
+    classifier.on_meter(T0, 1000.0, "L")
+    _detect_by_humidity(classifier)
+    meter = 1000.0
+    for step in range(17):
+        meter = _draw(classifier, meter, 10 + 30 * step, 3.75)
+    classifier.on_humidity(T0 + 10 * MINUTE, "bath", 55.0)
+    report = classifier.take_shower_end()
+    assert report is not None
+    assert report.litres == pytest.approx(60.0)
+    assert report.minutes == pytest.approx(8.0)
+
+
+def test_litres_reclassified_at_detection_belong_to_the_shower() -> None:
+    """The litres of the reclassify window count in the shower, with their time of flow."""
+    classifier = DrawClassifier(ClassifierOptions())
+    classifier.on_meter(T0, 1000.0, "L")
+    meter = 1000.0
+    for seconds in (10, 40, 70):  # 3 L before detection, 1 minute of flow
+        meter = _draw(classifier, meter, seconds, 1.0)
+    assert not classifier.detected
+    classifier.on_humidity(T0 + 75 * SECOND, "bath", 55.0)
+    classifier.on_humidity(T0 + 80 * SECOND, "bath", 70.0)
+    meter = _draw(classifier, meter, 100, 1.0)
+    classifier.on_humidity(T0 + 120 * SECOND, "bath", 55.0)
+    report = classifier.take_shower_end()
+    assert report is not None
+    assert report.litres == pytest.approx(3.0)
+    assert report.minutes == pytest.approx(90 / 60)
+
+
+def test_detection_without_a_draw_reports_no_shower() -> None:
+    """A humidity rise with no water drawn ends without a report."""
+    classifier = DrawClassifier(ClassifierOptions())
+    _detect_by_humidity(classifier)
+    classifier.on_humidity(T0 + 10 * MINUTE, "bath", 55.0)
+    assert classifier.take_shower_end() is None
+
+
+def test_steady_shower() -> None:
+    """24 L in the last 2 minutes of flow is a rolling flow of 12.0 L/min."""
+    classifier = DrawClassifier(ClassifierOptions())
+    classifier.on_meter(T0, 1000.0, "L")
+    _detect_by_humidity(classifier)
+    meter = 1000.0
+    for step in range(37):  # 1 L every 5 s for 3 minutes
+        meter = _draw(classifier, meter, 10 + 5 * step, 1.0)
+    assert classifier.rolling_flow == pytest.approx(12.0)
+
+
+def test_pause_in_the_shower() -> None:
+    """15 L in 2 minutes of flow, then 3 minutes with the water off: still 7.5 L/min."""
+    classifier = DrawClassifier(ClassifierOptions())
+    classifier.on_meter(T0, 1000.0, "L")
+    _detect_by_humidity(classifier)
+    meter = 1000.0
+    for step in range(16):  # 1 L every 8 s for 2 minutes
+        meter = _draw(classifier, meter, 10 + 8 * step, 1.0)
+    assert classifier.rolling_flow == pytest.approx(7.5)
+    classifier.update(T0 + 130 * SECOND + 3 * MINUTE)
+    assert classifier.detected
+    assert classifier.rolling_flow == pytest.approx(7.5)
+    # The next session starts after the pause: the pause is no flow, so the flow is not diluted.
+    meter = _draw(classifier, meter, 130 + 180 + 5, 1.0)
+    meter = _draw(classifier, meter, 130 + 180 + 15, 2.0)
+    assert classifier.rolling_flow == pytest.approx((2.0 + 13.0) / 114 * 60)
+
+
+def test_too_little_flow_yet() -> None:
+    """A detected shower with 40 seconds of flow has no rolling flow."""
+    classifier = DrawClassifier(ClassifierOptions())
+    classifier.on_meter(T0, 1000.0, "L")
+    _detect_by_humidity(classifier)
+    meter = 1000.0
+    for step in range(6):  # 40 s of flow
+        meter = _draw(classifier, meter, 10 + 8 * step, 1.0)
+    assert classifier.rolling_flow is None
+    meter = _draw(classifier, meter, 10 + 8 * 6 + 20, 3.0)  # 60 s of flow now
+    assert classifier.rolling_flow is not None
+
+
+def test_no_rolling_flow_without_a_detected_shower() -> None:
+    """Draws that are no shower have no rolling flow."""
+    classifier = DrawClassifier(ClassifierOptions())
+    classifier.on_meter(T0, 1000.0, "L")
+    meter = 1000.0
+    for step in range(16):
+        meter = _draw(classifier, meter, 10 + 8 * step, 1.0)
+    assert classifier.rolling_flow is None
+
+
+def test_the_shower_in_progress_is_saved() -> None:
+    """A restart during a shower keeps its litres and flow, and a state without it loads."""
+    classifier = DrawClassifier(ClassifierOptions())
+    classifier.on_meter(T0, 1000.0, "L")
+    _detect_by_humidity(classifier)
+    meter = 1000.0
+    for step in range(16):
+        meter = _draw(classifier, meter, 10 + 8 * step, 1.0)
+    state = classifier.to_dict()
+    restored = DrawClassifier(ClassifierOptions())
+    restored.restore(json.loads(json.dumps(state)))
+    assert restored.rolling_flow == pytest.approx(7.5)
+    restored.on_humidity(T0 + 5 * MINUTE, "bath", 55.0)
+    report = restored.take_shower_end()
+    assert report is not None
+    assert report.litres == pytest.approx(15.0)
+
+    del state["shower"]
+    old = DrawClassifier(ClassifierOptions())
+    old.restore(state)
+    assert old.rolling_flow is None

@@ -1254,3 +1254,100 @@ def test_a_manual_set_state_is_a_reset() -> None:
         make_options(), model.sources, json.loads(json.dumps(model.to_dict()))
     )
     assert restored.reset_since(datetime(2026, 10, 31, 19, 42, tzinfo=UTC))
+
+
+# ----- shower minutes (design D6) ---------------------------------------------------------------
+
+
+def draw_shower(
+    model: TankModel, start: datetime, seconds: int, step: int, litres: float
+):
+    """Draw `litres` every `step` seconds for `seconds` seconds from `start`; return the end."""
+    meter = 1000.0
+    for offset in range(0, seconds + 1, step):
+        meter += litres
+        model.on_water_meter(start + offset * SECOND, meter, "L")
+    return start + seconds * SECOND
+
+
+def test_minutes_for_two_people() -> None:
+    """346 L at 7.65 L/min in use, history from 7.3 to 12.1: 45 minutes, low 29, high 47."""
+    model = make_model(
+        t_avg=50.0, t_ch=57.0, shower_flow=7.65, shower_flow_range=(7.3, 12.1)
+    )
+    assert model.outputs.shower_litres == 346
+    shower = model.shower_time
+    assert model.outputs.shower_minutes == 45
+    assert shower.minutes == 45
+    assert shower.low == 29
+    assert shower.high == 47
+    assert shower.flow == 7.65
+    assert shower.basis == "median"
+
+
+def test_minutes_without_a_history_have_no_range() -> None:
+    """With no history, low and high are the state itself."""
+    model = make_model(t_avg=50.0, t_ch=57.0)
+    shower = model.shower_time
+    assert (shower.minutes, shower.low, shower.high) == (46, 46, 46)
+
+
+def test_minutes_during_a_high_flow_shower() -> None:
+    """240 L of shower water, 4 minutes of shower at 12.0 L/min, 7.65 in use: 20 minutes."""
+    model = make_model(shower_flow=7.65, shower_flow_range=(7.3, 12.1))
+    start_shower(model, T0 + 20 * MINUTE)
+    now = draw_shower(model, T0 + 21 * MINUTE, 240, 5, 1.0)
+    shower_litres = 240.0
+    tank = shower_litres * 24 / 43
+    model.set_state(now, t_avg=57.0 - (0.85 - tank / 281.0) * 43, t_ch=57.0)
+    assert model.shower_detected
+    assert model.shower_litres_exact == pytest.approx(240.0)
+    shower = model.shower_time
+    assert model.outputs.shower_minutes == 20
+    assert shower.minutes == 20
+    assert shower.flow == pytest.approx(12.0)
+    assert shower.basis == "current_shower"
+    assert (shower.low, shower.high) == (20, 33)
+
+
+def test_first_minute_of_a_shower() -> None:
+    """With 40 seconds of flow the median stays in use: 346 L at 7.65 L/min is 45 minutes."""
+    model = make_model(shower_flow=7.65, shower_flow_range=(7.3, 12.1))
+    start_shower(model, T0 + 20 * MINUTE)
+    now = draw_shower(model, T0 + 21 * MINUTE, 40, 8, 1.0)
+    model.set_state(now, t_avg=50.0, t_ch=57.0)
+    assert model.shower_detected
+    shower = model.shower_time
+    assert model.outputs.shower_minutes == 45
+    assert shower.basis == "median"
+    assert shower.flow == 7.65
+
+
+def test_the_median_is_back_when_the_shower_ends() -> None:
+    """After the humidity falls, the minutes use the flow in use again."""
+    model = make_model(shower_flow=7.65)
+    start_shower(model, T0 + 20 * MINUTE)
+    now = draw_shower(model, T0 + 21 * MINUTE, 240, 5, 1.0)
+    assert model.shower_time.basis == "current_shower"
+    model.on_humidity(now + 5 * MINUTE, "bath", 50.0)
+    assert not model.shower_detected
+    assert model.shower_time.basis == "median"
+
+
+def test_a_shower_end_is_an_event() -> None:
+    """A shower with 4 minutes of flow ends with a shower_flow event of its litres and minutes."""
+    model = make_model()
+    start_shower(model, T0 + 20 * MINUTE)
+    now = draw_shower(model, T0 + 21 * MINUTE, 240, 5, 1.0)
+    events = model.on_humidity(now + 5 * MINUTE, "bath", 50.0)
+    shower = [e for e in events if e.kind == EventKind.SHOWER_FLOW]
+    assert len(shower) == 1
+    assert shower[0].change["litres"] == pytest.approx(48.0)
+    assert shower[0].change["minutes"] == pytest.approx(4.0)
+    assert shower[0].change["flow"] == pytest.approx(12.0)
+    # Two minutes of flow is no shower flow event.
+    model = make_model()
+    start_shower(model, T0 + 20 * MINUTE)
+    now = draw_shower(model, T0 + 21 * MINUTE, 120, 5, 1.0)
+    events = model.on_humidity(now + 5 * MINUTE, "bath", 50.0)
+    assert not [e for e in events if e.kind == EventKind.SHOWER_FLOW]

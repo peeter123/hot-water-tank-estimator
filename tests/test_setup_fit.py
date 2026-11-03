@@ -257,3 +257,76 @@ def test_the_fit_is_repeatable() -> None:
     history, options = load("week")
     again = setup_fit(history, options)
     assert again.parameters == week_fit().parameters
+
+
+# ----- the shower flow history (design D6) -------------------------------------------------------
+
+SHOWERS = 14
+T_START = datetime(2026, 10, 1, 6, 0, tzinfo=UTC)
+
+
+def shower_history() -> tuple[History, list[float]]:
+    """Return a history of 14 showers of 10 minutes of flow, and the flow of each in L/min.
+
+    Shower n draws in 21 increments, every 30 seconds (the first one 1 L, the 20 after it
+    10 minutes of flow), and humidity rises a minute before the draw and falls 5 minutes
+    after it. Shower n has the flow 5 + n / 2 L/min.
+    """
+    tank = [(T_START, "57.0")]
+    meter = [(T_START, "1000.0")]
+    humidity = [(T_START, "50.0")]
+    heating = [(T_START, "off")]
+    flows = []
+    total = 1000.0
+    for n in range(SHOWERS):
+        start = T_START + timedelta(hours=2 * n + 1)
+        flow = 5 + n / 2
+        flows.append(flow)
+        humidity.append((start - timedelta(minutes=1), "70.0"))
+        for step in range(21):
+            total += 1.0 if step == 0 else flow * 10 / 20
+            meter.append((start + timedelta(seconds=30 * step), f"{total:.6f}"))
+        humidity.append((start + timedelta(minutes=15), "50.0"))
+    end = T_START + timedelta(hours=2 * SHOWERS + 2)
+    history = History(
+        T_START,
+        end,
+        (
+            Series("tank_temperature", "sensor.tank", "°C", tank),
+            Series("water_meter", "sensor.meter", "L", meter),
+            Series("bathroom_humidity", "sensor.bath", "%", humidity),
+            Series("dhw_heating", "binary_sensor.heating", None, heating),
+        ),
+    )
+    return history, flows
+
+
+def test_showers_in_the_history() -> None:
+    """14 showers of at least 3 minutes of flow: the last 10 are kept, and their median is in use."""
+    history, flows = shower_history()
+    fit = setup_fit(history, ModelOptions(volume=281.0))
+    kept = flows[-10:]
+    assert fit.calibrator.shower_flows == pytest.approx(kept)
+    assert fit.options.shower_flow == pytest.approx((kept[4] + kept[5]) / 2)
+    assert fit.options.shower_flow_range == pytest.approx((kept[0], kept[-1]))
+    assert fit.parameters["shower_flow"][1] == "learned"
+
+
+def test_a_recalibrate_replaces_the_shower_flow_history() -> None:
+    """The replay's history replaces the one before; a flow set by hand stays locked."""
+    history, flows = shower_history()
+    previous = Calibrator(ModelOptions(volume=281.0))
+    previous.shower_flows = [9.0, 9.0, 9.0]
+    fit = setup_fit(history, ModelOptions(volume=281.0), previous=previous)
+    assert fit.calibrator.shower_flows == pytest.approx(flows[-10:])
+
+    previous.set_shower_flow(12.5)
+    locked = setup_fit(
+        history,
+        ModelOptions(volume=281.0),
+        locks=previous.locks,
+        previous=previous,
+    )
+    assert locked.options.shower_flow == 12.5
+    assert locked.parameters["shower_flow"] == (12.5, "locked")
+    assert locked.calibrator.shower_flows == pytest.approx(flows[-10:])

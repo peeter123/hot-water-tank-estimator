@@ -131,7 +131,6 @@ entry and keeps the model state (the tank average, the charged temperature and t
 | Draws, losses and heat | Loss coefficient | 0.004 per hour | Standing loss. Learned. |
 | Draws, losses and heat | Other draws hot share | 0.2 | Share of the litres outside a shower that comes from the tank. Learned. |
 | Draws, losses and heat | Start-up energy per run | 0 kWh | Energy of each run that does not reach the tank. Learned. |
-| Draws, losses and heat | Shower flow | 7.5 L/min | Turns litres into minutes. |
 | Draws, losses and heat | Humidity rise | 6 points | Rise above the lowest humidity of the window that counts as a shower. |
 | Draws, losses and heat | Humidity window | 60 min | The window of that lowest value. |
 | Draws, losses and heat | Long draw duration | 0 min | A draw this long counts as a shower. 0 is off. For homes without a humidity sensor. |
@@ -139,7 +138,7 @@ entry and keeps the model state (the tank average, the charged temperature and t
 | Draws, losses and heat | Session gap | 60 s | Draws closer than this belong to one session. |
 | Draws, losses and heat | Maximum draw per reading | 100 L | A larger rise of the meter in one reading is ignored. |
 | Draws, losses and heat | Power threshold | 100 W | Heat power above this counts as heating. |
-| Learning | Locked parameters | none | Parameters that keep their value from these options and are never learned. |
+| Learning | Locked parameters | none | Parameters that keep their value from these options and are never learned. The shower flow is one of them: it keeps the value set with the Shower flow number, or, when you lock it here, the flow in use at that moment. |
 | Learning | Days of history for the setup fit | 30 days | History replayed at setup and by the recalibrate action, 1-30. |
 
 ## Entities
@@ -151,7 +150,7 @@ Each tank has one device with these entities. All names are translated.
 | Hot water remaining | L | Litres of tank water at the charged temperature that can still be drawn. |
 | Shower water remaining | L | Litres of mixed water at the shower mix temperature that this makes. |
 | Charge level | % | The usable tank compared with the last charge. |
-| Shower time remaining | min | Shower water divided by the shower flow. |
+| Shower time remaining | min | Shower water divided by the shower flow. During a shower it uses that shower's own flow. Attributes: `flow` (L/min), `flow_basis` (`current_shower` or `median`), and `minutes_low` and `minutes_high` (the minutes at the highest and the lowest flow of the last showers). |
 | Charged temperature | C | The temperature of the hot layer. |
 | Tank average temperature | C | The estimated average temperature of the tank. |
 | Cold water temperature | C | The cold water temperature in use: the sensor, or the seasonal curve. |
@@ -159,6 +158,7 @@ Each tank has one device with these entities. All names are translated.
 | Shower detected | | On while a shower or bath is detected. Unavailable when there are no humidity sensors and the long draw rule is off. |
 | Hot water ran out | | Button. Press it when hot water ran out earlier than predicted. See "Tuning". |
 | Undo hot water ran out | | Button. Undoes the last accepted press. Unavailable unless there is a press to undo. See "Tuning". |
+| Shower flow | L/min | Number, 3-20. The flow that turns shower water into minutes: the median of your last 10 showers, 7.5 L/min until the first one. Setting it locks it. Attributes: `source` (default, learned or locked), and `low` and `high` (the lowest and highest flow of the last showers). See "Tuning". |
 
 The calibration diagnostic sensors are listed under "Diagnostic sensors" below.
 
@@ -207,10 +207,14 @@ The integration fits its parameters to your tank, so the defaults are only a sta
   background after the reload, because the loss coefficient fitted against a sensor is not the one fitted against
   the fixed ambient temperature. The tank average and the charged temperature are kept.
 - The first fall of the tank sensor after a charge gives the thermocline width.
+- Every detected shower with at least 3 minutes of flow adds its flow (the litres drawn in those minutes divided by
+  them, pauses left out) to a history of 10. The shower flow in use is the median of that history, within
+  3-20 L/min. The fit at setup and the recalibrate action fill the history from the showers in the recorder history.
 - The "Hot water ran out" button sets the usable fraction to the cold fraction at the end of the last draw and
   empties the model there (see "Tuning").
 - A locked parameter keeps its value from the options and is never learned. Removing a lock discards what was
-  learned before it.
+  learned before it. The exception is the shower flow: removing its lock returns to the median of the history,
+  which kept filling while it was locked.
 
 The formulas and the reasons are in [docs/model.md](docs/model.md). The learned values are kept per entry, so they
 survive restarts and reloads.
@@ -291,6 +295,14 @@ showers:
   applied, and the water drawn and the heat added since stay counted. After a charge or a set by hand it restores
   only the usable fraction, for 24 hours after that charge, because the charge already replaced the tank average.
   After that, or after an undo, the button is unavailable again. Only the last press can be undone.
+- **Shower flow:** the minutes left depend on how much water your shower uses per minute. The integration learns
+  it from your detected showers, so you do not enter it. If two people shower at different flows, the median
+  follows the one who showers most often, and the `minutes_low` and `minutes_high` attributes of the Shower
+  time remaining sensor show the minutes at the highest and the lowest flow of the last showers. While a
+  shower runs, the minutes use that shower's flow over its last 2 minutes (`flow_basis` is `current_shower`),
+  once it has run for a minute. To fix the flow, set the Shower flow number: it locks the flow at that value
+  (the same lock as in the options), and later showers still fill the history, so `low` and `high` stay
+  current. Turn the lock off in the options to return to the median.
 - **Usable fraction** (Options): lower it when showers run cold with litres left, raise it when water remains after
   the estimate reached zero. The button does this for you.
 - **Thermocline width** (Options): a wide layer makes the hot water run out more gradually. It is learned from the
@@ -354,6 +366,9 @@ touched. To remove the integration completely, then remove it in HACS (or delete
   action undo it.
 - A heating run cut short leaves the tank not uniform; the error shows at the next sensor bound.
 - The usable fraction is learned only from the button, not measured.
+- A fast draw mixes more cold inflow into the tank, so a high-flow shower can run cold a little earlier than the
+  litres suggest. The model counts litres, not flow, and does not represent that; the minutes of a high-flow
+  shower use its own flow, but the litres do not change with it.
 - The integration displays only. It does not warn or control the heater.
 
 ## Dashboard example
@@ -385,6 +400,36 @@ cards:
   - type: tile
     entity: sensor.hot_water_tank_shower_time_remaining
     name: Shower time
+    grid_options:
+      columns: 6
+  - type: tile
+    entity: sensor.hot_water_tank_heat_loss
+    name: Heat loss
+    grid_options:
+      columns: 6
+  - type: tile
+    entity: number.hot_water_tank_shower_flow
+    name: Shower flow
+    grid_options:
+      columns: 6
+  - type: tile
+    entity: button.hot_water_tank_hot_water_ran_out
+    name: Hot water ran out
+    tap_action:
+      action: perform-action
+      perform-action: button.press
+      target:
+        entity_id: button.hot_water_tank_hot_water_ran_out
+    grid_options:
+      columns: 6
+  - type: tile
+    entity: button.hot_water_tank_undo_hot_water_ran_out
+    name: Undo
+    tap_action:
+      action: perform-action
+      perform-action: button.press
+      target:
+        entity_id: button.hot_water_tank_undo_hot_water_ran_out
     grid_options:
       columns: 6
   - type: history-graph

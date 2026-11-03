@@ -242,6 +242,22 @@ the lowest flow in the history. They stay available while the flow is locked, be
 With a whole-litre meter the rolling flow steps by about 0.5 L/min, so the minutes can move by 1 between meter
 readings. That is the meter's resolution, not noise to filter.
 
+Details settled in the group 4 implementation (2026-11-03):
+- **The first increase of a session.** Its litres flowed before the session's first increase time, so they are
+  outside the first-to-last duration. Both the rolling flow and the whole-shower sample leave them out. Keeping
+  them would raise every sample by the same bias, which a median cannot remove. The bias scales with the litres per
+  reading: 1-2 % for a meter that reports each litre, but 6 % for a meter read every 30 s at 7.5 L/min, and 12 %
+  every 60 s. The group 4 review found this, and the specs were changed on 2026-11-03.
+- **What a shower is.** It is the whole detection period, from the rise to the fall of the humidity or long-draw
+  detection. A draw in the humidity tail, such as a washbasin, adds its litres and flow time to that shower.
+  Detection with no water drawn reports nothing.
+- **Recalibrate** replaces the history with the replay's, as the spec says. A shower learned live during a
+  background fit is added to the replay's history, and a flow set by hand during the fit stays locked.
+- **The lock** set by the number is also written into the entry options' lock list, without a reload, so the options
+  flow shows it. A lock turned on in the options holds the flow in use at that moment.
+- **The number's attributes.** `source` is default while the history is empty, also when an old option value is the
+  starting value. `low` and `high` are None while the history is empty.
+
 **The "Shower flow" number** (new `number.py`):
 - Its native value is the flow in use.
 - Its attributes are `source`, `low` and `high`.
@@ -283,7 +299,17 @@ Diagnostics already dump these dicts, so the new state appears there without new
 - [The tank sensor reads hot, but the outlet really ran cold, for example with a sensor high in a tank with a very
   wide thermocline] → The check uses `T_ch - tolerance`, the same threshold as the sensor bounds. The notification
   names the reading, and `set_tank_state` remains a manual way out.
-- [A bath fill enters the shower flow history] → The median ignores one or two such samples among ten.
+- [A bath fill skews a shower flow sample] → The median ignores one or two such samples among ten.
+- [A washbasin draw in a shower's humidity tail adds to that shower's sample] → This is common, but the skew is small,
+  about 3 %.
+- [Two people showering one after the other within one humidity detection make one sample at the litre-weighted mean
+  of their flows, such as about 9.7 L/min for 7.5 and 12] → This is the in-between value the median is meant to
+  avoid. Splitting a sample at a pause needs a threshold above a normal mid-shower pause (3 minutes in the spec), so
+  it is left for the user review in 5.5, with live evidence. Accepted for now (group 4 review, 2026-11-03).
+- [A background fit can double or lose one live shower sample near its end, because the live classifier notices a
+  shower end up to one tick later than the replay] → One sample in a median of 10. Accepted.
+- [A replay that finds no showers leaves the history empty, for example with history days set to 1] → The flow
+  falls back to the default or the old option until the next shower.
 - [Two people with very different flows make the median flip when the balance of recent showers changes] → The low
   and high minutes show the spread. The number lock fixes a value for a user who wants a stable one.
 - [An ambient sensor in the wrong place, such as one in sun or next to the heat pump, biases k] → k is fitted against

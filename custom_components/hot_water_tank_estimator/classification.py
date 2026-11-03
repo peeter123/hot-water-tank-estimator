@@ -19,6 +19,8 @@ from .const import (
     DEFAULT_MAX_DRAW,
     DEFAULT_RECLASSIFY_WINDOW,
     DEFAULT_SESSION_GAP,
+    ROLLING_FLOW_MIN_SECONDS,
+    ROLLING_FLOW_SECONDS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -79,6 +81,42 @@ class Classification:
     reclassified: float = 0.0
 
 
+@dataclass(frozen=True)
+class ShowerReport:
+    """A detected shower that has ended.
+
+    Attributes:
+        litres: The mixed litres drawn within its minutes of flow: those reclassified at
+            detection included, the first increase of each session left out (it was drawn
+            before the session began).
+        minutes: The minutes of flow: the summed duration of the shower's draw sessions, each
+            from its first to its last increase, so a pause longer than the session gap does
+            not count.
+    """
+
+    litres: float
+    minutes: float
+
+
+@dataclass
+class _Shower:
+    """The mixed draw of the detected shower in progress.
+
+    Attributes:
+        litres: Mixed litres so far, without the first increase of each session.
+        seconds: Seconds of flow so far.
+        last: The time of the latest increase.
+        recent: The latest increases as `(litres, seconds)`, where `seconds` is the time since
+            the previous increase of the same session and 0 for the first of a session. Only
+            the increases the rolling flow can reach are kept.
+    """
+
+    litres: float = 0.0
+    seconds: float = 0.0
+    last: datetime | None = None
+    recent: list[tuple[float, float]] = field(default_factory=list)
+
+
 @dataclass
 class _Humidity:
     """The recent readings of one humidity sensor and whether it detects a shower."""
@@ -112,6 +150,9 @@ class DrawClassifier:
         self._was_detected = False
         # The end of a session that has ended and was not taken yet (see `take_session_end`).
         self._ended: datetime | None = None
+        # The detected shower in progress, and one that has ended and was not taken yet.
+        self._shower: _Shower | None = None
+        self._shower_report: ShowerReport | None = None
         self._warned_units: set[str | None] = set()
 
     @property
@@ -137,6 +178,46 @@ class DrawClassifier:
         """
         ended, self._ended = self._ended, None
         return ended
+
+    def take_shower_end(self) -> ShowerReport | None:
+        """Return the detected shower that ended since the last call, once.
+
+        A shower ends when detection ends: the humidity falls, or the long-draw session ends.
+        The classifier notices at its next call that advances time, so the caller asks after
+        every such call. Detection without any draw reports nothing.
+
+        Returns:
+            The litres and minutes of flow of the shower, None when none ended.
+        """
+        report, self._shower_report = self._shower_report, None
+        return report
+
+    @property
+    def rolling_flow(self) -> float | None:
+        """Return the rolling flow of the detected shower in L/min, None when there is none.
+
+        It is the mixed litres over the last 2 minutes of flow divided by those minutes: the
+        time between the increases of a session counts, a pause longer than the session gap
+        does not. The litre of a session's first increase was drawn before the session, so it
+        is not part of the window. There is none while no shower is detected, or with less than
+        1 minute of flow in the shower.
+        """
+        shower = self._shower
+        if (
+            shower is None
+            or not self.detected
+            or shower.seconds < ROLLING_FLOW_MIN_SECONDS
+        ):
+            return None
+        seconds = litres = 0.0
+        for amount, duration in reversed(shower.recent):
+            if duration <= 0:
+                continue
+            if seconds > 0 and seconds + duration > ROLLING_FLOW_SECONDS:
+                break
+            seconds += duration
+            litres += amount
+        return litres / seconds * 60 if seconds > 0 else None
 
     def clear_pending(self, until: datetime | None = None) -> None:
         """Forget the other-draw litres that could still be reclassified (after a charge).
@@ -212,7 +293,9 @@ class DrawClassifier:
             self._long_active = True
         reclassified = self._edge(now)
         mixed = self.detected
-        if not mixed:
+        if mixed:
+            self._shower_add(now, delta)
+        else:
             self._others.append((now, delta))
             self._prune_others(now)
         return Classification(litres=delta, mixed=mixed, reclassified=reclassified)
@@ -268,15 +351,56 @@ class DrawClassifier:
 
     def _edge(self, now: datetime) -> float:
         """Return the litres to reclassify when detection has just started."""
+        self._end_shower()
         detected = self.detected
         rising = detected and not self._was_detected
         self._was_detected = detected
         if not rising:
             return 0.0
         start = now - timedelta(minutes=self.options.reclassify_window)
-        litres = sum(amount for time, amount in self._others if time >= start)
+        reclassified = [
+            (time, amount) for time, amount in self._others if time >= start
+        ]
         self._others.clear()
-        return litres
+        # The shower starts with the litres it takes over, in the order they were drawn.
+        self._shower = None
+        for time, amount in reclassified:
+            self._shower_add(time, amount)
+        return sum(amount for _, amount in reclassified)
+
+    def _shower_add(self, time: datetime, litres: float) -> None:
+        """Add a mixed increase to the shower in progress (a new one when there is none)."""
+        shower = self._shower
+        if shower is None:
+            shower = self._shower = _Shower()
+        seconds = 0.0
+        first = True
+        if shower.last is not None:
+            gap = (time - shower.last).total_seconds()
+            if 0 <= gap <= self.options.session_gap:
+                seconds = gap
+                first = False
+        if not first:
+            shower.litres += litres
+        shower.seconds += seconds
+        shower.last = time
+        shower.recent.append((litres, seconds))
+        # Keep the increases back to the one that reaches past the rolling window.
+        total = 0.0
+        for index in range(len(shower.recent) - 1, -1, -1):
+            total += shower.recent[index][1]
+            if total > ROLLING_FLOW_SECONDS:
+                del shower.recent[:index]
+                break
+
+    def _end_shower(self) -> None:
+        """Report the shower in progress as ended when detection has ended."""
+        shower = self._shower
+        if shower is None or self.detected:
+            return
+        self._shower = None
+        if shower.litres > 0:
+            self._shower_report = ShowerReport(shower.litres, shower.seconds / 60)
 
     def _prune_others(self, now: datetime) -> None:
         """Drop other-draw litres that can no longer fall inside a reclassify window."""
@@ -296,6 +420,7 @@ class DrawClassifier:
             self._others.clear()
             self._long_active = False
             self._was_detected = self.detected
+            self._end_shower()
 
     def to_dict(self) -> dict[str, Any]:
         """Return the state as a JSON-compatible dict."""
@@ -306,6 +431,16 @@ class DrawClassifier:
             "others": [[time.isoformat(), amount] for time, amount in self._others],
             "long_active": self._long_active,
             "was_detected": self._was_detected,
+            "shower": (
+                None
+                if self._shower is None
+                else {
+                    "litres": self._shower.litres,
+                    "seconds": self._shower.seconds,
+                    "last": _iso(self._shower.last),
+                    "recent": [list(item) for item in self._shower.recent],
+                }
+            ),
             "humidity": {
                 sensor_id: {
                     "readings": [[t.isoformat(), v] for t, v in humidity.readings],
@@ -331,6 +466,17 @@ class DrawClassifier:
             self._others = [(datetime.fromisoformat(t), a) for t, a in data["others"]]
             self._long_active = bool(data["long_active"])
             self._was_detected = bool(data["was_detected"])
+            shower = data.get("shower")
+            self._shower = (
+                None
+                if shower is None
+                else _Shower(
+                    litres=float(shower["litres"]),
+                    seconds=float(shower["seconds"]),
+                    last=_from_iso(shower["last"]),
+                    recent=[(float(a), float(b)) for a, b in shower["recent"]],
+                )
+            )
             self._humidity = {
                 sensor_id: _Humidity(
                     readings=[

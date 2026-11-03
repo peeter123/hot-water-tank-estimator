@@ -47,7 +47,7 @@ def test_every_entity_is_in_the_readme() -> None:
         for domain in STRINGS["entity"].values()
         for entity in domain.values()
     }
-    assert len(names) == 8 + 8 + 1 + 1 + 1
+    assert len(names) == 8 + 8 + 1 + 1 + 1 + 1
     missing = sorted(name for name in names if name not in README)
     assert not missing
 

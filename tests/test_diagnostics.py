@@ -110,15 +110,18 @@ async def test_download_diagnostics(hass: HomeAssistant, freezer) -> None:
         "closures",
         "quiet_estimates",
         "width_estimates",
+        "shower_flow_history",
         "undo",
     }
     assert calibration["undo"] is None
+    assert calibration["shower_flow_history"] == []
     assert set(calibration["parameters"]) == {
         "other_hot_share",
         "startup_energy",
         "loss_coefficient",
         "thermocline_width",
         "usable_fraction",
+        "shower_flow",
     }
     assert calibration["parameters"]["other_hot_share"] == {
         "value": 0.2,

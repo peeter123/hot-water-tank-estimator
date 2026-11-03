@@ -50,6 +50,7 @@ async def async_get_config_entry_diagnostics(
             "closures": [closure.as_dict() for closure in calibrator.closures],
             "quiet_estimates": list(calibrator.quiet_estimates),
             "width_estimates": list(calibrator.width_estimates),
+            "shower_flow_history": list(calibrator.shower_flows),
             "undo": (
                 None
                 if calibrator.undo_record is None

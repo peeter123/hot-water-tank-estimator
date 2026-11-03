@@ -74,7 +74,6 @@ from .const import (
     DEFAULT_SENSOR_MARGIN,
     DEFAULT_SENSOR_TOLERANCE,
     DEFAULT_SESSION_GAP,
-    DEFAULT_SHOWER_FLOW,
     DEFAULT_STARTUP_ENERGY,
     DEFAULT_THERMOCLINE_WIDTH,
     DEFAULT_USABLE_FRACTION,
@@ -156,7 +155,6 @@ DRAW_TUNING = (
         0.05,
         UnitOfEnergy.KILO_WATT_HOUR,
     ),
-    Tuning("shower_flow", DEFAULT_SHOWER_FLOW, 1, 30, 0.1, "L/min"),
     Tuning("humidity_rise", DEFAULT_HUMIDITY_RISE, 1, 40, 0.5, PERCENTAGE),
     Tuning("humidity_window", DEFAULT_HUMIDITY_WINDOW, 5, 720, 5, UnitOfTime.MINUTES),
     Tuning(

@@ -17,7 +17,7 @@ with new attributes would look older than it is.
 
 import asyncio
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from functools import partial
 import logging
@@ -49,7 +49,13 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
 
-from .calibration import PARAMETER_BOUNDS, USABLE_FRACTION, Calibrator, PressResult
+from .calibration import (
+    PARAMETER_BOUNDS,
+    SHOWER_FLOW,
+    USABLE_FRACTION,
+    Calibrator,
+    PressResult,
+)
 from .const import (
     CONF_AMBIENT_SENSOR,
     CONF_COLD_SENSOR,
@@ -70,6 +76,7 @@ from .const import (
     DIAGNOSTIC_EVENTS,
     DOMAIN,
     FALLBACK_TEMPERATURE,
+    SHOWER_HISTORY,
     SIGNAL_UPDATE,
     STORAGE_SAVE_DELAY,
     TICK_MINUTES,
@@ -100,7 +107,7 @@ type TankConfigEntry = ConfigEntry[TankEstimator]
 _TUNING_FIELDS = tuple(
     name
     for name in ModelOptions.__dataclass_fields__
-    if name not in {"volume", "sensor_height", "thermocline_width"}
+    if name not in {"volume", "sensor_height", "thermocline_width", "shower_flow_range"}
 )
 # The parameters the user can lock (the learned ones).
 LOCKABLE = tuple(PARAMETER_BOUNDS)
@@ -572,6 +579,27 @@ class TankEstimator:
         self.save_soon()
         async_dispatcher_send(self.hass, self.signal)
 
+    async def async_set_shower_flow(self, value: float) -> None:
+        """Set the shower flow by hand: it is kept and locked, also in the options.
+
+        The lock is written to the entry options, which the options flow shows and which win
+        over the store when the entry loads. The entry does not reload for it.
+        """
+        now = dt_util.utcnow()
+        old = self.calibrator.value_of(SHOWER_FLOW)
+        new = self.calibrator.set_shower_flow(value)
+        self.model.set_options(self.calibrator.options)
+        locks = {*(self.entry.options.get(CONF_LOCKS) or ()), SHOWER_FLOW}
+        self.hass.config_entries.async_update_entry(
+            self.entry, options={**self.entry.options, CONF_LOCKS: sorted(locks)}
+        )
+        self.config = replace(self.config, locks=self.config.locks | {SHOWER_FLOW})
+        self.model.log_event(
+            now, EventKind.SHOWER_FLOW, {"result": "set", "old": old, "new": new}
+        )
+        self.save_soon()
+        async_dispatcher_send(self.hass, self.signal)
+
     @property
     def _press_notification(self) -> str:
         """Return the notification ID of this tank's rejected press (one at a time)."""
@@ -605,6 +633,7 @@ class TankEstimator:
             measures_heat=self.config.measures_heat,
         )
         copy.restore(self.calibrator.to_dict())
+        copy.shower_added = self.calibrator.shower_added
         return copy
 
     async def async_setup_fit(self, days: int | None = None) -> SetupFit | None:
@@ -679,6 +708,15 @@ class TankEstimator:
                     else:
                         state[key].pop(USABLE_FRACTION, None)
             calibrator.restore(state)
+        # A shower learned during the fit is not in the replay: its sample is added to the
+        # replay's history. A flow set by hand during the fit stays locked.
+        added = live.shower_added - previous.shower_added
+        if added > 0:
+            calibrator.shower_flows.extend(live.shower_flows[-added:])
+            del calibrator.shower_flows[:-SHOWER_HISTORY]
+        if SHOWER_FLOW in live.locks and SHOWER_FLOW in live.values:
+            calibrator.values[SHOWER_FLOW] = live.values[SHOWER_FLOW]
+            calibrator.locks = calibrator.locks | {SHOWER_FLOW}
         # The record of the last press is the live one: a press or an undo during the fit,
         # or the first reset it has seen since, is not in the replay's copy.
         calibrator.undo_record = live.undo_record

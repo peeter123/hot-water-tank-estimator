@@ -12,7 +12,12 @@ from .const import DOMAIN, STORAGE_VERSION
 from .estimator import TankConfig, TankConfigEntry, TankEstimator
 from .services import async_setup_services
 
-PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON]
+PLATFORMS = [
+    Platform.SENSOR,
+    Platform.BINARY_SENSOR,
+    Platform.BUTTON,
+    Platform.NUMBER,
+]
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 

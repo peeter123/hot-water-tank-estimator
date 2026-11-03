@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -44,6 +45,7 @@ class TankSensorDescription(SensorEntityDescription):
     parameter: str | None = (
         None  # the learned parameter shown, for the source attribute
     )
+    attributes_fn: Callable[[TankEstimator], dict[str, Any]] | None = None
 
 
 def _heat_loss(estimator: TankEstimator) -> int:
@@ -54,6 +56,17 @@ def _heat_loss(estimator: TankEstimator) -> int:
     return round(
         options.loss_coefficient * heat_capacity(options.volume) * excess * 1000
     )
+
+
+def _shower_time_attributes(estimator: TankEstimator) -> dict[str, Any]:
+    """Return the flow behind the shower minutes and the minutes at the extreme flows."""
+    shower = estimator.model.shower_time
+    return {
+        "flow": round(shower.flow, 2),
+        "flow_basis": shower.basis,
+        "minutes_low": shower.low,
+        "minutes_high": shower.high,
+    }
 
 
 ESTIMATE_SENSORS: tuple[TankSensorDescription, ...] = (
@@ -91,6 +104,7 @@ ESTIMATE_SENSORS: tuple[TankSensorDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=0,
         value_fn=lambda e: e.model.outputs.shower_minutes,
+        attributes_fn=_shower_time_attributes,
     ),
     TankSensorDescription(
         key="heat_loss",
@@ -254,9 +268,11 @@ class TankSensor(TankEntity, SensorEntity):
         return self.entity_description.value_fn(self.estimator)
 
     @property
-    def extra_state_attributes(self) -> dict[str, str] | None:
-        """Return where a calibration parameter's value comes from."""
-        parameter = self.entity_description.parameter
-        if parameter is None:
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return where a calibration parameter's value comes from, or the sensor's own attributes."""
+        description = self.entity_description
+        if description.attributes_fn is not None:
+            return description.attributes_fn(self.estimator)
+        if description.parameter is None:
             return None
-        return {"source": self.estimator.calibrator.source_of(parameter)}
+        return {"source": self.estimator.calibrator.source_of(description.parameter)}

@@ -63,6 +63,12 @@ async def test_units_and_classes(hass: HomeAssistant) -> None:
         assert state.attributes.get("unit_of_measurement") == unit, key
         assert state.attributes.get("device_class") == device_class, key
         assert state.attributes.get("state_class") == state_class, key
+    flow = hass.states.get(entity_id(hass, entry, "number", "shower_flow"))
+    assert flow is not None
+    assert flow.attributes.get("unit_of_measurement") == "L/min"
+    assert flow.attributes.get("min") == 3.0
+    assert flow.attributes.get("max") == 20.0
+    assert flow.attributes.get("step") == 0.1
 
 
 async def test_standing_loss_of_a_charged_tank(hass: HomeAssistant) -> None:
@@ -133,7 +139,7 @@ async def test_every_entity_is_on_one_device_with_a_translated_name(
     assert len(devices) == 1
     assert devices[0].name == TITLE
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
-    assert len(entities) == 8 + 8 + 1 + 1 + 1
+    assert len(entities) == 8 + 8 + 1 + 1 + 1 + 1
     assert {e.device_id for e in entities} == {devices[0].id}
     state = hass.states.get(entity_id(hass, entry, "sensor", "tank_litres"))
     assert state is not None
@@ -294,6 +300,15 @@ async def test_names_shown(hass: HomeAssistant) -> None:
     level = hass.states.get("sensor.hot_water_tank_charge_level")
     assert level is not None
     assert level.attributes["friendly_name"] == "Hot Water Tank Charge level"
+    loss = hass.states.get("sensor.hot_water_tank_heat_loss")
+    assert loss is not None
+    assert loss.attributes["friendly_name"] == "Hot Water Tank Heat loss"
+    ran_out = hass.states.get("button.hot_water_tank_hot_water_ran_out")
+    assert ran_out is not None
+    assert ran_out.attributes["friendly_name"] == "Hot Water Tank Hot water ran out"
+    flow = hass.states.get("number.hot_water_tank_shower_flow")
+    assert flow is not None
+    assert flow.attributes["friendly_name"] == "Hot Water Tank Shower flow"
     assert entry.title == "Hot Water Tank"
 
 

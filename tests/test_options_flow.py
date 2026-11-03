@@ -165,7 +165,7 @@ async def test_every_tuning_value_can_be_changed(hass: HomeAssistant) -> None:
         hass,
         entry.entry_id,
         tank={**TANK_FIELDS, "mix_temperature": 40.0, "thermocline_width": 30},
-        draws={"shower_flow": 9.0, "session_gap": 30.0, "long_draw_minutes": 4.0},
+        draws={"session_gap": 30.0, "long_draw_minutes": 4.0},
         learning={CONF_HISTORY_DAYS: 14},
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -173,7 +173,6 @@ async def test_every_tuning_value_can_be_changed(hass: HomeAssistant) -> None:
     options = entry.runtime_data.model.options
     assert options.mix_temperature == 40.0
     assert options.thermocline_width == pytest.approx(0.30)
-    assert options.shower_flow == 9.0
     assert options.session_gap == 30.0
     assert options.long_draw_minutes == 4.0
     assert entry.runtime_data.config.history_days == 14

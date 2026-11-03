@@ -51,6 +51,7 @@ from .const import (
     DEFAULT_USABLE_FRACTION,
     DETECTOR_HOLD_SECONDS,
     HEATING_TIMEOUT_SECONDS,
+    SHOWER_MIN_MINUTES,
     WATER_HEAT_CAPACITY_WH,
 )
 
@@ -71,6 +72,7 @@ class EventKind(StrEnum):
     SENSOR_BOUND = "sensor_bound"
     CALIBRATION = "calibration"
     HOT_WATER_RAN_OUT = "hot_water_ran_out"
+    SHOWER_FLOW = "shower_flow"
 
 
 @dataclass(frozen=True)
@@ -180,7 +182,9 @@ class ModelOptions:
         DEFAULT_OTHER_HOT_SHARE  # share of other-draw litres that is hot
     )
     startup_energy: float = DEFAULT_STARTUP_ENERGY  # S, kWh per run
-    shower_flow: float = DEFAULT_SHOWER_FLOW  # L/min
+    shower_flow: float = DEFAULT_SHOWER_FLOW  # L/min, the flow in use (see Calibrator)
+    # The lowest and highest flow of the shower flow history in L/min, None when it is empty.
+    shower_flow_range: tuple[float, float] | None = None
     humidity_rise: float = DEFAULT_HUMIDITY_RISE  # percentage points
     humidity_window: float = DEFAULT_HUMIDITY_WINDOW  # minutes
     long_draw_minutes: float = DEFAULT_LONG_DRAW_MINUTES  # 0 is off
@@ -272,6 +276,30 @@ class Outputs:
     shower_litres: int
     percent_charged: int
     shower_minutes: int
+
+
+@dataclass(frozen=True)
+class ShowerMinutes:
+    """The shower minutes left, and the flows they come from.
+
+    Attributes:
+        minutes: Minutes of shower left at `flow`, whole minutes.
+        flow: The flow in use in L/min: the rolling flow of the shower in progress, or the
+            shower flow in use.
+        basis: `current_shower` or `median`: which of the two `flow` is.
+        low: Minutes at the highest flow of the history, `minutes` when it is empty.
+        high: Minutes at the lowest flow of the history, `minutes` when it is empty.
+    """
+
+    minutes: int
+    flow: float
+    basis: str
+    low: int
+    high: int
+
+
+BASIS_CURRENT_SHOWER = "current_shower"
+BASIS_MEDIAN = "median"
 
 
 def _finite(value: Any) -> bool:
@@ -412,6 +440,7 @@ class TankModel:
         self._mark("water_meter", _finite(value), now)
         result = self._classifier.on_meter(now, value, unit)
         self._collect_draw_end(now)
+        events += self._collect_shower_end(now)
         if result is None:
             return events
         events += self._apply_reclassify(now, result.reclassified)
@@ -428,6 +457,7 @@ class TankModel:
         self._mark(f"humidity:{sensor_id}", _finite(value), now)
         reclassify = self._classifier.on_humidity(now, sensor_id, value)
         self._collect_draw_end(now)
+        events += self._collect_shower_end(now)
         events += self._apply_reclassify(now, reclassify)
         events += self._apply_sensor_bounds(now)
         self._resnapshot_draw(now, reclassify)
@@ -551,6 +581,7 @@ class TankModel:
         now, events = self._begin(now)
         reclassify = self._classifier.update(now)
         self._collect_draw_end(now)
+        events += self._collect_shower_end(now)
         events += self._apply_reclassify(now, reclassify)
         events += self._follow_sensor(now)
         events += self._apply_sensor_bounds(now)
@@ -715,8 +746,31 @@ class TankModel:
             tank_litres=_round_half_up(self.tank_litres_exact),
             shower_litres=_round_half_up(shower),
             percent_charged=_round_half_up(percent),
-            shower_minutes=_round_half_up(shower / self.options.shower_flow),
+            shower_minutes=self.shower_time.minutes,
         )
+
+    @property
+    def shower_time(self) -> ShowerMinutes:
+        """Return the shower minutes left with the flow they use and their range.
+
+        While a shower is detected with at least 1 minute of flow, the flow is the shower's
+        rolling flow; otherwise it is the shower flow in use. The range is the minutes at the
+        highest and the lowest flow of the history.
+        """
+        shower = self.shower_litres_exact
+        rolling = self._classifier.rolling_flow
+        if rolling is not None and rolling > 0:
+            flow, basis = rolling, BASIS_CURRENT_SHOWER
+        else:
+            flow, basis = self.options.shower_flow, BASIS_MEDIAN
+        minutes = _round_half_up(shower / flow)
+        flows = self.options.shower_flow_range
+        if flows is None:
+            low = high = minutes
+        else:
+            low = _round_half_up(shower / flows[1])
+            high = _round_half_up(shower / flows[0])
+        return ShowerMinutes(minutes, flow, basis, low, high)
 
     @property
     def shower_detected(self) -> bool:
@@ -813,6 +867,22 @@ class TankModel:
             last = replace(self._draw_record(now), time=ended)
         self._draw_end = last
         self._last_draw = None
+
+    def _collect_shower_end(self, now: datetime) -> list[ModelEvent]:
+        """Return the event of a detected shower that the classifier reports as ended.
+
+        Only a shower with enough minutes of flow is a sample of the shower flow (see
+        `Calibrator.on_shower`); the event carries its litres, minutes of flow and flow.
+        """
+        report = self._classifier.take_shower_end()
+        if report is None or report.minutes < SHOWER_MIN_MINUTES:
+            return []
+        change = {
+            "litres": report.litres,
+            "minutes": report.minutes,
+            "flow": report.litres / report.minutes,
+        }
+        return [self._record(now, EventKind.SHOWER_FLOW, change, self._temps())]
 
     def _mark(self, source: str, available: bool, now: datetime) -> None:
         """Track how long a source is unavailable within the calibration interval."""

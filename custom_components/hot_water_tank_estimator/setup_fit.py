@@ -24,6 +24,7 @@ from typing import Any
 
 from .calibration import (
     PARAMETER_BOUNDS,
+    SHOWER_FLOW,
     SOURCE_SETUP_FIT,
     USABLE_FRACTION,
     Calibrator,
@@ -356,7 +357,8 @@ def setup_fit(
         tick: The tick interval.
         previous: The calibrator this fit replaces (a recalibrate). The usable fraction it
             learned from the button stays with its source, because no replay can learn it, and
-            so does the undo record of the last press.
+            so does the undo record of the last press. A shower flow set by hand stays too,
+            while the shower flow history is the replay's own.
 
     Returns:
         The fitted options and the calibration state. The calibrator is ready for live
@@ -374,6 +376,13 @@ def setup_fit(
         if USABLE_FRACTION not in calibrator.locks:
             calibrator.values[USABLE_FRACTION] = previous.values[USABLE_FRACTION]
             calibrator.sources[USABLE_FRACTION] = previous.sources[USABLE_FRACTION]
+    if (
+        previous is not None
+        and SHOWER_FLOW in calibrator.locks
+        and SHOWER_FLOW in previous.values
+    ):
+        # A flow set by hand stays: no replay can learn it.
+        calibrator.values[SHOWER_FLOW] = previous.values[SHOWER_FLOW]
     replay(history, options, sources=sources, calibrator=calibrator, tick=tick)
     if previous is not None:
         # No replay can learn the undo of the last press either.

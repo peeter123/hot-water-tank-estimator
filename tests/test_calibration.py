@@ -22,6 +22,7 @@ from custom_components.hot_water_tank_estimator.calibration import (
     true_start_average,
 )
 from custom_components.hot_water_tank_estimator.model import (
+    EventKind,
     ModelOptions,
     Sources,
     TankModel,
@@ -1363,3 +1364,186 @@ def test_the_press_reset_is_not_a_reset_after_the_press() -> None:
     rig.call(T0 + 11 * MINUTE, "tick")
     assert record.reset_seen is None
     assert rig.cal.undo_available(rig.model, T0 + 12 * MINUTE)
+
+
+# ----- shower flow from detected showers (design D6) ------------------------------------------
+
+TWO_PEOPLE = (7.4, 7.6, 7.5, 12.1, 11.8, 7.3, 12.0, 7.7, 11.9, 7.5)
+
+
+def add_showers(calibrator: Calibrator, flows: tuple[float, ...]) -> None:
+    """Add a detected shower of 5 minutes of flow for each flow in L/min."""
+    for flow in flows:
+        assert calibrator.on_shower(flow * 5, 5.0)
+
+
+def test_two_people_two_flows() -> None:
+    """The history of two people gives a median of 7.65 L/min, from 7.3 to 12.1."""
+    calibrator = Calibrator(make_options())
+    add_showers(calibrator, TWO_PEOPLE)
+    options = calibrator.options
+    assert options.shower_flow == pytest.approx(7.65)
+    assert options.shower_flow_range == pytest.approx((7.3, 12.1))
+    assert calibrator.source_of("shower_flow") == "learned"
+
+
+def test_short_draw_is_no_shower_flow_sample() -> None:
+    """A detected shower with 2 minutes of flow does not change the history."""
+    calibrator = Calibrator(make_options())
+    add_showers(calibrator, (7.4, 7.6))
+    before = list(calibrator.shower_flows)
+    assert not calibrator.on_shower(20.0, 2.0)
+    assert calibrator.shower_flows == before
+
+
+def test_the_default_applies_until_the_first_shower() -> None:
+    """With an empty history the option is in use: 7.5 L/min by default, and no range."""
+    calibrator = Calibrator(make_options())
+    assert calibrator.options.shower_flow == 7.5
+    assert calibrator.options.shower_flow_range is None
+    assert calibrator.source_of("shower_flow") == "option"
+
+
+def test_an_old_shower_flow_option_is_the_starting_value() -> None:
+    """The shower flow an older version kept in the options applies while the history is empty."""
+    calibrator = Calibrator(make_options(shower_flow=9.0))
+    assert calibrator.options.shower_flow == 9.0
+    add_showers(calibrator, (6.0,))
+    assert calibrator.options.shower_flow == 6.0
+
+
+def test_an_old_option_outside_the_bounds_is_limited() -> None:
+    """An old shower flow option of 40 L/min is limited to 20, also when the lock holds it."""
+    calibrator = Calibrator(make_options(shower_flow=40.0))
+    assert calibrator.options.shower_flow == 20.0
+    calibrator.set_locks({"shower_flow"})
+    assert calibrator.options.shower_flow == 20.0
+    assert Calibrator(make_options(shower_flow=1.0)).options.shower_flow == 3.0
+
+
+def test_a_set_event_is_no_sample() -> None:
+    """A shower_flow event of a manual set has no litres and changes nothing in the history."""
+    calibrator = Calibrator(make_options())
+    model = TankModel(make_options(), Sources(energy_counter=True), T0, 57.0, 57.0)
+    event = model.log_event(
+        T0, EventKind.SHOWER_FLOW, {"result": "set", "old": 7.5, "new": 9.0}
+    )
+    calibrator.observe(model, [event], T0)
+    assert calibrator.shower_flows == []
+
+
+def test_the_median_is_limited_to_the_bounds() -> None:
+    """A median above 20 or below 3 L/min is limited to the bounds."""
+    calibrator = Calibrator(make_options())
+    add_showers(calibrator, (25.0, 30.0, 40.0))
+    assert calibrator.options.shower_flow == 20.0
+    low = Calibrator(make_options())
+    add_showers(low, (1.0, 2.0))
+    assert low.options.shower_flow == 3.0
+
+
+def test_the_history_keeps_the_last_ten() -> None:
+    """The 11th shower pushes out the first."""
+    calibrator = Calibrator(make_options())
+    add_showers(calibrator, tuple(float(n) for n in range(4, 15)))
+    assert calibrator.shower_flows == [float(n) for n in range(5, 15)]
+
+
+def test_a_learning_off_calibrator_adds_no_sample() -> None:
+    """A calibrator that records only does not learn the shower flow either."""
+    calibrator = Calibrator(make_options(), learn=False)
+    assert not calibrator.on_shower(40.0, 5.0)
+    assert calibrator.shower_flows == []
+
+
+def test_set_shower_flow_locks_and_the_history_keeps_filling() -> None:
+    """Set to 9 over a learned 7.65: 9 locked, and later showers add without changing it."""
+    calibrator = Calibrator(make_options())
+    add_showers(calibrator, TWO_PEOPLE)
+    assert calibrator.options.shower_flow == pytest.approx(7.65)
+    assert calibrator.set_shower_flow(9.0) == 9.0
+    assert calibrator.options.shower_flow == 9.0
+    assert calibrator.source_of("shower_flow") == "locked"
+    assert "shower_flow" in calibrator.locks
+    add_showers(calibrator, (11.0, 11.5))
+    assert calibrator.options.shower_flow == 9.0
+    assert calibrator.shower_flows[-2:] == [11.0, 11.5]
+    assert calibrator.options.shower_flow_range == pytest.approx((7.3, 12.1))
+    # The lock removed in the options: the median again, with the source learned.
+    calibrator.set_locks(())
+    assert calibrator.options.shower_flow == pytest.approx(
+        sorted(calibrator.shower_flows)[4] / 2 + sorted(calibrator.shower_flows)[5] / 2
+    )
+    assert calibrator.source_of("shower_flow") == "learned"
+
+
+def test_set_shower_flow_stays_within_the_bounds() -> None:
+    """A flow set outside 3-20 L/min is limited."""
+    calibrator = Calibrator(make_options())
+    assert calibrator.set_shower_flow(50.0) == 20.0
+    assert calibrator.set_shower_flow(0.5) == 3.0
+
+
+def test_locking_in_the_options_keeps_the_flow_in_use() -> None:
+    """A lock turned on in the options holds the median in use at that moment."""
+    calibrator = Calibrator(make_options())
+    add_showers(calibrator, TWO_PEOPLE)
+    calibrator.set_locks({"shower_flow"})
+    assert calibrator.options.shower_flow == pytest.approx(7.65)
+    add_showers(calibrator, (15.0, 15.0, 15.0, 15.0, 15.0, 15.0))
+    assert calibrator.options.shower_flow == pytest.approx(7.65)
+
+
+def test_a_shower_with_a_pause_is_7_5_litres_per_minute() -> None:
+    """60 L over 8 minutes of flow, with a 3-minute pause, learns 7.5 L/min end to end."""
+    sources = Sources(energy_counter=True, humidity_sensors=("bath",))
+    model = TankModel(make_options(), sources, T0, 57.0, 57.0)
+    calibrator = Calibrator(make_options())
+
+    def feed(now: datetime, method: str, *args: object) -> None:
+        events = getattr(model, method)(now, *args)
+        if calibrator.observe(model, events, now):
+            model.set_options(calibrator.options)
+
+    feed(T0, "on_water_meter", 1000.0, "L")
+    feed(T0, "on_humidity", "bath", 55.0)
+    feed(T0 + SECOND, "on_humidity", "bath", 70.0)
+    meter = 1000.0
+    for seconds, litres in (
+        (10, 1.0),
+        *((70 + 60 * n, 6.0) for n in range(5)),
+        (490, 1.0),
+        *((550 + 60 * n, 10.0) for n in range(3)),
+    ):
+        meter += litres
+        feed(T0 + seconds * SECOND, "on_water_meter", meter, "L")
+    assert calibrator.shower_flows == []
+    feed(T0 + 12 * MINUTE, "on_humidity", "bath", 55.0)
+    assert calibrator.shower_flows == [pytest.approx(7.5)]
+    assert model.options.shower_flow == pytest.approx(7.5)
+    shower_events = [e for e in model.events if e.kind == "shower_flow"]
+    assert len(shower_events) == 1
+    assert shower_events[0].change["litres"] == pytest.approx(60.0)
+    assert shower_events[0].change["minutes"] == pytest.approx(8.0)
+
+
+def test_the_shower_flow_history_is_saved() -> None:
+    """The history and the locked flow survive to_dict and from a JSON round trip."""
+    calibrator = Calibrator(make_options())
+    add_showers(calibrator, TWO_PEOPLE)
+    calibrator.set_shower_flow(9.0)
+    restored = Calibrator(make_options(), locks=frozenset({"shower_flow"}))
+    restored.restore(json.loads(json.dumps(calibrator.to_dict())))
+    assert restored.shower_flows == calibrator.shower_flows
+    assert restored.options.shower_flow == 9.0
+    assert restored.to_dict()["shower_flow_history"] == list(TWO_PEOPLE)
+
+
+def test_a_store_without_the_shower_flow_history_loads() -> None:
+    """A calibration state saved before the history existed loads with an empty history."""
+    state = Calibrator(make_options()).to_dict()
+    del state["shower_flow_history"]
+    calibrator = Calibrator(make_options())
+    calibrator.restore(state)
+    assert calibrator.shower_flows == []
+    assert calibrator.options.shower_flow == 7.5
