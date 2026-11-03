@@ -314,6 +314,38 @@ Applies to every group:
     and set the options lock; turning it off returned to learned, with no lock. The system log is clean, and the
     switch tile is on the dashboard after the Shower flow tile.
 
+## 7. Tank sensor temperature diagnostic sensor (added 2026-11-03 at the user's request)
+
+- [x] 7.1 Add the "Tank sensor temperature" diagnostic sensor (design D10, `sensor.py`). It shows the reading the
+  model receives in C, with the `source_entity` and `sensor_height` attributes. It is unavailable with the source,
+  and has translations and an icon. Verify:
+  - tests for the integration-setup scenarios "Reading shown", "Reading in Fahrenheit" and "Source unavailable";
+  - the entity count, name and unit tests, including "Units shown";
+  - `python scripts/lint.py --hassfest`.
+  - Done 2026-11-03: `tank_sensor_temperature` in `DIAGNOSTIC_SENSORS` (diagnostic, temperature, measurement, C,
+    enabled by default, icon `mdi:thermometer`). Its value is `model.tank_sensor`, the converted reading the model
+    stores, rounded to 2 decimals; a new `available_fn` on the description makes it unavailable when that is None.
+    `source_entity` and `sensor_height` (%) are its attributes. It also waits for `TankEstimator.fed`, so a reading
+    restored from the store is not shown before the current states are fed. The estimator already signals on
+    every tank sensor state change, so it needed no change. Tests in `tests/test_entities.py` cover the three
+    scenarios (also unknown, non-numeric and a missing state); the entity counts and units tests are updated.
+    `python scripts/lint.py --hassfest` is clean.
+- [x] 7.2 Document the sensor in the README entity table, with its attributes, and note in `docs/model.md` that it
+  is the model's input. Verify: `python scripts/lint.py`.
+  - Done 2026-11-03: README ("Diagnostic sensors" table, entities list) and `docs/model.md` ("The tank sensor as a
+    measurement"). `python scripts/lint.py` is clean.
+- [x] 7.3 With authorization, deploy and restart from master after the group is merged. Verify through the
+  home-assistant MCP server:
+  - the sensor exists in the diagnostic category;
+  - its value matches the source entity within the source's precision;
+  - its attributes name the source and the height;
+  - the system log has no entries for the integration.
+
+  Record the result in `private/installation.md`.
+  - Done 2026-11-03 at about 21:42, from master at `01542e3`, with the user's authorization. The sensor is
+    diagnostic and enabled, and reads 57.5 C like the source. Its `source_entity` names the source, and
+    `sensor_height` is 58. T_avg was kept (49.43 to 49.42 C), and the system log is clean.
+
 ## Workflow follow-up
 
 - Before starting group 1, archive `add-hot-water-estimator`, so that the modified capabilities exist under

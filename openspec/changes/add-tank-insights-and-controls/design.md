@@ -326,6 +326,26 @@ as the number's `source` attribute, and the way back was the options flow.
   on/off setting, and it can sit on a dashboard next to the number.
 - Leaving it in the options only. Rejected by the user as not transparent.
 
+### D10: The tank sensor temperature diagnostic sensor
+
+The user asked for it on 2026-11-03, for a direct link from the device to the source data.
+- **Value.** It is the tank sensor reading the model receives, after conversion to C, not the raw state. So it is
+  the input the sensor bounds and the charge checks use.
+- **Unavailable with the source.** Showing a held value would hide an outage. The model's own fallback for an
+  unavailable tank sensor stays as it is.
+- **Attributes.** `source_entity` holds the entity ID, which is the link, and `sensor_height` holds the configured
+  height. The reading only means something with its height. The name is not `source`, because elsewhere in this
+  integration `source` says where a value comes from (option, learned or locked). That name was changed after the
+  group 7 review on 2026-11-03.
+- **Diagnostic, enabled by default.** It belongs with the calibration sensors, not on the main card. It records one
+  more temperature in the recorder, which is cheap.
+- **Only the tank sensor.** The other sources stay as they are. Their health is the backlog item
+  `add-source-health-repairs`.
+
+**Alternatives considered:**
+- An attribute on the tank average sensor. Rejected, because an attribute has no history graph of its own and no
+  unit.
+
 ## Risks / Trade-offs
 
 - [The tank sensor reads hot, but the outlet really ran cold, for example with a sensor high in a tank with a very

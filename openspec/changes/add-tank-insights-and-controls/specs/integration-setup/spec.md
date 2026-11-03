@@ -89,7 +89,8 @@ Each tank SHALL provide sensors (state class measurement) for:
 - charged temperature, tank average and cold water temperature (C).
 
 It SHALL also provide a shower detected binary sensor, a "Hot water ran out" button, an "Undo hot water ran out"
-button, a "Shower flow" number (L/min), a "Shower flow locked" switch and the calibration diagnostic sensors.
+button, a "Shower flow" number (L/min), a "Shower flow locked" switch, a "Tank sensor temperature" diagnostic
+sensor and the calibration diagnostic sensors.
 Names SHALL be translated, without emoji. The user-facing names differ from the model's vocabulary where the
 model's terms read wrongly: "tank water" alone does not say that it is hot, and "percent charged" at 100 % beside
 fewer litres than the tank holds reads as an error, while "charge level" compares with the last charge.
@@ -97,7 +98,7 @@ fewer litres than the tank holds reads as an error, while "charge level" compare
 #### Scenario: Units shown
 - **WHEN** the entities are listed
 - **THEN** both remaining sensors are in litres, the charge level in %, the minutes sensor in min, the heat loss in
-  W, the shower flow in L/min, and the three temperatures in degrees Celsius
+  W, the shower flow in L/min, and the three temperatures and the tank sensor temperature in degrees Celsius
 
 #### Scenario: Names shown
 - **WHEN** a new entry titled "Hot Water Tank" is added
@@ -169,6 +170,24 @@ filling while the switch is on.
 #### Scenario: Lock in the options
 - **WHEN** the user turns the shower flow lock on in the options
 - **THEN** the switch is on after the reload
+
+### Requirement: Tank sensor temperature diagnostic sensor
+The "Tank sensor temperature" sensor SHALL be a diagnostic sensor (C, device class temperature, state class
+measurement) that shows the tank sensor reading as the model receives it, in degrees Celsius. It SHALL be
+unavailable while the tank sensor is unavailable or not numeric. Its `source_entity` attribute SHALL give the tank
+sensor's entity ID, and its `sensor_height` attribute the configured sensor height in %.
+
+#### Scenario: Reading shown
+- **WHEN** the tank sensor `sensor.tank_probe` reads 55.8 C and the sensor height is 58 %
+- **THEN** the tank sensor temperature is 55.8 C, with `source_entity` `sensor.tank_probe` and `sensor_height` 58
+
+#### Scenario: Reading in Fahrenheit
+- **WHEN** the tank sensor reads 132.8 F
+- **THEN** the tank sensor temperature is 56.0 C
+
+#### Scenario: Source unavailable
+- **WHEN** the tank sensor becomes unavailable
+- **THEN** the tank sensor temperature is unavailable, while the tank average keeps its value
 
 ### Requirement: Heat loss sensor
 The "Heat loss" sensor SHALL show the standing heat loss of the tank in W as `k * C * (T_avg - T_ambient) * 1000`,

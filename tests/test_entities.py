@@ -8,6 +8,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.hot_water_tank_estimator.const import (
     CONF_AMBIENT_SENSOR,
     CONF_HUMIDITY_SENSORS,
+    CONF_SENSOR_HEIGHT,
     DOMAIN,
     STORAGE_VERSION,
 )
@@ -41,6 +42,7 @@ SENSORS = {
     "tank_average": ("°C", "temperature", "measurement"),
     "cold_water_temperature": ("°C", "temperature", "measurement"),
     "heat_loss": ("W", "power", "measurement"),
+    "tank_sensor_temperature": ("°C", "temperature", "measurement"),
 }
 PARAMETER_SENSORS = {
     "other_hot_share": None,
@@ -101,6 +103,71 @@ async def test_standing_loss_of_a_charged_tank(hass: HomeAssistant) -> None:
     assert value(hass, entry, "sensor", "heat_loss") == "0"
 
 
+async def test_the_tank_sensor_temperature_shows_the_reading(
+    hass: HomeAssistant,
+) -> None:
+    """A tank sensor at 55.8 C and height 58 %: the sensor shows 55.8 with its source and height."""
+    set_sources(hass, **{TANK: "55.8"})
+    entry = await setup_entry(hass, {**FULL_OPTIONS, CONF_SENSOR_HEIGHT: 58.0})
+    eid = entity_id(hass, entry, "sensor", "tank_sensor_temperature")
+    assert er.async_get(hass).async_get(eid).entity_category is (
+        er.EntityCategory.DIAGNOSTIC
+    )
+    assert er.async_get(hass).async_get(eid).disabled_by is None
+    state = hass.states.get(eid)
+    assert state is not None
+    assert state.state == "55.8"
+    assert state.attributes["source_entity"] == TANK
+    assert state.attributes["sensor_height"] == 58
+    assert state.attributes["friendly_name"] == "Hot water Tank sensor temperature"
+    # It follows the source at once.
+    hass.states.async_set(TANK, "54.2", ATTRIBUTES[TANK])
+    await hass.async_block_till_done()
+    assert hass.states.get(eid).state == "54.2"
+
+
+async def test_the_tank_sensor_temperature_is_in_celsius(
+    hass: HomeAssistant,
+) -> None:
+    """A tank sensor reading 132.8 F shows as 56.0 C."""
+    set_sources(hass)
+    hass.states.async_set(
+        TANK, "132.8", {"unit_of_measurement": "°F", "device_class": "temperature"}
+    )
+    entry = await setup_entry(hass)
+    assert value(hass, entry, "sensor", "tank_sensor_temperature") == "56.0"
+
+
+@pytest.mark.parametrize("text", ["unavailable", "unknown", "warm"])
+async def test_the_tank_sensor_temperature_is_unavailable_with_the_source(
+    hass: HomeAssistant, text: str
+) -> None:
+    """The tank sensor becoming unavailable (unknown, not numeric) leaves the tank average as it is."""
+    set_sources(hass)
+    entry = await setup_entry(hass)
+    average = value(hass, entry, "sensor", "tank_average")
+    assert value(hass, entry, "sensor", "tank_sensor_temperature") == "55.0"
+    hass.states.async_set(TANK, text, ATTRIBUTES[TANK])
+    await hass.async_block_till_done()
+    assert value(hass, entry, "sensor", "tank_sensor_temperature") == "unavailable"
+    assert value(hass, entry, "sensor", "tank_average") == average
+    hass.states.async_set(TANK, "53.0", ATTRIBUTES[TANK])
+    await hass.async_block_till_done()
+    assert value(hass, entry, "sensor", "tank_sensor_temperature") == "53.0"
+
+
+async def test_the_tank_sensor_temperature_is_unavailable_without_a_source_state(
+    hass: HomeAssistant,
+) -> None:
+    """A tank sensor with no state (removed, or not there yet) leaves the sensor unavailable."""
+    set_sources(hass)
+    entry = await setup_entry(hass)
+    assert value(hass, entry, "sensor", "tank_sensor_temperature") == "55.0"
+    hass.states.async_remove(TANK)
+    await hass.async_block_till_done()
+    assert value(hass, entry, "sensor", "tank_sensor_temperature") == "unavailable"
+
+
 async def test_diagnostic_sensors_and_their_source(hass: HomeAssistant) -> None:
     """The calibration sensors are diagnostic, and each parameter shows its source."""
     set_sources(hass)
@@ -139,7 +206,7 @@ async def test_every_entity_is_on_one_device_with_a_translated_name(
     assert len(devices) == 1
     assert devices[0].name == TITLE
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
-    assert len(entities) == 8 + 8 + 1 + 1 + 1 + 1 + 1
+    assert len(entities) == 8 + 9 + 1 + 1 + 1 + 1 + 1
     assert {e.device_id for e in entities} == {devices[0].id}
     state = hass.states.get(entity_id(hass, entry, "sensor", "tank_litres"))
     assert state is not None

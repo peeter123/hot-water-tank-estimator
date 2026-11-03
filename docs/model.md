@@ -177,6 +177,10 @@ diagnostic one, because it answers what keeping the tank hot costs. On the devel
 
 ## The tank sensor as a measurement
 
+The "Tank sensor temperature" diagnostic sensor shows `t_s` as the model receives it, in C after any unit conversion.
+It is unavailable while the tank sensor is. The model does not hold the last reading then: it drops it, the sensor
+bounds and the rise to the sensor while heating pause, and the estimate runs on from the meter and the heat input.
+
 The sensor sits at height `h` (configurable 20-80 %, default 50 %), because outside that range it would see only one
 layer for most of the cycle. `h` is the share of the water volume below the sensor, not of the outer height of the
 tank: the water column starts above the floor (base, bottom insulation, dished bottom). On a tank whose sensor sleeve

@@ -24,7 +24,7 @@ It provides:
 - the cold water temperature used;
 - the standing heat loss of the tank, in W;
 - a shower detected binary sensor, a "Hot water ran out" button and an "Undo hot water ran out" button;
-- calibration diagnostics.
+- calibration diagnostics, and the tank sensor temperature the model works from.
 
 ## What it is for
 
@@ -161,7 +161,7 @@ Each tank has one device with these entities. All names are translated.
 | Shower flow | L/min | Number, 3-20. The flow that turns shower water into minutes: the median of your last 10 showers, 7.5 L/min until the first one. Setting it turns the Shower flow locked switch on. Attributes: `source` (default, learned or locked), and `low` and `high` (the lowest and highest flow of the last showers). See "Tuning". |
 | Shower flow locked | | Switch, in the configuration category. On when the shower flow is locked: it is the same lock as in the options, so the switch, the Shower flow number and the options always agree. Turning it on locks the flow in use now. Turning it off returns the flow to the median of your last showers, or to the starting value (7.5 L/min, or one an older version kept in the options) while there are none. See "Tuning". |
 
-The calibration diagnostic sensors are listed under "Diagnostic sensors" below.
+The calibration diagnostic sensors and the Tank sensor temperature are listed under "Diagnostic sensors" below.
 
 ## Why the hot water remaining is less than the tank volume
 
@@ -234,6 +234,7 @@ These sensors have the diagnostic category, so they are hidden from dashboards b
 | Calibration samples | | The number of valid heating runs (closures) in the fit. Sensor starts and excluded runs are not counted. The first heating run after adding an entry is a sensor start, so it does not raise the count. |
 | Last charge error | K | The error of the model at the start of the last run. |
 | Mean charge error | K | The mean absolute error over the last 10 runs. |
+| Tank sensor temperature | C | The reading of the tank sensor as the model receives it (stored in C; Home Assistant shows your unit system): the input behind the bounds and the charge checks. It is unavailable while the tank sensor is unavailable, unknown or not a number. Attributes: `source_entity` (the tank sensor's entity ID) and `sensor_height` (the configured sensor height, in %). |
 
 A mean charge error that rises, or errors that keep one sign, point to a wrong sensor height or a changed
 household. Check the sensor height first. Download the diagnostics of the entry to see the options, the state,

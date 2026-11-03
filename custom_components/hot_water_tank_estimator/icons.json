@@ -64,6 +64,9 @@
       },
       "heat_loss": {
         "default": "mdi:radiator"
+      },
+      "tank_sensor_temperature": {
+        "default": "mdi:thermometer"
       }
     },
     "number": {

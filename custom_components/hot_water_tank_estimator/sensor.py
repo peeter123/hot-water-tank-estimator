@@ -33,6 +33,7 @@ from .calibration import (
 )
 from .entity import TankEntity
 from .estimator import TankConfigEntry, TankEstimator
+from .setup_fit import TANK_TEMPERATURE
 
 PARALLEL_UPDATES = 0
 
@@ -46,6 +47,9 @@ class TankSensorDescription(SensorEntityDescription):
         None  # the learned parameter shown, for the source attribute
     )
     attributes_fn: Callable[[TankEstimator], dict[str, Any]] | None = None
+    available_fn: Callable[[TankEstimator], bool] | None = (
+        None  # unavailable while this is False
+    )
 
 
 def _heat_loss(estimator: TankEstimator) -> int:
@@ -66,6 +70,20 @@ def _shower_time_attributes(estimator: TankEstimator) -> dict[str, Any]:
         "flow_basis": shower.basis,
         "minutes_low": shower.low,
         "minutes_high": shower.high,
+    }
+
+
+def _tank_sensor_attributes(estimator: TankEstimator) -> dict[str, Any]:
+    """Return the tank sensor's entity ID and the configured sensor height in %."""
+    config = estimator.config
+    source = next(
+        entity_id
+        for entity_id, roles in config.routes.items()
+        if TANK_TEMPERATURE in roles
+    )
+    return {
+        "source_entity": source,
+        "sensor_height": round(config.options.sensor_height * 100, 1),
     }
 
 
@@ -202,6 +220,20 @@ DIAGNOSTIC_SENSORS: tuple[TankSensorDescription, ...] = (
         value_fn=lambda e: _percent(e, USABLE_FRACTION),
     ),
     TankSensorDescription(
+        key="tank_sensor_temperature",
+        translation_key="tank_sensor_temperature",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        value_fn=lambda e: (
+            None if (reading := e.model.tank_sensor) is None else round(reading, 2)
+        ),
+        attributes_fn=_tank_sensor_attributes,
+        available_fn=lambda e: e.fed and e.model.tank_sensor is not None,
+    ),
+    TankSensorDescription(
         key="calibration_samples",
         translation_key="calibration_samples",
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -266,6 +298,12 @@ class TankSensor(TankEntity, SensorEntity):
     def native_value(self) -> float | int | None:
         """Return the value."""
         return self.entity_description.value_fn(self.estimator)
+
+    @property
+    def available(self) -> bool:
+        """Return whether the sensor has a value: a reading-based sensor follows its source."""
+        check = self.entity_description.available_fn
+        return check is None or check(self.estimator)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:

@@ -329,6 +329,17 @@
       },
       "heat_loss": {
         "name": "Heat loss"
+      },
+      "tank_sensor_temperature": {
+        "name": "Tank sensor temperature",
+        "state_attributes": {
+          "source_entity": {
+            "name": "Source entity"
+          },
+          "sensor_height": {
+            "name": "Sensor height"
+          }
+        }
       }
     },
     "binary_sensor": {

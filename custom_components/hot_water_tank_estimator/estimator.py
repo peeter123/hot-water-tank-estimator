@@ -245,6 +245,8 @@ class TankEstimator:
         self._ambient_fitted: str | None = None
         self.model_restored = False
         self._stopped = False
+        # True once the current states of the sources have been fed to the model.
+        self.fed = False
         self._save_pending = False
         self._fit_lock = asyncio.Lock()
         # Counts the button presses and manual resets, so a fit that was running while one
@@ -354,6 +356,7 @@ class TankEstimator:
         events: list[ModelEvent] = []
         for entity_id in self.config.routes:
             events += self._feed(entity_id, self.hass.states.get(entity_id), now)
+        self.fed = True
         self._finish(events, now)
         self._unsubscribe.append(
             async_track_state_change_event(
