@@ -41,7 +41,7 @@ configured other-draws hot share (0-1). It covers hot taps among cold toilet flu
 ### Requirement: Heat from an energy counter raises the tank average
 When a thermal energy counter is configured, each increase of dE kWh during a heating run SHALL raise T_avg by
 `dE * 1000 / (1.163 * V)` kelvin, after the configured start-up energy of that run has been used up. While heating,
-T_ch SHALL be at least T_avg, because a heating run circulates the tank.
+T_ch SHALL be at least T_avg, because a heating run mixes the tank above the heat source.
 
 #### Scenario: Energy counter step
 - **WHEN** the counter rises by 3.27 kWh on a 281 L tank at 40 C, with the start-up energy already used up
@@ -70,7 +70,7 @@ The first of these that is configured decides. While it is unavailable, heating 
 has been unavailable for 15 minutes, the next configured one decides until it returns.
 
 A heating run SHALL end when heating stops counting as active. When the counter timeout ends it, the run SHALL end
-at the last counter increase, because circulation stopped then. Draws and standing loss between that end and the
+at the last counter increase, because heat input stopped then. Draws and standing loss between that end and the
 moment it is found SHALL be applied to the charged tank, and they belong to the interval that starts at the end.
 
 #### Scenario: Binary sensor drives the run

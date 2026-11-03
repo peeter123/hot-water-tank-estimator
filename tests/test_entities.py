@@ -104,7 +104,7 @@ async def test_every_entity_is_on_one_device_with_a_translated_name(
     assert {e.device_id for e in entities} == {devices[0].id}
     state = hass.states.get(entity_id(hass, entry, "sensor", "tank_litres"))
     assert state is not None
-    assert state.attributes["friendly_name"] == "Hot water Tank water remaining"
+    assert state.attributes["friendly_name"] == "Hot water Hot water remaining"
     button = hass.states.get(entity_id(hass, entry, "button", "shower_ran_cold"))
     assert button is not None
     assert button.attributes["friendly_name"] == "Hot water Shower ran cold"
@@ -245,3 +245,44 @@ async def test_the_humidity_option_is_optional(hass: HomeAssistant) -> None:
     entry = await setup_entry(hass, {**FULL_OPTIONS, CONF_HUMIDITY_SENSORS: []})
     assert entry.runtime_data.config.sources.humidity_sensors == ()
     assert entry.domain == DOMAIN
+
+
+async def test_names_shown(hass: HomeAssistant) -> None:
+    """A new entry titled "Hot Water Tank" gets the new names and entity IDs."""
+    set_sources(hass)
+    entry = await setup_entry(hass, title="Hot Water Tank")
+    remaining = hass.states.get("sensor.hot_water_tank_hot_water_remaining")
+    assert remaining is not None
+    assert remaining.attributes["friendly_name"] == "Hot Water Tank Hot water remaining"
+    level = hass.states.get("sensor.hot_water_tank_charge_level")
+    assert level is not None
+    assert level.attributes["friendly_name"] == "Hot Water Tank Charge level"
+    assert entry.title == "Hot Water Tank"
+
+
+async def test_unique_ids_unchanged(hass: HomeAssistant) -> None:
+    """Entities registered under the old entity IDs keep them, and show the new names."""
+    set_sources(hass)
+    entry = MockConfigEntry(domain=DOMAIN, title="Hot Water Tank", options=FULL_OPTIONS)
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    for key, old_id in (
+        ("tank_litres", "hot_water_tank_tank_water_remaining"),
+        ("percent_charged", "hot_water_tank_percent_charged"),
+    ):
+        registry.async_get_or_create(
+            "sensor",
+            DOMAIN,
+            f"{entry.entry_id}_{key}",
+            config_entry=entry,
+            suggested_object_id=old_id,
+        )
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    remaining = hass.states.get("sensor.hot_water_tank_tank_water_remaining")
+    assert remaining is not None
+    assert remaining.attributes["friendly_name"] == "Hot Water Tank Hot water remaining"
+    level = hass.states.get("sensor.hot_water_tank_percent_charged")
+    assert level is not None
+    assert level.attributes["friendly_name"] == "Hot Water Tank Charge level"
+    assert hass.states.get("sensor.hot_water_tank_hot_water_remaining") is None

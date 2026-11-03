@@ -24,9 +24,11 @@ only in the git-ignored `private/` folder.
 
 ## Vocabulary
 
-- **Charged:** the state at the end of a heating run. The run has circulated the whole tank, so all of it sits at
-  the **charged temperature**: the mean of the heater's flow and return temperature just before the run ends (the
-  tank sensor if those are not configured). This holds whether or not the run reached the setpoint.
+- **Charged:** the state at the end of a heating run. The run has mixed the tank above the heat source (by
+  circulation, or by convection above a coil low in the tank), so the model counts all of it at the **charged
+  temperature**: the mean of the heater's flow and return temperature just before the run ends (the tank sensor if
+  those are not configured). This holds whether or not the run reached the setpoint. The colder water below a low
+  coil is carried by the start-up energy (energy) and the usable fraction (litres).
 - **Tank water litres:** litres of tank water at the charged temperature that can still be drawn before the outlet
   runs cold.
 - **Shower litres:** litres of mixed water at the shower mix temperature that the tank water still makes, after

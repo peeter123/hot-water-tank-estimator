@@ -14,13 +14,13 @@
       }
     },
     "sensor": {
-      "tank_litres": {
+      "hot_water_remaining": {
         "default": "mdi:water-boiler"
       },
       "shower_litres": {
         "default": "mdi:shower-head"
       },
-      "percent_charged": {
+      "charge_level": {
         "default": "mdi:battery-charging-medium"
       },
       "shower_minutes": {

@@ -46,7 +46,7 @@ class TankSensorDescription(SensorEntityDescription):
 ESTIMATE_SENSORS: tuple[TankSensorDescription, ...] = (
     TankSensorDescription(
         key="tank_litres",
-        translation_key="tank_litres",
+        translation_key="hot_water_remaining",
         device_class=SensorDeviceClass.VOLUME_STORAGE,
         native_unit_of_measurement=UnitOfVolume.LITERS,
         state_class=SensorStateClass.MEASUREMENT,
@@ -64,7 +64,7 @@ ESTIMATE_SENSORS: tuple[TankSensorDescription, ...] = (
     ),
     TankSensorDescription(
         key="percent_charged",
-        translation_key="percent_charged",
+        translation_key="charge_level",
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=0,
@@ -223,7 +223,7 @@ class TankSensor(TankEntity, SensorEntity):
         self, estimator: TankEstimator, description: TankSensorDescription
     ) -> None:
         """Create the sensor."""
-        super().__init__(estimator, description.key)
+        super().__init__(estimator, description.key, description.translation_key)
         self.entity_description = description
 
     @property

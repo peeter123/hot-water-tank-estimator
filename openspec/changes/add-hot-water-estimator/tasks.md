@@ -47,7 +47,7 @@ Applies to every group:
   exempt (with a reason), per `docs/development.md`. hassfest does not validate this file for custom integrations,
   so add `tests/test_quality_scale.py` with a copy of hassfest's rule list (and the date it was copied). Verify:
   the test checks that the file has exactly those rules, each `done`, `todo`, or `exempt` with a comment, and it
-  passes. hassfest itself runs in CI from 7.3.
+  passes. hassfest itself runs in CI from 8.3.
 
 - [x] 1.7 Remote test runner, added on 2026-10-31 at the user's request instead of WSL, which conflicts with VMware on
   the development PC. Native Windows cannot load Home Assistant's test plugin.
@@ -62,7 +62,7 @@ Applies to every group:
   - The runner's address and key path come from a git-ignored file in `private/`, so no hostname enters a tracked
     file.
   - `scripts/lint.py` and the edit hook use the runner when it is configured, and fall back to the native
-    run otherwise. `python scripts/lint.py --hassfest` also runs hassfest on the runner, until CI (7.3) runs it.
+    run otherwise. `python scripts/lint.py --hassfest` also runs hassfest on the runner, until CI (8.3) runs it.
   - Concurrent runs, such as an edit hook during a review's lint, each sync into their own folder on the runner.
   - `docs/development.md` describes the setup.
 
@@ -239,7 +239,7 @@ Applies to every group:
   a diagnostics test checks the keys.
 - [x] 5.9 Write `strings.json` and `translations/en.json` (plain text), and the README sections on configuration,
   options, entities, calibration and the diagnostic sensors. Verify: every config and options field and every
-  entity appears in the README, and hassfest passes locally (`uvx` or the Docker image) or in CI once 7.3 exists.
+  entity appears in the README, and hassfest passes locally (`uvx` or the Docker image) or in CI once 8.3 exists.
 
 ## 6. Rollout on the development installation (each task needs the user's authorization)
 
@@ -286,9 +286,71 @@ Applies to every group:
 - [x] 6.5 Add stock-card dashboard example YAML to the README, with made-up entity IDs. Verify: the example uses
   only core cards and `hot_water_tank_estimator` entity names.
 
-## 7. Packaging and release
+## 7. Entity names, integration type and icon (the user's review of the live rollout, 2026-11-03)
 
-- [ ] 7.1 Complete the README:
+The user reviewed the live entry on 2026-11-03 and chose to fix these before the release. The new sensors and
+controls they asked for go to the follow-up change `add-tank-insights-and-controls` (proposal, Out of scope).
+
+- [x] 7.1 Set `integration_type` to `device` in the manifest (packaging spec), so that each entry is listed on the
+  Integrations page with its tank device instead of under Helpers. Update `tests/test_manifest.py`. Verify: the test
+  and hassfest pass.
+- [x] 7.2 Rename the user-facing names of two sensors (integration-setup spec, "Entities and units"):
+  - tank water remaining becomes "Hot water remaining";
+  - percent charged becomes "Charge level".
+
+  Rename the translation keys too, so that a new entry gets `sensor.<tank>_hot_water_remaining` and
+  `sensor.<tank>_charge_level`. Existing entries keep their entity IDs, because the unique IDs do not change.
+  Update `strings.json`, `translations/en.json`, the README (entity table, dashboard example) and the output names in
+  `docs/model.md`, keeping the model's terms where the formulas are explained. Verify: a test for the scenario
+  "Names shown", a test that the unique IDs are unchanged, and lint.
+- [x] 7.3 Add brand images in `custom_components/hot_water_tank_estimator/brand/` (packaging spec, "Own brand
+  images"):
+  - `icon.png` 256x256 and `icon@2x.png` 512x512: flat, no text, transparent background. Draw three alternatives
+    and show them to the user to pick from before finishing (the user's request, 2026-11-03):
+    - A, plain: a tank with a hot layer over a cold layer;
+    - B, MDI: the Material Design Icons `water-boiler` glyph combined with `heat-wave` (or the top part of
+      `radiator`) as the heat;
+    - C, hybrid: a tank showing the hot and cold layers, with the heat wave or radiator top above or around it;
+    - The user picked C on 2026-11-03, with more detail in the style of a water heater line icon: a temperature
+      gauge on the tank, the inlet and outlet pipes below it, and the smaller heat waves from the top of the MDI
+      `radiator` glyph instead of `heat-wave`. After the second preview the user asked for the pipes of the MDI
+      `water-boiler` glyph, and for the pipes and the gauge face in the tank's grey rim colour. After the third
+      preview: the same margin above the heat waves as below the pipe feet, and the needle in the gauge ring's
+      colour; with those changes the drawing is final;
+    - Group 7 review, 2026-11-03: Apache 2.0 section 4 asks for a copy of the licence with redistributed work, so
+      the full licence text ships as `LICENSE-MDI` in the repository root, and the README and the script point to
+      it;
+  - only the picked alternative is kept in `brand/`, and the script keeps the code for it alone;
+  - `logo.png` and `logo@2x.png` of the same drawing;
+  - dark variants only if the plain image does not work on a dark background.
+
+  The MDI glyphs are under the Apache 2.0 licence: take the SVG paths from the Pictogrammers `@mdi/svg` release, and
+  if the picked alternative uses them, credit them with the licence in the README and next to the script. Make the
+  images with a script in `scripts/` (for example `svg.path` plus Pillow with supersampling, through
+  `uv run --with`), so they can be redrawn. Mark the `brands` rule in `quality_scale.yaml` done, and check that
+  `hacs.json` names 2026.3 or later. Verify: the files exist with these sizes, and hassfest passes.
+- [x] 7.4 Document the user's questions in the README and `docs/model.md`:
+  - why hot water remaining is less than the tank's volume right after a charge (the usable fraction: the mixed layer
+    and the water below a low coil cannot be drawn hot), and what the charge level compares with;
+  - that a coil low in the tank is supported, and a coil or element high up, or a second heat source such as an
+    electric element, is not yet (design Risks).
+
+  Verify: lint.
+- [x] 7.5 With authorization: deploy and restart, then rename the live dashboard's tiles "Tank water" and
+  "Charged" to "Hot water" and "Charge level" with a targeted dashboard transform. Verify through the
+  home-assistant MCP server:
+  - the entry is listed with its device and its icon (the brands proxy returns the local icon);
+  - the live entity IDs are unchanged and their friendly names show the new names;
+  - the dashboard search finds the renamed tiles.
+
+  Record the result in `private/installation.md`.
+  - Done 2026-11-03 with the user's authorization. The listing itself is checked through the API (one device with
+    its 17 entities, the deployed manifest's `integration_type`, the brands proxy serving the local images), not by
+    viewing the Integrations page.
+
+## 8. Packaging and release
+
+- [ ] 8.1 Complete the README:
   - purpose and requirements;
   - HACS and manual install;
   - finding the sensor height;
@@ -300,14 +362,14 @@ Applies to every group:
   - limitations (from design Risks).
 
   Verify: every README requirement in the packaging spec has its section.
-- [ ] 7.2 Bring `quality_scale.yaml` up to date: every applicable Bronze and Silver rule, plus the Gold rules in
+- [ ] 8.2 Bring `quality_scale.yaml` up to date: every applicable Bronze and Silver rule, plus the Gold rules in
   the packaging spec, marked done with the code that meets them. Settle the `brands` rule and the minimum Home
   Assistant version in `hacs.json`. Verify: no applicable Bronze or Silver rule is todo,
   `tests/test_quality_scale.py` passes, and hassfest passes.
-- [ ] 7.3 Add GitHub Actions: `validate.yml` (hassfest and the HACS action) and `lint.yml` (`python scripts/lint.py`
+- [ ] 8.3 Add GitHub Actions: `validate.yml` (hassfest and the HACS action) and `lint.yml` (`python scripts/lint.py`
   with uv set up) on push and pull request. Verify: the workflow files pass `uvx check-jsonschema` against the
   GitHub workflow schema.
-- [ ] 7.4 **User review.** Ask the user to authorize creating the GitHub repository, pushing, tagging `v0.1.0` and
+- [ ] 8.4 **User review.** Ask the user to authorize creating the GitHub repository, pushing, tagging `v0.1.0` and
   publishing a release. Record the decision with its date. With authorization: set the manifest version to 0.1.0,
   push, tag and release. Verify: the workflows pass on GitHub, and HACS on the development installation shows
   version 0.1.0 when the repository is added as a custom repository.

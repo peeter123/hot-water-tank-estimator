@@ -33,9 +33,10 @@ sensor's known height turns its reading into a measurement of how far the cold l
 - Shower and bath detection from a rise in bathroom humidity. Litres drawn just before detection are reclassified.
   An optional long-draw rule covers homes without a humidity sensor.
 - Sensors:
-  - tank water remaining (L), litres of tank water at the charged temperature that can still be drawn;
+  - hot water remaining (L), litres of tank water at the charged temperature that can still be drawn (the model's
+    "tank water remaining");
   - shower water remaining (L), the litres of mixed water at the shower mix temperature those make;
-  - percent charged;
+  - charge level, the model's percent charged against the last charge;
   - shower minutes left;
   - charged temperature;
   - estimated tank average temperature;
@@ -124,9 +125,18 @@ No existing entity, automation or card changes behaviour.
   wrong height as a steady bias. Follow-up if needed: `add-sensor-height-learning`.
 - **Learning the usable fraction without user feedback**, for example from a drop in shower flow or bathroom
   temperature. Follow-up: `add-cold-shower-detection`.
-- **More than one tank sensor**, or a temperature probe on the hot outlet, and **tanks heated by an internal coil
-  without circulation**, where charging does not mix the tank. Follow-up: `add-multi-sensor-tanks`.
+- **More than one tank sensor**, or a temperature probe on the hot outlet, and **tanks heated high up** (a coil or
+  element in the upper part), where charging does not mix the water below the heat source. A coil low in the tank
+  is in scope: convection mixes the water above it. Follow-up: `add-multi-sensor-tanks`.
 - **A Lovelace card.** The README shows stock cards.
+- **Further sensors and controls from the user's review of the live rollout (2026-11-03).** Follow-up change
+  `add-tank-insights-and-controls`:
+  - a standing heat loss sensor in W (`k * C * (T_avg - T_ambient)`);
+  - an optional ambient temperature sensor instead of the fixed ambient temperature, for loss and its learning;
+  - recovery from a "Shower ran cold" press made by mistake: an undo for a limited time, and a guard that ignores a
+    press without a recent shower;
+  - the shower flow learned from detected showers, with a number entity to override it;
+  - an electric heating element in the tank as a second heat source, which heats only the water above it.
 
 ## Impact
 

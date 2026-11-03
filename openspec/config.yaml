@@ -9,10 +9,12 @@ context: |
   that stops reheating. It is meant to be published on GitHub for others to install, so every source entity, volume
   and tuning value comes from the config flow; nothing about one installation is hard-coded.
 
-  Vocabulary: a tank is "charged" when a heating run ends. The run has circulated the whole tank, so all of it sits
-  at the charged temperature, the mean of the heater's flow and return temperature at the end of the run, whether
-  or not that reaches the setpoint. Shower water is mixed: the house water meter counts the hot and the cold water
-  that a thermostatic mixer combines, so the model works with energy, never with "litres counted as hot".
+  Vocabulary: a tank is "charged" when a heating run ends. The run has mixed the tank above the heat source (by
+  circulation, or by convection above a coil low in the tank), so the model counts all of it at the charged
+  temperature, the mean of the heater's flow and return temperature at the end of the run, whether or not that
+  reaches the setpoint. The colder water below a low coil is carried by the start-up energy and the usable
+  fraction. Shower water is mixed: the house water meter counts the hot and the cold water that a thermostatic
+  mixer combines, so the model works with energy, never with "litres counted as hot".
 
   Layout: this folder is its own git repo. Code in custom_components/hot_water_tank_estimator/ (model.py has no
   Home Assistant imports), tests in tests/, tools in scripts/, public docs in docs/ (docs/README.md is the entry

@@ -20,7 +20,7 @@ def test_manifest_fields() -> None:
     assert manifest["issue_tracker"] == f"{REPOSITORY_URL}/issues"
     assert manifest["codeowners"]
     assert manifest["config_flow"] is True
-    assert manifest["integration_type"] == "helper"
+    assert manifest["integration_type"] == "device"
     assert manifest["iot_class"] == "calculated"
     assert manifest["requirements"] == []
 

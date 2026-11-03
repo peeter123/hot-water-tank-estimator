@@ -78,7 +78,7 @@ Energy counter: each increase of `dE` kWh during a heating run raises the averag
 dt_avg = dE * 1000 / (1.163 * V)      K
 ```
 
-and `t_ch = max(t_ch, t_avg)`, because a heating run circulates the tank.
+and `t_ch = max(t_ch, t_avg)`, because a heating run mixes the tank above the heat source.
 
 Power sensor: `dE = P * dt` with `P` in W and `dt` in hours (a left Riemann sum: the previous reading holds until the
 next one), applied with the same rule. A gap where the power was unavailable counts as no energy. If both a counter and
@@ -106,8 +106,10 @@ heating is active and the sensor is higher, because a heating tank's sensor even
 
 ## Charging at the end of a run
 
-At the end of a heating run the heater has circulated the whole tank, so it is evenly mixed, whether or not it reached
-the setpoint:
+At the end of a heating run the tank above the heat source is evenly mixed, whether or not the run reached the
+setpoint. An external circuit circulates the tank and its return is tank-bottom water. A coil low in the tank mixes
+the tank above it by convection, and its return is the coil's outlet. The model counts the whole tank at `t_charge`
+by convention:
 
 ```text
 t_avg = t_ch = t_charge
@@ -115,8 +117,9 @@ t_avg = t_ch = t_charge
 
 - `t_charge` is the highest mean of the heater's flow and return temperature over the 2 minutes before the run ended
   (for a run ended by the counter timeout, before its last counter increase).
-  The return is water taken from the tank bottom, so it shows the whole tank. Flow and return start falling up to 40
-  seconds before a demand sensor turns off, which is why the highest mean is used and not the last reading.
+  With an external circuit the return is water taken from the tank bottom, so it shows the whole tank; with a coil
+  it is the coil's outlet. Flow and return start falling up to 40 seconds before a demand sensor turns off, which is
+  why the highest mean is used and not the last reading.
 - Without flow and return sensors, or when their readings are unavailable, `t_charge` is the tank sensor reading. It
   agreed with the flow and return mean within 1.3 K on the development installation, but the heater's own
   temperatures do not depend on where the sensor sits.
@@ -194,19 +197,26 @@ other rules at its ends. When neither is limited, `f_s = h + w / 2 - s * w`.
 
 | Output | Formula | Unit |
 |---|---|---|
-| Tank water | `max(0, V * (u - f))` | L, whole litres |
+| Tank water (shown as hot water remaining) | `max(0, V * (u - f))` | L, whole litres |
 | Shower water | tank water `* (t_ch - t_cold) / (t_mix - t_cold)`; equal to tank water when `t_ch <= t_mix` | L, whole litres |
-| Percent charged | `(u - f) / u * 100`, limited to 0-100 | %, whole percent |
+| Percent charged (shown as charge level) | `(u - f) / u * 100`, limited to 0-100 | %, whole percent |
 | Shower minutes | shower water / shower flow | min, whole minutes |
 
 - `u` is the usable fraction: the cold fraction at which the outlet runs cold. It covers the thermocline and the
   outlet position. The default 0.85 is just above a drain that was still warm at about 0.78, and below 1, the limit
   of an ideal tank. A tank with a worse thermocline runs cold earlier, so users lower `u` after a shower that ran
   cold.
+- Right after a charge `f` is 0, so tank water is `V * u`, less than the tank volume `V`. The unusable `1 - u`
+  covers the lukewarm layer that cold inflow mixes at the bottom during draws and, for a coil low in the tank, the
+  colder water below the coil, which cannot be drawn hot. The energy that this colder water lacks is not in `u`: the
+  start-up energy that the closures learn carries it.
 - Shower water is the energy identity of the mixed draw read backwards. It uses the unrounded tank water, and shower
   minutes use the unrounded shower water.
 - Percent charged is 100 % right after any charge. Charged is by convention whatever the heater reached, so percent
   compares with the last charge, not with the setpoint. The litres show the absolute amount.
+- A coil low in the tank is supported: the colder water below it is carried as litres by `u` and as energy by the
+  start-up energy. A coil or element high up in the tank, or a second heat source such as an electric element, is not
+  supported yet: the charged state assumes that the run heats the whole tank from one heater.
 - The default shower flow 7.5 L/min is a round value near the median flow of single showers (about 7.3 L/min;
   6.2-10.0 L/min for single showers). The default mix
   temperature 38 C is a common thermostatic setting.
@@ -280,7 +290,7 @@ since the previous charge, the three terms that change `t_avg`: `loss` (the sum 
 K*h), `other` (the sum of `dV * (t_ch - t_cold) / V` over other draws, in K, for a share of 1) and `mixed` (the
 mixed-draw drops, in K). So learning measures the balance and not the corrections.
 
-At the end of a run the tank is evenly mixed at `t_charge`, so the true average at the start of the run follows from
+At the end of a run the model counts the tank at `t_charge`, so the true average at the start of the run follows from
 the run's energy `E_run` (kWh), the start-up energy `S` and the draws and loss during the run. With
 `C = 1.163 * V / 1000` kWh/K:
 

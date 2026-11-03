@@ -50,6 +50,9 @@ python scripts/remote_test.py shell "cmd; cmd" # the string runs in the remote s
 python scripts/lint.py --hassfest              # lint plus hassfest on the runner
 ```
 
+`scripts/brand.py` draws the images in `brand/` from the MDI `radiator` and `water-boiler` glyphs; run it with
+`uv run --with svg.path==7.1 --with pillow==13.0.0 scripts/brand.py <mdi-svg-folder>` (usage in its docstring).
+
 Rebuild the container (`docker compose up -d --build`) after a change to `requirements_test.txt` or the
 Dockerfile.
 
@@ -140,8 +143,8 @@ core integrations:
 Home Assistant's Integration Quality Scale is the checklist for integration code. The integration keeps a
 `quality_scale.yaml` with the status of each rule (`done`, `todo` or `exempt` with a comment). hassfest does
 not validate this file for custom integrations, so `tests/test_quality_scale.py` checks it against a copy of
-hassfest's rule list. The target for the first release is Silver, plus these Gold rules that apply to a calculated
-helper:
+hassfest's rule list. The target for the first release is Silver, plus these Gold rules that apply to this
+integration:
 - diagnostics;
 - entity translations and icon translations;
 - entity categories and device classes;

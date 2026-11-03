@@ -15,15 +15,22 @@ class TankEntity(Entity):
     _attr_has_entity_name = True
     _attr_should_poll = False
 
-    def __init__(self, estimator: TankEstimator, key: str) -> None:
+    def __init__(
+        self,
+        estimator: TankEstimator,
+        key: str,
+        translation_key: str | None = None,
+    ) -> None:
         """Create the entity.
 
         Args:
             estimator: The estimator of the tank.
-            key: The translation key, also the unique ID suffix.
+            key: The unique ID suffix. It never changes, so that existing entries
+                keep their unique IDs and entity IDs.
+            translation_key: The translation key; the key when not given.
         """
         self.estimator = estimator
-        self._attr_translation_key = key
+        self._attr_translation_key = translation_key or key
         self._attr_unique_id = f"{estimator.entry.entry_id}_{key}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, estimator.entry.entry_id)},

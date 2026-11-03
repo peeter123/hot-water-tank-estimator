@@ -12,11 +12,22 @@ The repository SHALL be installable as a HACS custom repository of type integrat
 - a `hacs.json` with the display name;
 - the integration in `custom_components/hot_water_tank_estimator/`;
 - a manifest with domain, name, version, documentation and issue tracker URLs, codeowners, `config_flow` true,
-  `integration_type` helper, `iot_class` calculated, and no runtime requirements.
+  `integration_type` device (one tank device per entry), `iot_class` calculated, and no runtime requirements.
 
 #### Scenario: Add as custom repository
 - **WHEN** a user adds the repository URL in HACS as an integration and downloads it
-- **THEN** after a restart, "Hot Water Tank Estimator" can be added from Settings, Devices and services
+- **THEN** after a restart, "Hot Water Tank Estimator" can be added from Settings, Devices and services, and each
+  entry is listed on the Integrations page with its tank device
+
+### Requirement: Own brand images
+The integration SHALL ship its icon and logo in `custom_components/hot_water_tank_estimator/brand/` (`icon.png`,
+`icon@2x.png`, `logo.png`, `logo@2x.png`, with dark variants where the plain image does not work on a dark
+background), which Home Assistant 2026.3 and later serves instead of the brands repository. `hacs.json` SHALL name a
+minimum Home Assistant version of at least 2026.3.
+
+#### Scenario: Integration list
+- **WHEN** a user opens Settings, Devices and services
+- **THEN** the Hot Water Tank Estimator entry shows its own icon, not the placeholder
 
 ### Requirement: README explains install, setup, model and tuning
 The README SHALL cover:

@@ -12,7 +12,10 @@ history, 1-31 October 2026, exported to `private/history/2026-10-01_2026-10-31/`
 The installation has:
 - a 300 L nominal tank holding about 285 L of water (from the manufacturer's empty and filled weights; the October
   analysis used 281 L, which changes the fits by less than 0.1 K);
-- a ground source heat pump that charges it through an external circuit, which circulates the whole tank;
+- a ground source heat pump that charges it through an internal coil low in the tank (218-940 mm of 1660 mm), with
+  no pump circulating the tank water. Heating from below mixes the water above the coil by convection; the water
+  below the coil, about 15-20 L, is heated less (corrected on 2026-11-03: the first draft said an external circuit
+  circulated the tank);
 - one tank temperature sensor in a sleeve 1020 mm up a 1660 mm tank, at about 58 % of the water volume once the
   base and the dished bottom are taken off (the October analysis assumed 50 %; corrected on 2026-11-03);
 - the heat pump's thermal DHW energy counter (kWh), heat power, DHW-demand binary sensor, and production flow
@@ -29,9 +32,11 @@ An evening price block keeps the heat pump from charging between 16:00 and 23:00
      after the block or in the morning that stop at 49-50.4 C.
    - At each run's end, the highest mean of production flow and return over the last 2 minutes matched the tank
      sensor within 1.3 K, for example 57.9 against 58.0 C and 50.3 against 50.5 C.
-   - Production return is water taken from the tank's bottom. Its 48.5 C at the end of a 50 C run shows the tank
-     is evenly mixed then. A run that stops below the setpoint still leaves an evenly mixed tank, so it is
-     "charged".
+   - Production return is the coil's outlet, at the bottom of the coil. Its 48.5 C at the end of a 50 C run, close
+     to the flow, shows the water around the whole coil is at the charged temperature then, and convection has
+     mixed the water above it. A run that stops below the setpoint still leaves the tank above the coil evenly
+     mixed, so it is "charged". The water below the coil stays colder; the closure fit absorbs that steady deficit
+     (about 15-20 L, or roughly 0.7 kWh per charge from 50 C) mostly in the start-up energy (see D4).
    - Flow and return start falling up to 40 s before the demand sensor turns off, so the charged temperature is
      the highest mean in the last 2 minutes, not the last reading.
 2. **Energy closure between runs** (25 intervals).
@@ -158,7 +163,11 @@ Alternatives:
 
 ### D4: Charging at run end
 
-- At the end of a run, set `T_avg = T_ch = T_charge`. Evidence 1: the tank is evenly mixed then.
+- At the end of a run, set `T_avg = T_ch = T_charge`. Evidence 1: the tank above the coil is evenly mixed then,
+  and the model counts the whole tank at `T_charge` by convention.
+- The colder water below a low coil (Evidence 1) is carried in two places: as energy, by the start-up energy that
+  the closure fit learns (the steady deficit per charge), and as litres, by the usable fraction `u` (water that
+  cannot be drawn hot). The docs say both.
 - `T_charge` is the highest mean of flow and return over the last 2 minutes. Taking the highest mean skips the drop
   of up to 40 s before the demand sensor turns off.
 - Without flow and return sensors, `T_charge` is the tank sensor. It agreed within 1.3 K on the development
@@ -414,8 +423,10 @@ Alternatives:
   runs meanwhile, the estimate errs towards showing less.
 - **The water meter misses low flows.** Small trickles are lost, which errs towards showing more water. The bounds
   catch large errors.
-- **A tank heated by an internal coil without circulation** is not evenly mixed at the end of a run, so the charge
-  rule is wrong for it. This is out of scope (proposal), and the README says so.
+- **A tank heated high up** (a coil or an electric element in the upper part) only heats and mixes the water above
+  the heat source, so the charge rule is wrong for it. A coil low in the tank, as on the development installation,
+  mixes nearly all of it by convection, and the charge rule holds. Tanks heated high up, and a second heat source
+  such as an electric element, are out of scope here (proposal); the README says so.
 - **Learning drifts on unusual weeks** (guests, holidays). The step limit, the forgetting factor and the minimum
   count slow it down. The error sensors make drift visible, and locks and `recalibrate` undo it.
 - **A run cut short mid-charge.** The charge rule still applies, using the flow and return at that moment. The
@@ -439,4 +450,5 @@ Rollback: remove the config entry and the folder. Nothing else depends on it.
 
 - Whether to exclude dishwasher and washing machine fills, where the appliance integration reports them, with
   optional "cold appliance" water sensors. This can be added later without changing the model.
-- Which display name and icon the HACS brands repository should get. This can wait until after the first release.
+- The icon and logo ship in the integration's own `brand/` folder (Home Assistant 2026.3 and later), so the brands
+  repository is not needed (decided 2026-11-03).

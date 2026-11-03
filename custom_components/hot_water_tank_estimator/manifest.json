@@ -10,7 +10,7 @@
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/peeter123/hot-water-tank-estimator",
-  "integration_type": "helper",
+  "integration_type": "device",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/peeter123/hot-water-tank-estimator/issues",
   "requirements": [],

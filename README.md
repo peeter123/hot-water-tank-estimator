@@ -16,9 +16,9 @@ run end. Diagnostic sensors show what it learned and how well it fits.
 
 It provides:
 
-- tank water remaining: litres of tank water at the charged temperature;
+- hot water remaining: litres of tank water at the charged temperature;
 - shower water remaining: litres of mixed water at your shower temperature;
-- percent charged;
+- charge level, in percent of the last charge;
 - shower minutes left;
 - the charged temperature and the estimated tank average temperature;
 - the cold water temperature used;
@@ -124,9 +124,9 @@ Each tank has one device with these entities. All names are translated.
 
 | Entity | Unit | Meaning |
 |---|---|---|
-| Tank water remaining | L | Litres of tank water at the charged temperature that can still be drawn. |
+| Hot water remaining | L | Litres of tank water at the charged temperature that can still be drawn. |
 | Shower water remaining | L | Litres of mixed water at the shower mix temperature that this makes. |
-| Percent charged | % | The usable tank compared with the last charge. |
+| Charge level | % | The usable tank compared with the last charge. |
 | Shower time remaining | min | Shower water divided by the shower flow. |
 | Charged temperature | C | The temperature of the hot layer. |
 | Tank average temperature | C | The estimated average temperature of the tank. |
@@ -135,6 +135,24 @@ Each tank has one device with these entities. All names are translated.
 | Shower ran cold | | Button. Press it when a shower ran cold earlier than predicted. |
 
 The calibration diagnostic sensors are listed under "Diagnostic sensors" below.
+
+## Why the hot water remaining is less than the tank volume
+
+Right after a charge the estimate counts the whole tank as charged, at the charged temperature, yet hot water
+remaining shows less than the tank volume. Only the usable fraction of the tank can be drawn hot:
+- as water is drawn, cold water enters at the bottom and mixes into a lukewarm layer, so the outlet runs lukewarm
+  before all the hot water has been replaced;
+- with a heating coil low in the tank, the water below the coil is colder and cannot be drawn hot.
+
+The usable fraction covers both. It is a setting that is learned from the "Shower ran cold" button, not measured. Charge
+level compares the usable tank with the last charge, so it is 100 % right after any charge, whatever the heater reached.
+The litres show the absolute amount.
+
+## Supported heat sources
+
+A tank heated by a heater that circulates the whole tank is supported, and so is a coil low in the tank. A coil or
+element high up in the tank, or a second heat source such as an electric element next to the heater, is not
+supported yet: the estimate then does not know that the heat goes into the upper part only.
 
 ## Actions
 
@@ -198,8 +216,8 @@ cards:
     heading: Hot Water
     icon: mdi:water-boiler
   - type: tile
-    entity: sensor.hot_water_tank_tank_water_remaining
-    name: Tank water
+    entity: sensor.hot_water_tank_hot_water_remaining
+    name: Hot water
     grid_options:
       columns: 6
   - type: tile
@@ -208,8 +226,8 @@ cards:
     grid_options:
       columns: 6
   - type: tile
-    entity: sensor.hot_water_tank_percent_charged
-    name: Charged
+    entity: sensor.hot_water_tank_charge_level
+    name: Charge level
     grid_options:
       columns: 6
   - type: tile
@@ -241,3 +259,8 @@ See [docs/development.md](docs/development.md). `python scripts/lint.py` runs al
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
+The images in `custom_components/hot_water_tank_estimator/brand/` use parts of two Material Design Icons glyphs, the
+heat waves of `radiator` and the pipes of `water-boiler`, from the Pictogrammers `@mdi/svg` package (version
+7.4.47). They are (c) Pictogrammers and licensed under the
+Apache License 2.0, whose text is in [LICENSE-MDI](LICENSE-MDI). `scripts/brand.py` draws them.

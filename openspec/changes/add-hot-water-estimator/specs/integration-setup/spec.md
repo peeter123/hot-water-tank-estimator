@@ -87,19 +87,25 @@ The defaults for draws, losses and heat input SHALL be those in the scenario bel
 
 ### Requirement: Entities and units
 Each tank SHALL provide sensors (state class measurement) for:
-- tank water remaining (L);
-- shower water remaining (L);
-- percent charged (%);
-- shower minutes remaining (min);
+- tank water remaining (L), named "Hot water remaining";
+- shower water remaining (L), named "Shower water remaining";
+- percent charged (%), named "Charge level";
+- shower minutes remaining (min), named "Shower time remaining";
 - charged temperature, tank average and cold water temperature (C).
 
 It SHALL also provide a shower detected binary sensor, a "Shower ran cold" button and the calibration diagnostic
-sensors. Names SHALL be translated, without emoji.
+sensors. Names SHALL be translated, without emoji. The user-facing names differ from the model's vocabulary where
+the model's terms read wrongly: "tank water" alone does not say that it is hot, and "percent charged" at 100 %
+beside fewer litres than the tank holds reads as an error, while "charge level" compares with the last charge.
 
 #### Scenario: Units shown
 - **WHEN** the entities are listed
-- **THEN** both remaining sensors are in litres, percent charged in %, the minutes sensor in min, and the three
+- **THEN** both remaining sensors are in litres, the charge level in %, the minutes sensor in min, and the three
   temperatures in degrees Celsius
+
+#### Scenario: Names shown
+- **WHEN** a new entry titled "Hot Water Tank" is added
+- **THEN** its sensors include "Hot Water Tank Hot water remaining" and "Hot Water Tank Charge level"
 
 ### Requirement: Set tank state action
 The action `hot_water_tank_estimator.set_tank_state` SHALL take a target tank and optionally a tank average and a

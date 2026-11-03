@@ -4,7 +4,7 @@ Pure Python: standard library only, no Home Assistant imports and no I/O. The fo
 their symbols are those of `docs/model.md`:
 
 - `C = 1.163 * V / 1000` is the heat capacity of the tank in kWh per K.
-- At the end of a heating run the tank is evenly mixed at `t_charge`, so the average at the
+- At the end of a heating run the model counts the tank at `t_charge`, so the average at the
   start of the run follows from the run's energy `E_run` (kWh), the start-up energy `S` (kWh)
   and the draws and loss during the run:
 

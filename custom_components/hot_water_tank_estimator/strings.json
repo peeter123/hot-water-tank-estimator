@@ -201,14 +201,14 @@
   },
   "entity": {
     "sensor": {
-      "tank_litres": {
-        "name": "Tank water remaining"
+      "hot_water_remaining": {
+        "name": "Hot water remaining"
       },
       "shower_litres": {
         "name": "Shower water remaining"
       },
-      "percent_charged": {
-        "name": "Percent charged"
+      "charge_level": {
+        "name": "Charge level"
       },
       "shower_minutes": {
         "name": "Shower time remaining"

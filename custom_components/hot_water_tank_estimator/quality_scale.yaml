@@ -6,8 +6,8 @@ rules:
     status: exempt
     comment: Nothing is polled; state changes and a timer drive the estimate.
   brands:
-    status: todo
-    comment: Brand images are decided before the first release.
+    status: done
+    comment: The brand folder holds icon.png, icon@2x.png, logo.png and logo@2x.png (drawn by scripts/brand.py).
   common-modules:
     status: todo
     comment: Not implemented yet.
