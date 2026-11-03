@@ -76,7 +76,8 @@ Markdown fixes first.
 ### Requirement: Quality scale
 The integration SHALL keep a `quality_scale.yaml` that records each Home Assistant Integration Quality Scale rule as
 done, todo or exempt (with a reason). The first release SHALL meet every Silver rule that applies, plus the Gold
-rules for diagnostics, entity and icon translations, entity categories, device classes and reconfiguration.
+rules for diagnostics, entity and icon translations, entity categories, device classes and reconfiguration (a
+reconfigure step in the config flow).
 
 #### Scenario: Release check
 - **WHEN** version 0.1.0 is tagged

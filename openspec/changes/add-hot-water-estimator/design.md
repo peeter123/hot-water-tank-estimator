@@ -297,6 +297,18 @@ active, with tolerance `delta` (default 1.5 K) and margin m (default 2 K):
 
   Selectors are filtered by domain and device class. The options flow holds every tuning value plus the optional
   sources. An options update reloads the entry, and the state survives through the `Store`.
+- A reconfigure step (`async_step_reconfigure`, the Gold rule reconfiguration-flow) changes everything the config
+  flow asked for: the volume, the tank sensor and its height, the water meter, the heat inputs and the optional
+  sources. It refuses a tank sensor that another entry uses, keeps the tuning values, locks, history days, model
+  state and calibration, and reloads the entry (decided with the user on 2026-11-03; the options flow alone does not
+  meet the rule).
+- The options flow keeps what can change without a duplicate check: the tuning values (the sensor height
+  among them), the optional sources (flow and return, humidity, cold water), the locks and the history days. The
+  volume, the tank sensor, the water meter and the heat inputs change only through reconfigure (group 8 review,
+  2026-11-03), so the tank sensor check cannot be bypassed.
+- Like Home Assistant's own helpers, an entry keeps all its settings in `options` (`data` stays empty), so that
+  both flows edit one mapping and the live entry needs no migration. The `config-flow` quality rule's comment
+  says so.
 - Diagnostics: options, state, source availability and a ring of the last 100 events.
 - Translations go in `strings.json` and `translations/en.json`, plain text.
 

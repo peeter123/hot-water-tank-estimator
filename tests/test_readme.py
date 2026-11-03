@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+import re
 
 import pytest
 
@@ -68,3 +69,45 @@ def test_no_emoji_in_the_strings() -> None:
     """The user-facing text is plain."""
     text = json.dumps(STRINGS, ensure_ascii=False)
     assert all(ord(char) < 0x2000 for char in text)
+
+
+@pytest.mark.parametrize(
+    "heading",
+    [
+        "What it is for",
+        "Requirements",
+        "Installation",
+        "Finding the sensor height",
+        "Configuration",
+        "Options",
+        "Entities",
+        "Calibration",
+        "Diagnostic sensors",
+        "The model in short",
+        "Tuning",
+        "Dashboard example",
+        "Troubleshooting",
+        "Removal",
+        "Limitations",
+    ],
+)
+def test_the_readme_has_its_sections(heading: str) -> None:
+    """The README has a section for each item of the packaging spec."""
+    assert re.search(rf"^#+ {heading}$", README, re.MULTILINE)
+
+
+def test_the_readme_links_the_model_docs() -> None:
+    """The model summary links docs/model.md."""
+    assert "(docs/model.md" in README
+
+
+def test_the_readme_mentions_the_backtest() -> None:
+    """The tuning section shows the backtest."""
+    assert "scripts/backtest.py" in README
+
+
+def test_no_stray_backslash_n_in_shell_blocks() -> None:
+    """A fenced sh block has real line continuations, not a literal backslash and n."""
+    fence = "`" * 3
+    for block in re.findall(rf"{fence}sh\n(.*?){fence}", README, re.DOTALL):
+        assert "\\n" not in block

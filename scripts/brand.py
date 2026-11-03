@@ -8,7 +8,9 @@ Usage::
 (version 7.4.47 was used; ``npm pack @mdi/svg`` and unpack it). ``<output-folder>`` defaults to the integration's
 ``brand`` folder. The drawing is made at 2048 px and scaled down for smooth edges. It writes ``icon.png`` (256),
 ``icon@2x.png`` (512), and ``logo.png`` and ``logo@2x.png`` (the same square drawing, the largest size Home
-Assistant allows for the shortest side: 256 and 512). Pillow is used for drawing.
+Assistant allows for the shortest side: 256 and 512), each with a dark slate outline and pipes. The four ``dark_``
+files (``dark_icon.png`` and so on) are the same drawing with a light grey outline and pipes, for dark backgrounds.
+Pillow is used for drawing.
 
 Credit: the heat waves are the top of the ``radiator`` glyph and the pipes are the bottom of the ``water-boiler``
 glyph of Material Design Icons, (c) Pictogrammers, under the Apache License 2.0 (full text in ``LICENSE-MDI`` in
@@ -23,10 +25,11 @@ from PIL import Image, ImageChops, ImageDraw
 from svg.path import Arc, parse_path
 
 CANVAS = 2048
-HOT = (255, 112, 67)
+HOT = (255, 72, 9)
 WARM = (255, 183, 77)
-COLD = (41, 182, 246)
-RIM = (120, 144, 156)
+COLD = (24, 108, 255)
+RIM = (120, 144, 156)  # the gauge face, and the outline of the dark variants
+BAND = 120  # the height of the yellow band between the layers
 INK = (55, 71, 79)
 WHITE = (255, 255, 255)
 INTEGRATION = Path(__file__).resolve().parent.parent / (
@@ -75,15 +78,47 @@ def rounded(box: tuple[int, int, int, int], radius: int) -> Image.Image:
     return mask
 
 
-def band(top: int, bottom: int) -> Image.Image:
-    """Return a mask of a full-width horizontal band."""
-    mask = Image.new("L", (CANVAS, CANVAS), 0)
-    ImageDraw.Draw(mask).rectangle((0, top, CANVAS, bottom), fill=255)
-    return mask
+def smoothstep(x: float) -> float:
+    """Ease from 0 to 1 over 0 <= x <= 1, with no slope at the ends."""
+    return x * x * (3 - 2 * x)
 
 
-def draw(folder: Path) -> Image.Image:
-    """Draw the tank with its gauge and pipes under heat waves, at the canvas size."""
+def mix(a: tuple[int, int, int], b: tuple[int, int, int], x: float) -> tuple[int, ...]:
+    """Blend colour a into colour b by x."""
+    return tuple(round(p + (q - p) * x) for p, q in zip(a, b, strict=True))
+
+
+def layers(split: int) -> Image.Image:
+    """Return the colours of the tank water: hot above the split, cold below it.
+
+    The yellow band starts at the split. Its first third eases from the hot colour into yellow
+    (smoothstep), its middle third is plain yellow, and its last third eases from yellow into
+    the cold colour, so the band has no hard edges.
+    """
+    third = BAND // 3
+    column = Image.new("RGBA", (1, CANVAS))
+    for y in range(CANVAS):
+        if y < split:
+            colour = HOT
+        elif y < split + third:
+            colour = mix(HOT, WARM, smoothstep((y - split + 0.5) / third))
+        elif y < split + BAND - third:
+            colour = WARM
+        elif y < split + BAND:
+            colour = mix(
+                WARM, COLD, smoothstep((y - split - BAND + third + 0.5) / third)
+            )
+        else:
+            colour = COLD
+        column.putpixel((0, y), (*colour, 255))
+    return column.resize((CANVAS, CANVAS))
+
+
+def draw(folder: Path, outline: tuple[int, int, int] = INK) -> Image.Image:
+    """Draw the tank with its gauge and pipes under heat waves, at the canvas size.
+
+    ``outline`` is the colour of the tank outline and the pipes.
+    """
     image = Image.new("RGBA", (CANVAS, CANVAS), (0, 0, 0, 0))
     left, right, top, bottom, radius, inset = 640, 1408, 400, 1700, 260, 56
 
@@ -92,27 +127,21 @@ def draw(folder: Path) -> Image.Image:
         glyph_path(folder, "water-boiler"), 64, 1024 - 12 * 64, 1640 - 18 * 64
     )
     legs.paste(0, (0, 0, CANVAS, 1640))
-    fill(image, legs, RIM)
+    fill(image, legs, outline)
 
-    # Tank: rim, then hot layer over the thermocline over the cold layer.
+    # Tank: dark outline, then hot layer over the thermocline over the cold layer.
     rim = rounded((left, top, right, bottom), radius)
-    fill(image, rim, RIM)
+    fill(image, rim, outline)
     inner = rounded(
         (left + inset, top + inset, right - inset, bottom - inset), radius - inset
     )
     split = top + int((bottom - top) * 0.52)
-    for y0, y1, colour in (
-        (0, split, HOT),
-        (split, split + 80, WARM),
-        (split + 80, CANVAS, COLD),
-    ):
-        fill(image, ImageChops.multiply(inner, band(y0, y1)), colour)
-    for y in (top + 250, bottom - 250):  # the seams of the domed top and the base
-        fill(image, ImageChops.multiply(rim, band(y, y + 48)), RIM)
+    image.paste(layers(split), (0, 0), inner)
 
-    # Gauge: grey face in a dark ring, with a dark needle and hub.
+    # Gauge: grey face in a dark ring, centred in the hot layer, with a dark needle and hub.
     d = ImageDraw.Draw(image)
-    cx, cy, r = 1024, 1040, 200
+    cx, r = 1024, 200
+    cy = (top + inset + split) // 2
     d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(*INK, 255))
     d.ellipse((cx - r + 40, cy - r + 40, cx + r - 40, cy + r - 40), fill=(*RIM, 255))
     d.line((cx, cy, cx + 90, cy - 85), fill=(*INK, 255), width=34)
@@ -147,14 +176,17 @@ def main() -> None:
     folder = Path(sys.argv[1])
     out = Path(sys.argv[2]) if len(sys.argv) > 2 else INTEGRATION / "brand"
     out.mkdir(parents=True, exist_ok=True)
-    big = fit(draw(folder))
-    for name, size in (
-        ("icon.png", 256),
-        ("icon@2x.png", 512),
-        ("logo.png", 256),
-        ("logo@2x.png", 512),
-    ):
-        big.resize((size, size), Image.LANCZOS).save(out / name, optimize=True)
+    for prefix, outline in (("", INK), ("dark_", RIM)):
+        big = fit(draw(folder, outline))
+        for name, size in (
+            ("icon.png", 256),
+            ("icon@2x.png", 512),
+            ("logo.png", 256),
+            ("logo@2x.png", 512),
+        ):
+            big.resize((size, size), Image.LANCZOS).save(
+                out / f"{prefix}{name}", optimize=True
+            )
 
 
 if __name__ == "__main__":

@@ -46,8 +46,8 @@ The config flow SHALL ask for:
 
 ### Requirement: Options flow tunes the model without losing its state
 The options flow SHALL let the user change:
-- every tuning value named in the defaults requirements below;
-- the optional source entities;
+- every tuning value named in the defaults requirements below, and the sensor height;
+- the optional source entities (flow and return, humidity, cold water);
 - a lock for each learned parameter (see calibration);
 - the history days for the setup fit (1-30, default 30).
 
@@ -56,6 +56,21 @@ Saving SHALL keep the current tank average, the charged temperature and the cali
 #### Scenario: Change sensor height
 - **WHEN** T_avg is 44 C and the user changes the sensor height from 50 % to 65 %
 - **THEN** T_avg stays 44 C, and the next sensor bound uses 65 %
+
+### Requirement: Reconfigure changes the tank and its sources
+A reconfigure step SHALL let the user change everything the config flow asked for, with the config flow's
+validation: the volume, the tank sensor and its height, the water meter, the heat inputs and the optional sources.
+The volume, the tank sensor, the water meter and the heat inputs SHALL change only here, not in the options flow. It
+SHALL refuse a tank sensor that another entry uses. Saving SHALL keep the tuning values, the locks, the history days,
+the tank average, the charged temperature and the calibration state, and SHALL reload the entry.
+
+#### Scenario: Replace the water meter
+- **WHEN** T_avg is 50 C, the usable fraction is locked, and the user picks another water meter in reconfigure
+- **THEN** the entry reloads with the new meter, T_avg stays 50 C, and the lock and the calibration samples stay
+
+#### Scenario: Tank sensor of another entry
+- **WHEN** the user picks a tank sensor that another entry already uses
+- **THEN** reconfigure refuses it and the entry stays unchanged
 
 ### Requirement: Temperature and shape defaults
 Every tuning value SHALL have a default, so that a fresh entry runs without opening the options. The defaults for

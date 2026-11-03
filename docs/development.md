@@ -33,11 +33,11 @@ and lint exits `2`. pytest's own exit code 2 (collection errors) stays a finding
 ## Remote test runner
 
 `docker/test-runner/` builds a long-running container for a Docker host such as a NAS. It runs `sshd` (key login only,
-port 2222, non-root user `runner`) and holds the pinned test requirements in `/opt/venv`. hassfest runs from Home
-Assistant core at the tag of the `homeassistant` version in the test venv, in a separate venv (`/opt/hassfest-venv`)
-built from the test venv's frozen package set plus the extras hassfest needs (installed as wheels only), so its
-dependencies never change the test environment. `docker/test-runner/README.md` explains deployment and the config
-file.
+port 2222, non-root user `runner`) and holds the pinned test requirements in `/opt/venv`. On the runner, hassfest runs
+from Home Assistant core at the tag of the `homeassistant` version in the test venv, in a separate venv
+(`/opt/hassfest-venv`) built from the test venv's frozen package set plus the extras hassfest needs (installed as wheels
+only), so its dependencies never change the test environment. `docker/test-runner/README.md` explains deployment and the
+config file.
 
 `scripts/remote_test.py` (standard library only) copies the files `git ls-files` lists (never `private/` or `.git`)
 into a folder of its own in the container over SSH, runs the command there, removes the folder afterwards, and returns
@@ -50,7 +50,8 @@ python scripts/remote_test.py shell "cmd; cmd" # the string runs in the remote s
 python scripts/lint.py --hassfest              # lint plus hassfest on the runner
 ```
 
-`scripts/brand.py` draws the images in `brand/` from the MDI `radiator` and `water-boiler` glyphs; run it with
+`scripts/brand.py` draws the images in `brand/` from the MDI `radiator` and `water-boiler` glyphs and writes eight
+files (icon and logo at 256 and 512 px, each with a `dark_` variant). Run it with
 `uv run --with svg.path==7.1 --with pillow==13.0.0 scripts/brand.py <mdi-svg-folder>` (usage in its docstring).
 
 Rebuild the container (`docker compose up -d --build`) after a change to `requirements_test.txt` or the
@@ -78,6 +79,10 @@ core integrations:
 | Python | 3.14.2 or later | core `pyproject.toml` `requires-python` |
 | hassfest core tag | derived from `requirements_test.txt` | the `homeassistant` version in the test venv |
 | uv image (local Docker and the remote test runner) | `ghcr.io/astral-sh/uv:0.13.1-python3.14-trixie-slim` | `scripts/lint.py` |
+| uv in CI | 0.13.1 | the version of that image, set in `lint.yml` |
+| `actions/checkout`, `actions/setup-python` | v7 | tags (latest majors, 2026-11-03) |
+| `astral-sh/setup-uv` | SHA of v10.3.3 | its README's pin |
+| `home-assistant/actions/hassfest`, `hacs/action` | `master`, `main` | documented without release tags |
 | pytest-homeassistant-custom-component | 0.13.375 | `requirements_test.txt`; targets Home Assistant 2026.10.4 |
 
 - `.python-version` (3.14) makes `uv run` pick a Python that Home Assistant supports, not the newest installed one.
@@ -138,6 +143,18 @@ core integrations:
 - Formulas in code use the symbols of `docs/model.md` (`t_avg`, `t_ch`, `t_cold`, `f`, `h`, `w`, `u`) and give
   units in names or comments.
 
+## Continuous integration
+
+Two workflows in `.github/workflows/` run on every push and pull request:
+- `validate.yml` runs hassfest (`home-assistant/actions/hassfest`) and the HACS action (`hacs/action`, category
+  integration). The HACS check needs the repository's description, topics and issues, so it fails until the GitHub
+  repository has them.
+- `lint.yml` sets up Python (from `.python-version`) and uv (pinned, see the table) and runs `python scripts/lint.py`.
+  On Linux that runs pytest through `uv run` with the pinned `requirements_test.txt`, with no remote runner.
+
+Check the workflow files with
+`uvx check-jsonschema --builtin-schema vendor.github-workflows .github/workflows/*.yml`.
+
 ## Quality scale
 
 Home Assistant's Integration Quality Scale is the checklist for integration code. The integration keeps a
@@ -148,7 +165,7 @@ integration:
 - diagnostics;
 - entity translations and icon translations;
 - entity categories and device classes;
-- reconfiguration through the options flow;
+- reconfiguration (a reconfigure step in the config flow);
 - documentation of the data and the known limitations.
 
 Rules about discovery, network connections and authentication are `exempt`, with the reason. The integration has one

@@ -1,55 +1,55 @@
 rules:
   action-setup:
-    status: todo
-    comment: Not implemented yet; the integration will register set_tank_state and recalibrate.
+    status: done
+    comment: services.py registers set_tank_state and recalibrate in async_setup, so they exist without a loaded entry.
   appropriate-polling:
     status: exempt
     comment: Nothing is polled; state changes and a timer drive the estimate.
   brands:
     status: done
-    comment: The brand folder holds icon.png, icon@2x.png, logo.png and logo@2x.png (drawn by scripts/brand.py).
+    comment: The brand folder holds icon, logo and their @2x and dark_ variants (drawn by scripts/brand.py).
   common-modules:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: const.py holds the shared constants and entity.py the base entity; there is no coordinator.
   config-flow:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: A five-step config flow with selectors and field descriptions; settings live in options, like core helpers.
   config-flow-test-coverage:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: test_config_flow.py, test_options_flow.py and test_reconfigure.py cover config_flow.py at 100 %.
   dependency-transparency:
     status: exempt
     comment: There are no runtime requirements.
   docs-actions:
-    status: todo
-    comment: Not implemented yet; the integration will register set_tank_state and recalibrate.
+    status: done
+    comment: The README section Actions describes set_tank_state and recalibrate with their fields.
   docs-conditions:
     status: exempt
     comment: The integration provides no conditions.
   docs-high-level-description:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: The README opens with what the integration estimates and how.
   docs-installation-instructions:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: The README section Installation gives the HACS and the manual steps.
   docs-removal-instructions:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: The README section Removal says how to delete an entry and what is left behind.
   docs-triggers:
     status: exempt
     comment: The integration provides no triggers.
   entity-event-setup:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: entity.py connects the dispatcher in async_added_to_hass and disconnects it with async_on_remove.
   entity-unique-id:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: Every entity has the unique ID entry_id plus a fixed key (entity.py).
   has-entity-name:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: The base entity sets _attr_has_entity_name; the names come from translations.
   runtime-data:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: The estimator is kept in entry.runtime_data (a typed TankConfigEntry).
   test-before-configure:
     status: exempt
     comment: No connection is made to a device or service.
@@ -57,23 +57,23 @@ rules:
     status: exempt
     comment: No connection is made to a device or service.
   unique-config-entry:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: The config flow aborts when another entry already uses the same tank temperature sensor.
   action-exceptions:
-    status: todo
-    comment: Not implemented yet; the integration will register set_tank_state and recalibrate.
+    status: done
+    comment: services.py raises ServiceValidationError with translated messages.
   config-entry-unloading:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: async_unload_entry unloads the platforms and stops the estimator, which saves the store.
   docs-configuration-parameters:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: The README section Options lists every options field with its default and meaning.
   docs-installation-parameters:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: The README section Configuration lists every config flow field.
   entity-unavailable:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: The sensors stay available; shower detected is unavailable without a detection method.
   integration-owner:
     status: done
     comment: Codeowners are set in the manifest.
@@ -81,20 +81,20 @@ rules:
     status: exempt
     comment: Entities are computed locally, not fetched from a device or service.
   parallel-updates:
-    status: exempt
-    comment: Entities are computed locally and never poll or call a device.
+    status: done
+    comment: Each platform sets PARALLEL_UPDATES = 0; entities never poll or call a device.
   reauthentication-flow:
     status: exempt
     comment: There is no authentication.
   test-coverage:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: The suite covers 98 % of the integration (pytest-cov, 2026-11-03), and each module is at least 89 %.
   devices:
-    status: todo
-    comment: Not implemented yet; one device per entry.
+    status: done
+    comment: One device per entry, created by the base entity's device_info.
   diagnostics:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: diagnostics.py returns the options, the model state, the sources, the events and the calibration.
   discovery:
     status: exempt
     comment: A calculated helper has nothing to discover on the network.
@@ -102,53 +102,53 @@ rules:
     status: exempt
     comment: A calculated helper has nothing to discover on the network.
   docs-data-update:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: The README section How the estimate updates says what drives it (state changes, a 5-minute tick).
   docs-examples:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: The README has a dashboard example, two automation examples (boost run, low shower time) and tuning.
   docs-known-limitations:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: The README section Limitations lists them.
   docs-supported-devices:
     status: exempt
     comment: A calculated helper supports no devices; it reads existing entities.
   docs-supported-functions:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: The README sections Entities, Diagnostic sensors and Actions describe every function.
   docs-troubleshooting:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: The README section Troubleshooting covers the common problems.
   docs-use-cases:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: The README opens with what the estimate is used for.
   dynamic-devices:
     status: exempt
     comment: One device per entry, created and removed with the entry; no devices appear or disappear at runtime.
   entity-category:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: The calibration sensors have the diagnostic category.
   entity-device-class:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: The sensors set the volume storage, duration and temperature device classes where one fits.
   entity-disabled-by-default:
     status: todo
-    comment: Not implemented yet.
+    comment: Above Silver and not required for 0.1.0; the diagnostic sensors are enabled by default.
   entity-translations:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: Every entity has a translation_key with its name in strings.json.
   exception-translations:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: Every exception that reaches the user carries a translation key (services.py, strings.json exceptions).
   icon-translations:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: icons.json gives each entity its icon, including the state icons of the shower detected sensor.
   reconfiguration-flow:
-    status: todo
-    comment: Not implemented yet.
+    status: done
+    comment: async_step_reconfigure changes the tank and the sources on one form and reloads the entry.
   repair-issues:
     status: todo
-    comment: Not implemented yet.
+    comment: Above Silver and not required for 0.1.0.
   stale-devices:
     status: exempt
     comment: One device per entry, created and removed with the entry; no devices appear or disappear at runtime.
@@ -160,4 +160,4 @@ rules:
     comment: The integration makes no web requests.
   strict-typing:
     status: todo
-    comment: Not implemented yet.
+    comment: Above Silver; the code is typed but no mypy strict check runs yet.

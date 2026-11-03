@@ -350,7 +350,7 @@ controls they asked for go to the follow-up change `add-tank-insights-and-contro
 
 ## 8. Packaging and release
 
-- [ ] 8.1 Complete the README:
+- [x] 8.1 Complete the README:
   - purpose and requirements;
   - HACS and manual install;
   - finding the sensor height;
@@ -362,14 +362,47 @@ controls they asked for go to the follow-up change `add-tank-insights-and-contro
   - limitations (from design Risks).
 
   Verify: every README requirement in the packaging spec has its section.
-- [ ] 8.2 Bring `quality_scale.yaml` up to date: every applicable Bronze and Silver rule, plus the Gold rules in
+  - Added the sections What it is for, How the estimate updates, The model in short, Tuning, Troubleshooting, Removal
+    and Limitations, a full Installation, and removed the stale Status section. `tests/test_readme.py` checks the
+    headings.
+- [x] 8.2 Bring `quality_scale.yaml` up to date: every applicable Bronze and Silver rule, plus the Gold rules in
   the packaging spec, marked done with the code that meets them. Settle the `brands` rule and the minimum Home
   Assistant version in `hacs.json`. Verify: no applicable Bronze or Silver rule is todo,
   `tests/test_quality_scale.py` passes, and hassfest passes.
-- [ ] 8.3 Add GitHub Actions: `validate.yml` (hassfest and the HACS action) and `lint.yml` (`python scripts/lint.py`
+  - `reconfiguration-flow` asks for `async_step_reconfigure`, and only an options flow existed. The user decided on
+    2026-11-03 to build the reconfigure step (design D9): it changes the settings the options flow does not, such as
+    the required sources, with tests, translated strings and a README note.
+  - Group 8 review, 2026-11-03: the volume, the tank sensor, the water meter and the heat inputs leave the options
+    flow and change only through reconfigure, so the tank sensor check cannot be bypassed (design D9,
+    integration-setup "Reconfigure changes the tank and its sources"). Settings stay in `options`, like core helpers.
+    `docs-examples` needs automation examples in the README. `test-coverage` is done at 98 %.
+  - The user agreed on 2026-11-03 to leave `entity-disabled-by-default`, `repair-issues` and `strict-typing` todo
+    for 0.1.0, and to keep the `hacs.json` minimum at 2026.10.0, the tested version.
+- [x] 8.3 Add GitHub Actions: `validate.yml` (hassfest and the HACS action) and `lint.yml` (`python scripts/lint.py`
   with uv set up) on push and pull request. Verify: the workflow files pass `uvx check-jsonschema` against the
   GitHub workflow schema.
-- [ ] 8.4 **User review.** Ask the user to authorize creating the GitHub repository, pushing, tagging `v0.1.0` and
+  - Pins (after the group 8 review, the current majors): `actions/checkout@v7`, `actions/setup-python@v7`,
+    `astral-sh/setup-uv` at the SHA of v10.3.3 (as its README shows) with uv 0.13.1, the version of the remote runner
+    image, `home-assistant/actions/hassfest@master` and `hacs/action@main` (both documented without release tags).
+    The HACS check needs the repository description, topics and issues, so it fails until the repository exists
+    (8.5).
+- [x] 8.4 Refine the icon after the user saw it at its real size on the live installation (2026-11-03):
+  - remove the two horizontal grey seams;
+  - draw the tank outline and the pipes in the gauge ring's dark colour; the gauge face stays grey;
+  - move the gauge up so it is centred in the hot (orange) layer.
+
+  Redraw with `scripts/brand.py` and show the user a preview for approval before writing `brand/`. Verify: the
+  user approves, the four files keep their sizes, and the script reproduces them. A live deploy of the new images
+  needs the user's authorization.
+  - The user approved icon E on 2026-11-03. `brand/` now holds eight files (the four plus their `dark_` variants,
+    with a light grey outline), 256 and 512 px with a transparent background, and `scripts/brand.py` reproduces
+    them byte for byte.
+  - After the first preview (2026-11-03) the user asked for:
+    - dark variants (`dark_icon.png`, `dark_icon@2x.png`, `dark_logo.png`, `dark_logo@2x.png`) with the outline and
+      pipes in the light grey, because the dark outline disappears on a dark background;
+    - the hot layer in #FF4809 and the cold layer in #186CFF;
+    - the yellow band between them 1.5 times as thick, blending by a gradient into the layers on either side.
+- [ ] 8.5 **User review.** Ask the user to authorize creating the GitHub repository, pushing, tagging `v0.1.0` and
   publishing a release. Record the decision with its date. With authorization: set the manifest version to 0.1.0,
   push, tag and release. Verify: the workflows pass on GitHub, and HACS on the development installation shows
   version 0.1.0 when the repository is added as a custom repository.

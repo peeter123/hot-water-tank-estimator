@@ -1,8 +1,12 @@
 """Config flow and options flow of the Hot Water Tank Estimator integration.
 
 The config flow has five steps (tank, water meter, heat input, shower detection, cold water). The
-options flow shows the same fields again, with every tuning value, the locks and the history days.
-Everything the user sets is stored in the entry options.
+reconfigure step shows those fields again on one form, to change the tank and the sources of an
+entry; it is the only place that changes the volume, the tank sensor, the water meter and the heat
+inputs, so the check for a tank sensor of another entry cannot be bypassed. The options flow has
+every tuning value with the sensor height, the optional sources (flow and return, humidity, cold
+water), the locks and the history days. Like Home Assistant's own helpers, everything the user sets
+is stored in the entry options and the entry data stays empty, so both flows edit one mapping.
 """
 
 from collections.abc import Mapping
@@ -216,14 +220,21 @@ def _tuning_fields(tunings: tuple[Tuning, ...]) -> dict[Any, Any]:
     }
 
 
+def _height_field() -> dict[Any, Any]:
+    """Return the field of the sensor height."""
+    return {
+        probatio.Required(
+            CONF_SENSOR_HEIGHT, default=DEFAULT_SENSOR_HEIGHT * 100
+        ): _number(PERCENTAGE)
+    }
+
+
 def _tank_fields() -> dict[Any, Any]:
     """Return the fields of the tank step: volume, tank sensor and its height."""
     return {
         probatio.Required(CONF_VOLUME): _number("L"),
         probatio.Required(CONF_TANK_SENSOR): _temperature(),
-        probatio.Required(
-            CONF_SENSOR_HEIGHT, default=DEFAULT_SENSOR_HEIGHT * 100
-        ): _number(PERCENTAGE),
+        **_height_field(),
     }
 
 
@@ -244,6 +255,13 @@ def _heat_fields() -> dict[Any, Any]:
         probatio.Optional(CONF_HEATING_ACTIVE): selector.EntitySelector(
             selector.EntitySelectorConfig(domain=BINARY_SENSOR_DOMAIN)
         ),
+        **_flow_return_fields(),
+    }
+
+
+def _flow_return_fields() -> dict[Any, Any]:
+    """Return the fields of the heater's flow and return temperatures."""
+    return {
         probatio.Optional(CONF_FLOW_SENSOR): _temperature(),
         probatio.Optional(CONF_RETURN_SENSOR): _temperature(),
     }
@@ -282,18 +300,23 @@ def _learning_fields() -> dict[Any, Any]:
     }
 
 
-def validate_tank(user_input: Mapping[str, Any]) -> dict[str, str]:
-    """Check the volume and the sensor height. Returns the errors by field."""
-    errors: dict[str, str] = {}
-    if not MIN_VOLUME <= float(user_input[CONF_VOLUME]) <= MAX_VOLUME:
-        errors[CONF_VOLUME] = "volume_out_of_range"
+def validate_height(user_input: Mapping[str, Any]) -> dict[str, str]:
+    """Check the sensor height. Returns the errors by field."""
     if (
         not MIN_SENSOR_HEIGHT
         <= float(user_input[CONF_SENSOR_HEIGHT])
         <= MAX_SENSOR_HEIGHT
     ):
-        errors[CONF_SENSOR_HEIGHT] = "height_out_of_range"
-    return errors
+        return {CONF_SENSOR_HEIGHT: "height_out_of_range"}
+    return {}
+
+
+def validate_tank(user_input: Mapping[str, Any]) -> dict[str, str]:
+    """Check the volume and the sensor height. Returns the errors by field."""
+    errors: dict[str, str] = {}
+    if not MIN_VOLUME <= float(user_input[CONF_VOLUME]) <= MAX_VOLUME:
+        errors[CONF_VOLUME] = "volume_out_of_range"
+    return errors | validate_height(user_input)
 
 
 def validate_water_meter(hass: HomeAssistant, entity_id: str) -> dict[str, str]:
@@ -311,6 +334,15 @@ def validate_water_meter(hass: HomeAssistant, entity_id: str) -> dict[str, str]:
     return {}
 
 
+def validate_flow_return(user_input: Mapping[str, Any]) -> dict[str, str]:
+    """Check that the flow and the return sensor are given together or not at all."""
+    if bool(user_input.get(CONF_FLOW_SENSOR)) != bool(
+        user_input.get(CONF_RETURN_SENSOR)
+    ):
+        return {"base": "flow_return_pair"}
+    return {}
+
+
 def validate_heat(user_input: Mapping[str, Any]) -> dict[str, str]:
     """Check the heat input: one source at least, and flow and return as a pair."""
     errors: dict[str, str] = {}
@@ -319,11 +351,7 @@ def validate_heat(user_input: Mapping[str, Any]) -> dict[str, str]:
         for key in (CONF_ENERGY_COUNTER, CONF_POWER_SENSOR, CONF_HEATING_ACTIVE)
     ):
         errors["base"] = "no_heat_source"
-    if bool(user_input.get(CONF_FLOW_SENSOR)) != bool(
-        user_input.get(CONF_RETURN_SENSOR)
-    ):
-        errors["base"] = "flow_return_pair"
-    return errors
+    return errors | validate_flow_return(user_input)
 
 
 class HotWaterTankEstimatorConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -422,9 +450,56 @@ class HotWaterTankEstimatorConfigFlow(ConfigFlow, domain=DOMAIN):
             )
         return self._form("cold", _cold_fields(), user_input)
 
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Change the tank and the sources of the entry on one form.
+
+        The entry, its device and its model state stay; the entry reloads. The tuning values
+        stay in the options flow. Another entry may not use the same tank sensor.
+        """
+        entry = self._get_reconfigure_entry()
+        fields = {
+            **_tank_fields(),
+            **_meter_fields(),
+            **_heat_fields(),
+            **_detection_fields(),
+            **_cold_fields(),
+        }
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            errors = validate_tank(user_input)
+            errors |= validate_water_meter(self.hass, user_input[CONF_WATER_METER])
+            errors |= validate_heat(user_input)
+            if not errors:
+                if any(
+                    other.entry_id != entry.entry_id
+                    and other.options.get(CONF_TANK_SENSOR)
+                    == user_input[CONF_TANK_SENSOR]
+                    for other in self._async_current_entries(include_ignore=False)
+                ):
+                    return self.async_abort(reason="already_configured")
+                options = {
+                    key: value
+                    for key, value in entry.options.items()
+                    if key not in {marker.schema for marker in fields}
+                }
+                return self.async_update_reload_and_abort(
+                    entry, options=options | user_input
+                )
+        schema = self.add_suggested_values_to_schema(
+            probatio.Schema(fields), user_input or entry.options
+        )
+        return self.async_show_form(
+            step_id="reconfigure", data_schema=schema, errors=errors
+        )
+
 
 class HotWaterTankEstimatorOptionsFlow(OptionsFlowWithReload):
-    """Handle the options: the tank, the sources, the draw values and the learning.
+    """Handle the options: the tuning values, the optional sources, the locks and the history days.
+
+    The volume, the tank sensor, the water meter and the heat inputs are not here: they change
+    only in the reconfigure step, which checks the tank sensor against the other entries.
 
     The entry reloads when the options change. The model state and the calibration survive
     through the entry's store.
@@ -457,13 +532,13 @@ class HotWaterTankEstimatorOptionsFlow(OptionsFlowWithReload):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Tank, sensor height and the temperature and shape values."""
+        """The sensor height and the temperature and shape values."""
         if not self._options:
             self._options = dict(self.config_entry.options)
-        fields = {**_tank_fields(), **_tuning_fields(SHAPE_TUNING)}
+        fields = {**_height_field(), **_tuning_fields(SHAPE_TUNING)}
         errors: dict[str, str] = {}
         if user_input is not None:
-            errors = validate_tank(user_input)
+            errors = validate_height(user_input)
             if not errors:
                 self._store(user_input, fields)
                 return await self.async_step_sources()
@@ -472,17 +547,15 @@ class HotWaterTankEstimatorOptionsFlow(OptionsFlowWithReload):
     async def async_step_sources(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """The water meter and the optional sources."""
+        """The optional sources: flow and return, humidity and cold water."""
         fields = {
-            **_meter_fields(),
-            **_heat_fields(),
+            **_flow_return_fields(),
             **_detection_fields(),
             **_cold_fields(),
         }
         errors: dict[str, str] = {}
         if user_input is not None:
-            errors = validate_water_meter(self.hass, user_input[CONF_WATER_METER])
-            errors |= validate_heat(user_input)
+            errors = validate_flow_return(user_input)
             if not errors:
                 self._store(user_input, fields)
                 return await self.async_step_draws()

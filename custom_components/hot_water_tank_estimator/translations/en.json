@@ -64,6 +64,36 @@
         "data_description": {
           "cold_sensor": "The temperature of the cold supply water. Leave empty to use the seasonal curve of the options."
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure the tank",
+        "description": "Change the tank and its sources. The tuning values are in the options. The model state and the calibration stay.",
+        "data": {
+          "volume": "Tank volume",
+          "tank_sensor": "Tank temperature sensor",
+          "sensor_height": "Sensor height",
+          "water_meter": "Water meter",
+          "energy_counter": "Heat energy counter",
+          "power_sensor": "Heat power sensor",
+          "heating_active": "Heating active binary sensor",
+          "flow_sensor": "Flow temperature sensor",
+          "return_sensor": "Return temperature sensor",
+          "humidity_sensors": "Bathroom humidity sensors",
+          "cold_sensor": "Cold water temperature sensor"
+        },
+        "data_description": {
+          "volume": "The effective volume of the tank, 20-2000 L.",
+          "tank_sensor": "The temperature sensor of the tank.",
+          "sensor_height": "Share of the tank's water below the sensor, in % (20-80). See the README for how to work it out from the data sheet.",
+          "water_meter": "The total water meter of the house, with a volume unit (L, m3, gal or ft3). It counts the hot and the cold water.",
+          "energy_counter": "The thermal energy counter of the heater for heating the tank, in kWh.",
+          "power_sensor": "The heat power of the heater for heating the tank, in W.",
+          "heating_active": "A binary sensor that is on while the tank is being heated.",
+          "flow_sensor": "The flow temperature of the heater. Give it together with the return temperature.",
+          "return_sensor": "The return temperature of the heater. Give it together with the flow temperature.",
+          "humidity_sensors": "A rise in humidity tells a shower or bath from other draws. Leave empty to detect showers by the long draw duration only.",
+          "cold_sensor": "The temperature of the cold supply water. Leave empty to use the seasonal curve of the options."
+        }
       }
     },
     "error": {
@@ -74,17 +104,16 @@
       "flow_return_pair": "Give both the flow and the return temperature sensor, or neither."
     },
     "abort": {
-      "already_configured": "A tank with this temperature sensor is already set up."
+      "already_configured": "A tank with this temperature sensor is already set up.",
+      "reconfigure_successful": "The tank was reconfigured."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Tank and temperatures",
-        "description": "The tank, and the temperature and shape values of the model.",
+        "description": "The sensor height, and the temperature and shape values of the model. The tank volume and sensors change in Reconfigure.",
         "data": {
-          "volume": "Tank volume",
-          "tank_sensor": "Tank temperature sensor",
           "sensor_height": "Sensor height",
           "thermocline_width": "Thermocline width",
           "usable_fraction": "Usable fraction",
@@ -98,8 +127,6 @@
           "cold_coldest_day": "Coldest day of the year"
         },
         "data_description": {
-          "volume": "The effective volume of the tank, 20-2000 L.",
-          "tank_sensor": "The temperature sensor of the tank.",
           "sensor_height": "Share of the tank's water below the sensor, in % (20-80). See the README for how to work it out from the data sheet.",
           "thermocline_width": "The width of the layer between hot and cold water, as a percentage of the tank. Learned from the first sensor drop after each charge.",
           "usable_fraction": "The fraction of the tank that can be drawn before the outlet runs cold, 0.5-0.98. The Shower ran cold button learns it.",
@@ -115,22 +142,14 @@
       },
       "sources": {
         "title": "Sources",
-        "description": "The water meter and the optional sources.",
+        "description": "The flow and return temperatures, the humidity sensors and the cold water sensor. The water meter and the heat inputs change in Reconfigure.",
         "data": {
-          "water_meter": "Water meter",
-          "energy_counter": "Heat energy counter",
-          "power_sensor": "Heat power sensor",
-          "heating_active": "Heating active binary sensor",
           "flow_sensor": "Flow temperature sensor",
           "return_sensor": "Return temperature sensor",
           "humidity_sensors": "Bathroom humidity sensors",
           "cold_sensor": "Cold water temperature sensor"
         },
         "data_description": {
-          "water_meter": "The total water meter of the house, with a volume unit (L, m3, gal or ft3). It counts the hot and the cold water.",
-          "energy_counter": "The thermal energy counter of the heater for heating the tank, in kWh.",
-          "power_sensor": "The heat power of the heater for heating the tank, in W.",
-          "heating_active": "A binary sensor that is on while the tank is being heated.",
           "flow_sensor": "The flow temperature of the heater. Give it together with the return temperature.",
           "return_sensor": "The return temperature of the heater. Give it together with the flow temperature.",
           "humidity_sensors": "A rise in humidity tells a shower or bath from other draws. Leave empty to detect showers by the long draw duration only.",

@@ -30,23 +30,17 @@ from homeassistant.data_entry_flow import FlowResultType, InvalidData
 
 from .common import (
     COLD,
-    ENERGY,
     FLOW,
     HUMIDITY,
-    METER,
-    POWER,
     RETURN,
-    TANK,
     Rig,
     entity_id,
     set_sources,
     setup_entry,
 )
 
-TANK_FIELDS = {CONF_VOLUME: 281, CONF_TANK_SENSOR: TANK, CONF_SENSOR_HEIGHT: 50}
+TANK_FIELDS = {CONF_SENSOR_HEIGHT: 50}
 SOURCE_FIELDS = {
-    CONF_WATER_METER: METER,
-    CONF_ENERGY_COUNTER: ENERGY,
     CONF_FLOW_SENSOR: FLOW,
     CONF_RETURN_SENSOR: RETURN,
     CONF_HUMIDITY_SENSORS: [HUMIDITY],
@@ -66,8 +60,8 @@ async def walk(
     result = await hass.config_entries.options.async_init(entry_id)
     flow_id = result["flow_id"]
     for step, data in (
-        ("init", tank or TANK_FIELDS),
-        ("sources", sources or SOURCE_FIELDS),
+        ("init", TANK_FIELDS if tank is None else tank),
+        ("sources", SOURCE_FIELDS if sources is None else sources),
         ("draws", draws or {}),
         ("learning", learning or {}),
     ):
@@ -215,11 +209,7 @@ async def test_clearing_an_optional_source_removes_it(hass: HomeAssistant) -> No
     """A source that the user clears is no longer in the options or in the model."""
     set_sources(hass)
     entry = await setup_entry(hass)
-    sources = {
-        CONF_WATER_METER: METER,
-        CONF_ENERGY_COUNTER: ENERGY,
-    }
-    result = await walk(hass, entry.entry_id, sources=sources)
+    result = await walk(hass, entry.entry_id, sources={})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
     assert CONF_HUMIDITY_SENSORS not in entry.options
@@ -229,26 +219,21 @@ async def test_clearing_an_optional_source_removes_it(hass: HomeAssistant) -> No
 
 
 async def test_adding_a_source(hass: HomeAssistant) -> None:
-    """A cold water sensor and a power sensor can be added in the options."""
+    """A cold water sensor can be added in the options."""
     set_sources(hass)
     hass.states.async_set(COLD, "11.0", {"unit_of_measurement": "°C"})
-    hass.states.async_set(POWER, "0", {"unit_of_measurement": "W"})
     entry = await setup_entry(hass)
     result = await walk(
-        hass,
-        entry.entry_id,
-        sources={**SOURCE_FIELDS, CONF_COLD_SENSOR: COLD, "power_sensor": POWER},
+        hass, entry.entry_id, sources={**SOURCE_FIELDS, CONF_COLD_SENSOR: COLD}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
-    sources = entry.runtime_data.config.sources
-    assert sources.cold_sensor
-    assert sources.power
+    assert entry.runtime_data.config.sources.cold_sensor
     assert entry.runtime_data.model.t_cold == 11.0
 
 
 async def test_options_validation(hass: HomeAssistant) -> None:
-    """The options flow checks the height, the heat input and the flow and return pair."""
+    """The options flow checks the height and the flow and return pair."""
     set_sources(hass)
     entry = await setup_entry(hass)
     result = await walk(
@@ -257,15 +242,40 @@ async def test_options_validation(hass: HomeAssistant) -> None:
     assert result["step_id"] == "init"
     assert result["errors"] == {CONF_SENSOR_HEIGHT: "height_out_of_range"}
 
-    result = await walk(
-        hass, entry.entry_id, sources={CONF_WATER_METER: METER, CONF_FLOW_SENSOR: FLOW}
-    )
+    result = await walk(hass, entry.entry_id, sources={CONF_FLOW_SENSOR: FLOW})
     assert result["step_id"] == "sources"
     assert result["errors"] == {"base": "flow_return_pair"}
 
-    result = await walk(hass, entry.entry_id, sources={CONF_WATER_METER: METER})
-    assert result["errors"] == {"base": "no_heat_source"}
 
-    hass.states.async_set(METER, "1.0", {"unit_of_measurement": "kW"})
-    result = await walk(hass, entry.entry_id, sources=SOURCE_FIELDS)
-    assert result["errors"] == {CONF_WATER_METER: "water_meter_unit"}
+async def test_the_options_flow_leaves_the_reconfigure_fields_out(
+    hass: HomeAssistant,
+) -> None:
+    """The volume, tank sensor, water meter and heat inputs are not in the options forms and stay."""
+    set_sources(hass)
+    entry = await setup_entry(hass)
+    before = dict(entry.options)
+    moved = {
+        CONF_VOLUME,
+        CONF_TANK_SENSOR,
+        CONF_WATER_METER,
+        CONF_ENERGY_COUNTER,
+        "power_sensor",
+        "heating_active",
+    }
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    flow_id = result["flow_id"]
+    seen: set[str] = set()
+    for step, data in (
+        ("init", TANK_FIELDS),
+        ("sources", SOURCE_FIELDS),
+        ("draws", {}),
+        ("learning", {}),
+    ):
+        assert result["step_id"] == step
+        seen |= {marker.schema for marker in result["data_schema"].schema}
+        result = await hass.config_entries.options.async_configure(flow_id, data)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert not seen & moved
+    await hass.async_block_till_done()
+    for key in moved:
+        assert entry.options.get(key) == before.get(key), key

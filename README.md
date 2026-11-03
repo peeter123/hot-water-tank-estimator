@@ -25,10 +25,11 @@ It provides:
 - a shower detected binary sensor and a "Shower ran cold" button;
 - calibration diagnostics.
 
-## Status
+## What it is for
 
-In development, not yet released. The plan and specification are in
-`openspec/changes/add-hot-water-estimator/`.
+Typical uses: show on a dashboard whether there is enough hot water for another shower, see how many minutes of
+shower are left, and compare the tank before and after a heating run or a price block. The integration only
+displays; it does not control the heater. It needs no tank flow meter, only sensors you probably have already.
 
 ## Requirements
 
@@ -43,8 +44,18 @@ In development, not yet released. The plan and specification are in
 
 ## Installation
 
-Planned: add this repository to HACS as a custom repository of type Integration, download it, restart Home
-Assistant, then add "Hot Water Tank Estimator" under Settings, Devices and services.
+Home Assistant 2026.10 or newer is needed.
+
+Through HACS:
+1. In HACS, open the menu, choose Custom repositories, and add `https://github.com/peeter123/hot-water-tank-estimator`
+   with the type Integration.
+2. Search for "Hot Water Tank Estimator" in HACS and download it.
+3. Restart Home Assistant.
+4. Add "Hot Water Tank Estimator" under Settings, Devices and services, Add integration.
+
+By hand: copy the folder `custom_components/hot_water_tank_estimator` of this repository into the
+`custom_components` folder of your Home Assistant configuration, restart Home Assistant, and add the integration as
+in step 4.
 
 ## Configuration
 
@@ -71,6 +82,17 @@ At least one of the energy counter, the power sensor and the heating active bina
 flow and return, the tank sensor gives the charged temperature at the end of a heating run. A tank sensor can
 belong to one entry only.
 
+Temperature sensors in F or K are converted to C. Everything else has a default, so a fresh entry runs without
+opening the options.
+
+### Reconfiguring
+
+To change the tank or its sources later, open the entry under Settings, Devices and services, choose the three dots
+and Reconfigure. One form shows the tank volume, the tank sensor, the sensor height and all the sources, with the same
+checks as the setup. It is the only place to change the volume, the tank sensor, the water meter and the heat
+inputs. A tank sensor that another entry uses is refused. The entry, its device, the model state and the
+calibration stay, and the entry reloads. The tuning values are in the options.
+
 ### Finding the sensor height
 
 The height is the share of the tank's water that lies below the sensor. A connection height in the data sheet is
@@ -82,17 +104,15 @@ example, a tank 1700 mm high has its water from 150 mm to 1650 mm, and the senso
 height shows as a bias in the charge errors of the diagnostic
 sensors.
 
-Temperature sensors in F or K are converted to C. Everything else has a default, so a fresh entry runs without
-opening the options.
-
 ## Options
 
-Open the options of the entry to change anything. The options flow has four steps. Saving reloads the entry and
-keeps the model state (the tank average, the charged temperature and the draw session) and the calibration.
+Open the options of the entry to change the tuning. The options flow has four steps. The tank volume, the tank sensor,
+the water meter and the heat inputs are not in it: they change in Reconfigure (see Configuration). Saving reloads the
+entry and keeps the model state (the tank average, the charged temperature and the draw session) and the calibration.
 
 | Step | Field | Default | Meaning |
 |---|---|---|---|
-| Tank and temperatures | Tank volume, Tank temperature sensor, Sensor height | as set | As in the config flow. |
+| Tank and temperatures | Sensor height | as set | As in the config flow. |
 | Tank and temperatures | Thermocline width | 35 % | Width of the layer between hot and cold water. Learned. |
 | Tank and temperatures | Usable fraction | 0.85 | Fraction of the tank that can be drawn before the outlet runs cold. Learned from the button. |
 | Tank and temperatures | Shower mix temperature | 38 C | The temperature of your shower water. |
@@ -103,7 +123,7 @@ keeps the model state (the tank average, the charged temperature and the draw se
 | Tank and temperatures | Cold water mean temperature | 12.5 C | Yearly mean of the cold water, used without a cold water sensor. |
 | Tank and temperatures | Cold water amplitude | 5 K | Seasonal swing around the mean. |
 | Tank and temperatures | Coldest day of the year | 46 | Day of the year with the coldest cold water. |
-| Sources | Water meter and the optional sources | as set | As in the config flow. Clear a field to remove the source. |
+| Sources | Flow and return temperature sensors, Bathroom humidity sensors, Cold water temperature sensor | as set | As in the config flow. Clear a field to remove the source. Give flow and return together. |
 | Draws, losses and heat | Loss coefficient | 0.004 per hour | Standing loss. Learned. |
 | Draws, losses and heat | Other draws hot share | 0.2 | Share of the litres outside a shower that comes from the tank. Learned. |
 | Draws, losses and heat | Start-up energy per run | 0 kWh | Energy of each run that does not reach the tank. Learned. |
@@ -204,6 +224,91 @@ household. Check the sensor height first. Download the diagnostics of the entry 
 which sources are available, the last 100 model events and every stored closure (heating run) with its status
 and reason.
 
+## How the estimate updates
+
+Nothing is polled. Every state change of a source (water meter, tank sensor, heat input, humidity, cold water) goes
+to the model at once, and a 5-minute timer lets the standing loss and the cold layer move when nothing changes. The
+entities update after each of those. The model state and the calibration are stored per entry every minute or so
+and at shutdown, so a restart continues where it stopped.
+
+## The model in short
+
+The tank is a hot layer above a cold one, with a thermocline between them:
+- a heating run charges the whole tank to the charged temperature;
+- water drawn takes energy out, counted from the litres on the water meter and the cold water temperature;
+- the standing loss slowly cools the tank;
+- the tank sensor at its height gives a bound: once the cold layer reaches it, the estimate cannot show more water
+  than the sensor allows;
+- the usable fraction of the tank is what can be drawn before the outlet runs lukewarm.
+
+Every formula, unit, default and the reason for it is in [docs/model.md](docs/model.md).
+
+## Tuning
+
+The defaults are a start, and the fit learns most values. Three settings decide how well the estimate matches your
+showers:
+- **The shower ran cold earlier than predicted:** press the "Shower ran cold" button right then. It sets the usable
+  fraction to the current cold fraction. Check the sensor height first if the charge errors are biased.
+- **Usable fraction** (Options): lower it when showers run cold with litres left, raise it when water remains after
+  the estimate reached zero. The button does this for you.
+- **Thermocline width** (Options): a wide layer makes the hot water run out more gradually. It is learned from the
+  first fall of the tank sensor after a charge; lock it if you set it by hand.
+- **Other draws hot share** (Options): the share of the litres outside showers (taps, washing machine, garden) that
+  is hot water. Raise it when the tank empties faster than predicted between showers, lower it when it empties
+  slower. It is learned from the heating runs.
+
+To see the effect of a setting on your own history, run the backtest from a checkout of this repository, on a
+history export (`scripts/history.py`) or a fixture:
+
+```sh
+uv run --no-project scripts/backtest.py EXPORT_DIR --volume 200 --map-file MAPPING.json \
+  --options '{"usable_fraction": 0.8}'
+```
+
+It prints the charge error at every heating run and the outputs through every shower, once with your options and once
+with the fitted ones. The usage, all arguments and what the numbers mean are in
+[docs/model.md](docs/model.md#the-backtest).
+
+## Troubleshooting
+
+- **No values after setup:** the sensors need a reading of the tank sensor first, and the heating-run based
+  estimates need at least one heating run. Check that the sources are available. The diagnostics download shows which
+  are.
+- **The setup fit did nothing:** the recorder holds no history for the sources, or they are excluded from it. Run the
+  recalibrate action later, or set the values in the options.
+- **Hot water remaining is always lower than the tank volume:** this is the usable fraction, see above.
+- **A steady error after each charge:** check the sensor height, then the tank volume.
+- **Shower detected is unavailable:** there is no humidity sensor and the long draw rule is off. Add a sensor or set
+  a long draw duration in the options.
+- **A shower is not detected:** lower the humidity rise or the long draw duration; several humidity sensors are
+  allowed.
+- **A value you set by hand is overwritten:** lock the parameter in the options.
+
+## Removal
+
+Open the entry under Settings, Devices and services, choose the three dots and Delete. The entities and the device
+go with it, and the stored model state and calibration are deleted. The source entities (meters, sensors) are not
+touched. To remove the integration completely, then remove it in HACS (or delete the folder from
+`custom_components`) and restart Home Assistant.
+
+## Limitations
+
+- The sensor height is entered by hand. A wrong value biases the estimate; the charge error sensors show it.
+- Tanks heated high up (a coil or element in the upper part) and a second heat source such as an electric element
+  are not supported. A coil low in the tank is.
+- One tank sensor only, and no probe on the hot outlet.
+- A shower in a room without a humidity sensor is not detected (the long draw rule covers part of it). It then counts
+  at the other draws share, and the sensor bound corrects the estimate once the cold layer reaches the sensor.
+- Garden watering and other large draws count at the other draws share, and the next charge resets them.
+- A humidity rise without a shower (cooking, humid weather) has no effect without water drawn; with a draw it errs
+  towards showing less.
+- A water meter that misses low flows loses small trickles, which errs towards showing more water.
+- Learning can drift in unusual weeks (guests, holidays). The error sensors show it, and locks and the recalibrate
+  action undo it.
+- A heating run cut short leaves the tank not uniform; the error shows at the next sensor bound.
+- The usable fraction is learned only from the button, not measured.
+- The integration displays only. It does not warn or control the heater.
+
 ## Dashboard example
 
 A section for a sections view, using only core cards. The entity IDs assume a tank named "Hot Water Tank", so
@@ -252,6 +357,42 @@ cards:
         name: Shower detected
 ```
 
+## Automation examples
+
+A notification when the shower time left drops below 10 minutes (the entity ID assumes a tank named "Hot Water
+Tank", and `notify.mobile_app_phone` stands for your own notifier):
+
+```yaml
+alias: Hot water is running low
+triggers:
+  - trigger: numeric_state
+    entity_id: sensor.hot_water_tank_shower_time_remaining
+    below: 10
+actions:
+  - action: notify.mobile_app_phone
+    data:
+      message: Less than 10 minutes of shower water left.
+```
+
+Charge the model by hand when the heater runs a boost or legionella cycle that the energy counter does not show.
+`binary_sensor.heater_boost_active` stands for your own sensor that is on during the cycle:
+
+```yaml
+alias: Hot water tank charged by the boost run
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.heater_boost_active
+    from: "on"
+    to: "off"
+actions:
+  - action: hot_water_tank_estimator.set_tank_state
+    target:
+      entity_id: sensor.hot_water_tank_hot_water_remaining
+    data:
+      tank_average: 60
+      charged_temperature: 60
+```
+
 ## Development
 
 See [docs/development.md](docs/development.md). `python scripts/lint.py` runs all checks with pinned tools.
@@ -263,4 +404,5 @@ MIT, see [LICENSE](LICENSE).
 The images in `custom_components/hot_water_tank_estimator/brand/` use parts of two Material Design Icons glyphs, the
 heat waves of `radiator` and the pipes of `water-boiler`, from the Pictogrammers `@mdi/svg` package (version
 7.4.47). They are (c) Pictogrammers and licensed under the
-Apache License 2.0, whose text is in [LICENSE-MDI](LICENSE-MDI). `scripts/brand.py` draws them.
+Apache License 2.0, whose text is in [LICENSE-MDI](LICENSE-MDI). `scripts/brand.py` draws them, with a light grey
+outline in the `dark_` variants for dark backgrounds.
