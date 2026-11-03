@@ -10,9 +10,11 @@ history, 1-31 October 2026, exported to `private/history/2026-10-01_2026-10-31/`
 30 days. The analysis scripts and their outputs are in `private/analysis/`.
 
 The installation has:
-- a 281 L effective tank (manufacturer figure);
+- a 300 L nominal tank holding about 285 L of water (from the manufacturer's empty and filled weights; the October
+  analysis used 281 L, which changes the fits by less than 0.1 K);
 - a ground source heat pump that charges it through an external circuit, which circulates the whole tank;
-- one tank temperature sensor about halfway up;
+- one tank temperature sensor in a sleeve 1020 mm up a 1660 mm tank, at about 58 % of the water volume once the
+  base and the dished bottom are taken off (the October analysis assumed 50 %; corrected on 2026-11-03);
 - the heat pump's thermal DHW energy counter (kWh), heat power, DHW-demand binary sensor, and production flow
   ("out") and return ("in") temperatures;
 - a whole-house water meter (m3, 1 L resolution, readings every 5 s during flow);
@@ -71,11 +73,15 @@ An evening price block keeps the heat pump from charging between 16:00 and 23:00
    - The recovery run's energy, less the start-up energy, puts the average at about 23 C. Against a charged
      temperature of about 55 C, that is a cold fraction of about 0.78 with the outlet still warm.
 6. **Sensor height and thermocline width** (from evidence 3 and 5).
-   - The 14 October shower did not move the sensor at a cold fraction of about 0.31, so with h = 0.5,
-     `h - w / 2 >= 0.31` and w is at most about 0.38.
-   - On 29 October the sensor reached 50 C (s = 0.89) at a cold fraction of about 0.35, which gives w of about
-     0.38. It reached 40 C at about 0.46, which gives about 0.28.
-   - So w is about 0.35 with the sensor at mid height.
+   - The sensor first leaves the charged temperature at a cold fraction of about 0.31-0.35 (14 October: a 141 L
+     shower at about 0.31 did not move it; 29 October: 50 C, s = 0.89, at about 0.35). That gives
+     `h - w / 2` of about 0.31-0.35 whatever the height.
+   - The width then depends on h. The October analysis assumed h = 0.5 and found w of about 0.28-0.38. With the
+     measured h of about 0.58, `w = 2 * (h - f)` gives about 0.46-0.54, and the full thermocline rule applied to
+     the 50 C point (s = 0.89 at about 0.35) gives about 0.59.
+   - A backtest of October at several heights (2026-11-03) has the lowest fitted charge error at h = 0.57-0.60
+     (1.5 K, against 1.9 K at 0.5), with a fitted w of 0.44-0.49. So the sensor height entered by the user matters,
+     and the shipped width default (0.35) is only a starting value that the setup fit replaces.
 
 ## Goals / Non-Goals
 
@@ -421,9 +427,10 @@ Alternatives:
 There is no existing integration to migrate from. Rollout on the development installation, each step with the
 user's authorization:
 1. Deploy the integration folder over SSH (the author's workspace deploy script gets a mapping) and restart.
-2. Add the config entry with that installation's entities (listed in the git-ignored `private/installation.md`)
-   and the tuned options from the backtest.
-3. Compare with the charge errors and sensor bounds in the diagnostics for a week, and tune.
+2. Add the config entry with that installation's entities, volume and sensor height (listed in the git-ignored
+   `private/installation.md`) and the shipped defaults. The setup fit learns the rest (user decision in task 4.6).
+3. Check the diagnostics over the next shower and heating runs (task 6.3), and keep comparing the charge errors and
+   sensor bounds for a week.
 4. Add a dashboard block.
 
 Rollback: remove the config entry and the folder. Nothing else depends on it.

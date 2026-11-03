@@ -57,7 +57,7 @@ device class (the heating active binary sensor is filtered by domain only).
 | Tank | Name | The name of the device. |
 | Tank | Tank volume | The effective volume of the tank in L, 20-2000. |
 | Tank | Tank temperature sensor | The temperature sensor of the tank. |
-| Tank | Sensor height | Where the sensor sits, in % of the tank height from the bottom, 20-80. Default 50. |
+| Tank | Sensor height | Where the sensor sits, in % of the water volume below it, 20-80. Default 50. See "Finding the sensor height". |
 | Water meter | Water meter | The total water meter of the house. It needs a volume unit: L, m3, gal or ft3. |
 | Heat input | Heat energy counter | The thermal energy counter of the heater (kWh, or another energy unit, which is converted). |
 | Heat input | Heat power sensor | The heat power of the heater (W, or another power unit, which is converted). |
@@ -70,6 +70,17 @@ device class (the heating active binary sensor is filtered by domain only).
 At least one of the energy counter, the power sensor and the heating active binary sensor is needed. Without
 flow and return, the tank sensor gives the charged temperature at the end of a heating run. A tank sensor can
 belong to one entry only.
+
+### Finding the sensor height
+
+The height is the share of the tank's water that lies below the sensor. A connection height in the data sheet is
+measured from the floor, and the water column starts above it (base, bottom insulation, dished bottom), so a plain
+ratio to the outer height overstates it. Use the bottom and the top of the water column instead. (The empty and filled
+weights give the water volume, and with the inner diameter the height of the water column, so its bottom.) For
+example, a tank 1700 mm high has its water from 150 mm to 1650 mm, and the sensor sleeve is at 1000 mm. That is
+(1000 - 150) / (1650 - 150) = 850 / 1500 = 0.57, so enter 57, while the plain 1000 / 1700 would give 59. A wrong
+height shows as a bias in the charge errors of the diagnostic
+sensors.
 
 Temperature sensors in F or K are converted to C. Everything else has a default, so a fresh entry runs without
 opening the options.
@@ -166,7 +177,7 @@ These sensors have the diagnostic category, so they are hidden from dashboards b
 | Loss coefficient | 1/h | The same, with its `source`. |
 | Thermocline width | % | The same, with its `source`. |
 | Usable fraction | % | The same, with its `source`. |
-| Calibration samples | | The number of heating runs stored for the fit. |
+| Calibration samples | | The number of valid heating runs (closures) in the fit. Sensor starts and excluded runs are not counted. The first heating run after adding an entry is a sensor start, so it does not raise the count. |
 | Last charge error | K | The error of the model at the start of the last run. |
 | Mean charge error | K | The mean absolute error over the last 10 runs. |
 
@@ -174,6 +185,54 @@ A mean charge error that rises, or errors that keep one sign, point to a wrong s
 household. Check the sensor height first. Download the diagnostics of the entry to see the options, the state,
 which sources are available, the last 100 model events and every stored closure (heating run) with its status
 and reason.
+
+## Dashboard example
+
+A section for a sections view, using only core cards. The entity IDs assume a tank named "Hot Water Tank", so
+change them to match your entry. `sensor.tank_temperature` stands for your own tank temperature sensor.
+
+```yaml
+type: grid
+cards:
+  - type: heading
+    heading: Hot Water
+    icon: mdi:water-boiler
+  - type: tile
+    entity: sensor.hot_water_tank_tank_water_remaining
+    name: Tank water
+    grid_options:
+      columns: 6
+  - type: tile
+    entity: sensor.hot_water_tank_shower_water_remaining
+    name: Shower water
+    grid_options:
+      columns: 6
+  - type: tile
+    entity: sensor.hot_water_tank_percent_charged
+    name: Charged
+    grid_options:
+      columns: 6
+  - type: tile
+    entity: sensor.hot_water_tank_shower_time_remaining
+    name: Shower time
+    grid_options:
+      columns: 6
+  - type: history-graph
+    title: Last 24 hours
+    hours_to_show: 24
+    grid_options:
+      columns: full
+      rows: 5
+    entities:
+      - entity: sensor.hot_water_tank_tank_average_temperature
+        name: Tank average
+      - entity: sensor.hot_water_tank_charged_temperature
+        name: Charged temperature
+      - entity: sensor.tank_temperature
+        name: Tank sensor
+      - entity: binary_sensor.hot_water_tank_shower_detected
+        name: Shower detected
+```
 
 ## Development
 

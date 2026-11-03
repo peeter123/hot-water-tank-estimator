@@ -5,7 +5,7 @@ context: |
   (DHW) tank that has no flow meter on the tank itself. It keeps an energy balance of the tank from a house water
   meter, the heater's energy counter, the tank temperature sensor (at a configurable height), the heater's flow and
   return temperatures and a bathroom humidity sensor.
-  Developed against one live installation: a 281 L tank on a ground source heat pump, with an evening price block
+  Developed against one live installation: a 285 L tank on a ground source heat pump, with an evening price block
   that stops reheating. It is meant to be published on GitHub for others to install, so every source entity, volume
   and tuning value comes from the config flow; nothing about one installation is hard-coded.
 

@@ -138,7 +138,11 @@ cold layer was already near the sensor.
 ## The tank sensor as a measurement
 
 The sensor sits at height `h` (configurable 20-80 %, default 50 %), because outside that range it would see only one
-layer for most of the cycle. The thermocline is `w` wide (default 0.35). While heating is not active, with
+layer for most of the cycle. `h` is the share of the water volume below the sensor, not of the outer height of the
+tank: the water column starts above the floor (base, bottom insulation, dished bottom). On a tank whose sensor sleeve
+is at 1020 mm of 1660 mm outer height (0.61), `h` is about 0.58 of the water. A wrong height shows as a bias in the
+charge errors: on the development installation 0.50 instead of 0.58 raised the fitted error from 1.5 to 1.9 K. The
+thermocline is `w` wide (default 0.35). While heating is not active, with
 `delta = 1.5 K` and `m = 2 K`, and `h - w / 2` and `h + w / 2` limited to 0-1:
 
 | Sensor reading `t_s` | Meaning | Rule |
@@ -176,11 +180,13 @@ other rules at its ends. When neither is limited, `f_s = h + w / 2 - s * w`.
   not detected.
 - **The margin** lets the energy balance smooth sensor noise and steps of 0.1 K. 2 K is about the sensor's change for
   20 L of shower in the thermocline.
-- **The default `w = 0.35`** comes from two drains with the sensor at mid height. A 141 L shower at a cold fraction of
-  about 0.31 did not move the sensor, so `h - w / 2 >= 0.31` and `w` is at most about 0.38. In a long drain the sensor
-  reached 50 C (`s = 0.89`) at a cold fraction of about 0.35, which gives `w` of about 0.38, and 40 C at about 0.46,
-  which gives about 0.28. So `w` is about 0.35. The tolerance of 1.5 K covers the slow loss of the top layer between
-  charges.
+- **The default `w = 0.35`** is a generic starting value, and the setup fit replaces it. The evidence of the
+  development installation is two drains. A 141 L shower at a cold fraction of about 0.31 did not move the sensor,
+  and in a long drain the sensor reached 50 C (`s = 0.89`) at a cold fraction of about 0.35 and 40 C at about 0.46.
+  Together they give `h - w / 2` of about 0.31-0.35. With that tank's measured height of about 0.58,
+  `w = 2 * (h - f)` is about 0.46-0.54, and the full thermocline rule applied to the 50 C point gives about 0.59. Its
+  setup fit gives 0.44. At mid height the same drains read as `w` of about 0.35, which is why the
+  default stays. The tolerance of 1.5 K covers the slow loss of the top layer between charges.
 - The rules are re-evaluated on every sensor reading, every 5-minute tick and after every draw, so the bounds hold
   through a long shower.
 
@@ -306,7 +312,9 @@ A closure is excluded from the fit and from the error statistics when:
   next interval is excluded too, because it has no known charged start.
 
 The first charge of a replay is a sensor start and not a closure: the model starts at the sensor's reading, which
-ignores the draws since the real last charge. Its error is information only. Without an energy counter or power
+ignores the draws since the real last charge. Its error is information only. The same holds live: a new entry starts
+at the tank sensor's reading, so its first heating run is a sensor start and does not raise the number of
+calibration samples. The run after it is the first closure. Without an energy counter or power
 sensor there are no closures, and `k` comes from quiet windows only.
 
 ### Learning

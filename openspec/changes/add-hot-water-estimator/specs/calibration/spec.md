@@ -40,6 +40,14 @@ E_run is the run's energy in kWh and S the start-up energy in use. The charge er
 run's start minus that true average. It SHALL be stored with the sums of the interval before the run and of the run:
 the mixed-draw drop, the other-draw term, the loss term, E_run and the hours.
 
+The first charge after the model started from a sensor reading (a new entry, or the start of a replay) has no known
+charged start. It SHALL be stored as a sensor start: its error is kept as information, but it is not a closure, it
+does not count as a calibration sample, and it is not used for learning.
+
+#### Scenario: First run after a new entry
+- **WHEN** a new entry started at the tank sensor's reading, and its first heating run ends
+- **THEN** that run is stored as a sensor start, the samples sensor does not go up, and the next run is a closure
+
 #### Scenario: Error at a recovery run
 - **WHEN** a run with E_run 10.64 kWh ends at T_charge 49.9 C on a 281 L tank, S is 1.8 kWh, and the model held
   T_avg 25.0 C at the run's start

@@ -14,7 +14,7 @@
         "data_description": {
           "volume": "The effective volume of the tank, 20-2000 L.",
           "tank_sensor": "The temperature sensor of the tank.",
-          "sensor_height": "Where the sensor sits in the tank, as a percentage of the tank height from the bottom (20-80). The data sheet of the tank gives it."
+          "sensor_height": "Share of the tank's water below the sensor, in % (20-80). See the README for how to work it out from the data sheet."
         }
       },
       "water_meter": {
@@ -100,7 +100,7 @@
         "data_description": {
           "volume": "The effective volume of the tank, 20-2000 L.",
           "tank_sensor": "The temperature sensor of the tank.",
-          "sensor_height": "Where the sensor sits in the tank, as a percentage of the tank height from the bottom (20-80). The data sheet of the tank gives it.",
+          "sensor_height": "Share of the tank's water below the sensor, in % (20-80). See the README for how to work it out from the data sheet.",
           "thermocline_width": "The width of the layer between hot and cold water, as a percentage of the tank. Learned from the first sensor drop after each charge.",
           "usable_fraction": "The fraction of the tank that can be drawn before the outlet runs cold, 0.5-0.98. The Shower ran cold button learns it.",
           "mix_temperature": "The temperature of your shower water.",

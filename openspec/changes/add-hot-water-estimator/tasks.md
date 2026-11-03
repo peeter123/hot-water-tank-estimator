@@ -243,11 +243,15 @@ Applies to every group:
 
 ## 6. Rollout on the development installation (each task needs the user's authorization)
 
-- [ ] 6.1 In the config workspace `<config-workspace>`, add a `$Mappings` entry to `scripts/deploy.ps1`
-  for `custom_components/hot_water_tank_estimator/` -> `custom_components/hot_water_tank_estimator/`, and document
-  it in its `docs/deploy.md`. With authorization: deploy and restart Home Assistant. Verify: the deploy hook reports
-  the upload, and the integration appears in the list of integrations that can be added.
-- [ ] 6.2 With authorization, add the config entry with the entities and sensor height from
+- [x] 6.1 In the config workspace `<config-workspace>` (it moved there from
+  `<config-workspace>` on 2026-10-31), add a `$Mappings` entry to `scripts/deploy.ps1` for
+  `custom_components/hot_water_tank_estimator/` -> `custom_components/hot_water_tank_estimator/`, without
+  `__pycache__` files, and document it in its `docs/deploy.md`. With authorization: deploy and restart Home
+  Assistant. Verify: the deploy reports the upload, and the integration appears in the list of integrations that
+  can be added.
+  - The Verify wording changed on 2026-11-03 from "the deploy hook reports" to "the deploy reports", because this
+    repo has no deploy hook, and the `__pycache__` exclusion was added.
+- [x] 6.2 With authorization, add the config entry with the entities and sensor height from
   `private/installation.md`. Verify, through the home-assistant MCP server:
   - every entity exists;
   - the setup fit reports at least 20 samples from the recorder's 30 days;
@@ -255,21 +259,31 @@ Applies to every group:
   - T_avg is within 3 K of the tank sensor while the sensor reads the hot layer.
 
   Record the result in `private/installation.md`.
-- [ ] 6.3 Live check over the next shower and the next heating run:
-  - shower detected turns on within 2 minutes;
+- [x] 6.3 Live check over the next shower and the next two heating runs:
+  - shower detected turns on within the reclassify window (10 minutes), and the session's litres are counted as
+    mixed;
   - shower water drops by about the shower's litres;
-  - the charge event's error is 3 K or less;
-  - the samples sensor goes up by one.
+  - T_avg is within 3 K of the tank sensor after the first draw or heating run, while the sensor reads the hot
+    layer;
+  - the second live run's charge event has an error of 3 K or less, and the samples sensor goes up by one with it.
+    The first live run after setup is a sensor start, not a closure: the live model started at the sensor reading,
+    so that run has no known charged start (decided with the user on 2026-11-03, after the group 6 review).
 
   Record the result in `private/installation.md`. Verify: the diagnostics download shows these events.
-- [ ] 6.4 With authorization, add a "Hot Water" block next to the DHW Price Block section of the heating dashboard:
+  - Done 2026-11-04. The shower of 2026-11-03 was detected 3 min 57 s after it started, which missed the original
+    criterion "within 2 minutes". Humidity detection is that slow by design, and the reclassification counted the
+    whole session as mixed: the tank average fell 6.04 K against 5.99 K expected. The user accepted it on
+    2026-11-04 and the criterion was reworded to the reclassify window. Run 2 closed with a charge error of -1.81 K,
+    and the samples went from 26 to 27 when the closure was final, 10 minutes after the charge (counter lag).
+- [x] 6.4 With authorization, add a "Hot Water" block next to the DHW Price Block section of the heating dashboard:
   - tiles for tank water, shower water, percent charged and shower minutes;
   - a 24 h history graph of the tank average, the charged temperature, the tank sensor and shower detected.
 
   Edit it with a targeted dashboard transform. Document it in the config workspace's `docs/dhw-price-block.md`,
   update its `CLAUDE.md` note from "planned" to "live", and update `private/installation.md`. Verify: a dashboard
   search for the new entities finds the cards.
-- [ ] 6.5 Add stock-card dashboard example YAML to the README, with made-up entity IDs. Verify: the example uses
+  - The config workspace's `CLAUDE.md` had no "planned" note, so a "live" bullet was added instead.
+- [x] 6.5 Add stock-card dashboard example YAML to the README, with made-up entity IDs. Verify: the example uses
   only core cards and `hot_water_tank_estimator` entity names.
 
 ## 7. Packaging and release

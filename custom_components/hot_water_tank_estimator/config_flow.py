@@ -426,8 +426,8 @@ class HotWaterTankEstimatorConfigFlow(ConfigFlow, domain=DOMAIN):
 class HotWaterTankEstimatorOptionsFlow(OptionsFlowWithReload):
     """Handle the options: the tank, the sources, the draw values and the learning.
 
-    The entry reloads when the options change. The model state survives through the restore
-    data of the tank average sensor and the calibration through the store.
+    The entry reloads when the options change. The model state and the calibration survive
+    through the entry's store.
     """
 
     def __init__(self) -> None:

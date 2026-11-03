@@ -627,6 +627,23 @@ async def test_live_learning_at_each_charge(
     assert saved["model"]["t_ch"] == pytest.approx(estimator.model.t_ch)
 
 
+async def test_first_run_after_a_new_entry(hass: HomeAssistant, freezer) -> None:
+    """A new entry starts at the sensor reading: its first run is a sensor start, then closures."""
+    rig = await Rig.start(hass, freezer)
+    estimator = rig.entry.runtime_data
+    assert rig.read("sensor", "calibration_samples") == "0"
+
+    kwh = await run_heating(rig, 10.0)
+    await rig.tick(11)
+    assert [c.status for c in estimator.calibrator.closures] == [SENSOR_START]
+    assert rig.read("sensor", "calibration_samples") == "0"
+
+    await run_heating(rig, kwh)
+    await rig.tick(11)
+    assert [c.status for c in estimator.calibrator.closures] == [SENSOR_START, CLOSURE]
+    assert rig.read("sensor", "calibration_samples") == "1"
+
+
 async def test_continuous_inputs_do_not_postpone_the_save(
     hass: HomeAssistant, freezer, hass_storage
 ) -> None:

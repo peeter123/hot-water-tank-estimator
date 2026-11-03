@@ -4,10 +4,10 @@
 
 A domestic hot water tank usually has one temperature sensor and no flow meter of its own, so Home Assistant
 cannot say how much hot water is left. That matters most when reheating is blocked or slow, for example during an
-evening price block on a heat pump. On the development installation, evening showers of 240-360 L ran a 281 L tank
+evening price block on a heat pump. On the development installation, evening showers of 240-360 L ran a 285 L tank
 down to 22-28 C at its sensor five times in October 2026, with no warning beforehand.
 
-The tank sensor alone is a poor gauge. On that installation it sits halfway up the tank, and showers of 95-150 L
+The tank sensor alone is a poor gauge. On that installation it sits a little above halfway, and showers of 95-150 L
 did not move it at all. It only starts falling when the cold layer from below reaches it, and then it falls fast.
 Most homes do have a whole-house water meter and the heater's energy counter, often also the heater's flow and
 return temperatures and a bathroom humidity sensor. Together these allow an energy balance of the tank, and the

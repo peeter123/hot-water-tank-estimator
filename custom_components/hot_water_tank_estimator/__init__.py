@@ -47,12 +47,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: TankConfigEntry) -> bool
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: TankConfigEntry) -> bool:
-    """Unload a tank, saving its calibration."""
+    """Unload a tank, saving its model and calibration to the store."""
     if unloaded := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         await entry.runtime_data.async_stop()
     return unloaded
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: TankConfigEntry) -> None:
-    """Delete the calibration store of a removed tank."""
+    """Delete the store (model and calibration) of a removed tank."""
     await Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}").async_remove()
