@@ -403,7 +403,7 @@ controls they asked for go to the follow-up change `add-tank-insights-and-contro
     - the hot layer in #FF4809 and the cold layer in #186CFF;
     - the yellow band between them 1.5 times as thick, blending by a gradient into the layers on either side.
 
-The release task (8.5: tag `v0.1.0`, publish the release, set the manifest version) moved to task 8.1 of
+The release task (8.5: tag `v0.1.0`, publish the release, set the manifest version) moved to group 8 of
 `add-tank-insights-and-controls` on 2026-11-04, at the user's request, so that this change can be archived. The
 first push to GitHub stays with this change: it follows the archive.
 

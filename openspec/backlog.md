@@ -114,3 +114,23 @@ are not lost.
   shorter than a minimum (15 minutes, as for closures), with the heat counted as energy only. Evidence needed: how
   often short runs occur in the recorder history, and a backtest. Decided as a backlog item by the user on
   2026-11-04.
+
+## Manifest categories, after the next Home Assistant release
+
+Added 2026-11-04 at the user's request, taken out of `add-tank-insights-and-controls` (it was task 8.1 there).
+
+- **Why.** The first CI run on GitHub (2026-11-04) had the HACS action warn "The integration manifest has no
+  categories". The user chose `"categories": ["climate.water_heaters", "helpers.calculate_value"]` (1-3 values from
+  https://contributors.home-assistant.io/core/integrations/categories/).
+- **Why not yet.** hassfest in Home Assistant 2026.10.4, the version the test pin
+  (`pytest-homeassistant-custom-component` 0.13.375) targets and the runner builds hassfest from, rejects the key:
+  "Invalid manifest: not a valid option at 'categories'". The 2026.11 release candidate (2026.11.0b5) and the dev
+  branch accept it; CI's `hassfest@master` would too. Home Assistant 2026.10 does not validate the manifest at
+  runtime, so the key is harmless for older versions.
+- **Steps, once a Home Assistant release accepts the key and a matching
+  `pytest-homeassistant-custom-component` exists:**
+  1. Bump the test pin in `requirements_test.txt` and the pin table in `docs/development.md`.
+  2. Rebuild the remote test runner image, so hassfest comes from the new release tag.
+  3. Add the categories to the manifest in hassfest's key order, with a check in `tests/test_manifest.py`, and add
+     them to the packaging spec's "Installable through HACS" requirement (a MODIFIED delta).
+  4. Verify with `python scripts/lint.py --hassfest`, and after a push the HACS action no longer warns.

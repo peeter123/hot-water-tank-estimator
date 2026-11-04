@@ -119,7 +119,7 @@ No existing entity, automation or card changes behaviour.
 ## Out of scope
 
 - **Tagging and publishing the first release** (`v0.1.0`). The packaging capability defines what a release must
-  meet, but the release itself moved on 2026-11-04 to `add-tank-insights-and-controls` (task 8.1), so that it
+  meet, but the release itself moved on 2026-11-04 to `add-tank-insights-and-controls` (group 8), so that it
   includes that change.
 - **Acting on the estimate**, such as a phone warning when hot water runs low during a price block, or releasing a
   block or starting a heating run. The first version only displays. Follow-up change:
