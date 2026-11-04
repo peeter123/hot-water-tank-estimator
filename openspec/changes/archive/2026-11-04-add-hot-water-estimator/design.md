@@ -275,7 +275,8 @@ active, with tolerance `delta` (default 1.5 K) and margin m (default 2 K):
 - The estimator subscribes with `async_track_state_change_event` to every configured source: the water meter, the
   energy counter or power sensor, the heating binary sensor, the flow and return sensors, the tank sensor, the
   humidity sensors and the cold water sensor.
-  - Flow and return are kept as a 2-minute ring of readings for D4.
+  - Flow and return are kept as a 20-minute ring of readings for D4. The charge uses the last 2 minutes before the
+    run end, and a run ended by the counter timeout is found 10 minutes late, so the ring must reach that far back.
   - A 5-minute `async_track_time_interval` runs loss and the sensor bounds.
   - Events instead of polling keep each litre and each heat step exact.
 - Entities subscribe to the estimator through a dispatcher signal. There is no coordinator because nothing is
@@ -311,6 +312,8 @@ active, with tolerance `delta` (default 1.5 K) and margin m (default 2 K):
   says so.
 - Diagnostics: options, state, source availability and a ring of the last 100 events.
 - Translations go in `strings.json` and `translations/en.json`, plain text.
+- The icon and logo ship in the integration's own `brand/` folder (Home Assistant 2026.3 and later), so the brands
+  repository is not needed (decided 2026-11-03).
 
 ### D10: Test data from recorded history
 
@@ -462,5 +465,3 @@ Rollback: remove the config entry and the folder. Nothing else depends on it.
 
 - Whether to exclude dishwasher and washing machine fills, where the appliance integration reports them, with
   optional "cold appliance" water sensors. This can be added later without changing the model.
-- The icon and logo ship in the integration's own `brand/` folder (Home Assistant 2026.3 and later), so the brands
-  repository is not needed (decided 2026-11-03).

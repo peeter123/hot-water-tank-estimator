@@ -94,3 +94,23 @@ From `add-tank-insights-and-controls` (proposal, Out of scope).
 - A second heat source, such as an electric element, heats only the water above it. It needs a model with two zones,
   and evidence from a tank that has one.
 - The development installation has no element.
+
+## Small follow-ups from the whole-change review of add-hot-water-estimator
+
+Added 2026-11-04, from the review before that change was archived. Neither is blocking; they are kept here so they
+are not lost.
+
+- **Persist the calibrator's open windows.** The armed first-drop state (thermocline width) and the open quiet
+  window (loss) are not stored. A reload, including every options save, between a charge and the first sensor drop
+  loses that width estimate, and a reload during a quiet night loses that loss estimate. Store both with the
+  calibration state, and test that a reload keeps them.
+- **Guard the fixtures against real entity IDs.** The packaging scenarios "Fixture from real history" and
+  "Markdown with CRLF" were verified once by hand (tasks 3.2 and 1.3). Add tests: one that every entity ID in
+  `tests/fixtures/` is one of the made-up IDs, and one that the Markdown check rejects a CRLF file.
+- **Short heating runs charge the model.** Every heating run ends with T_avg = T_ch = the charged temperature,
+  however short. Calibration already ignores runs under 15 minutes, because a short run does not mix the tank. A
+  2-minute demand blip on a 40 %-drawn tank resets the estimate to full, and while the sensor still reads the hot
+  layer nothing corrects it until the cold layer reaches the sensor or a real run ends. Option: no charge for runs
+  shorter than a minimum (15 minutes, as for closures), with the heat counted as energy only. Evidence needed: how
+  often short runs occur in the recorder history, and a backtest. Decided as a backlog item by the user on
+  2026-11-04.

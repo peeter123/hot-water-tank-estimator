@@ -528,9 +528,11 @@ replays with fixed options and reports the same errors, so fitted options can be
 becomes a `History` with `history_from_fixture`, and a recorder export with the reader in the backtest script.
 
 In the integration the fit runs in the background when an entry is first set up, and again at each start until it
-has run once (a recorder that is missing or holds no history does not count). Sources excluded from the recorder
-weaken it, because their rows are missing. The live model does not take the replay's end state: it keeps its own
-state, which starts at the tank sensor's reading, and only the calibration comes from the fit.
+has run once (a missing recorder integration does not count, so the fit runs again at the next start; a recorder
+that returns no rows for the sources counts as done, and the values stay at the options until the recalibrate action
+runs). Sources excluded from the recorder weaken it, because their rows are missing. The live model does not take
+the replay's end state: it keeps its own state, which starts at the tank sensor's reading, and only the calibration
+comes from the fit.
 
 The replay feeds the ends of the showers it finds to the calibrator, so a fit or a recalibrate fills the shower flow
 history, and replaces the history before it. A shower detected while a background fit ran is added to the replay's

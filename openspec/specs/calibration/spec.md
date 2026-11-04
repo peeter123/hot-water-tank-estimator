@@ -1,4 +1,4 @@
-# Spec Delta
+# calibration Specification
 
 ## Purpose
 
@@ -6,7 +6,7 @@ Fits each tank's parameters to that tank: from recorder history at setup, at eve
 from the user's report that a shower ran cold. Every installation then gets values that fit its own house, not
 those of the development installation.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Learned parameters and their bounds
 The integration SHALL learn the following parameters, each kept within its bounds:
@@ -91,7 +91,8 @@ coefficient from the tank sensor's fall, while the sensor still reads within the
 open no earlier than 1 hour after a run end, because the sensor still settles then. The estimate is
 `k = rate / (T_mean - T_ambient)`, where rate is the fall in K/h and T_mean the window's mean sensor reading. From 3
 estimates on, their mean SHALL be the loss coefficient in use and the one the closure fit holds. With fewer, the
-closure fit SHALL fit k as well once 5 intervals are stored.
+mean of the estimates so far SHALL be the loss coefficient in use while fewer than 5 intervals are stored, or
+always when no energy counter or power sensor is configured; otherwise the closure fit SHALL fit k as well.
 
 #### Scenario: Quiet night
 - **WHEN** the sensor falls from 57.0 to 55.9 C over 8 hours with no draw and no heating, with T_ambient 20 C

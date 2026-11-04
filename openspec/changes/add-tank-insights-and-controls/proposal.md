@@ -106,6 +106,9 @@ These capabilities are added by `add-hot-water-estimator`, which must be archive
     restarting and removing the tile;
   - deploy and restart for the tank sensor temperature (group 7). Verify that the sensor is diagnostic, matches its
     source and names it. Roll back by deploying the previous commit and restarting.
+- **Release (group 8, moved here from `add-hot-water-estimator` on 2026-11-04):** with the user's authorization, set
+  the manifest version to 0.1.0, then tag and publish `v0.1.0` on GitHub. Verify that the workflows pass and that
+  HACS shows the version. Roll back by deleting the release and the tag.
 
 ## Out of scope
 

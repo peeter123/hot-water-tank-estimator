@@ -93,7 +93,9 @@ moment it is found SHALL be applied to the charged tank, and they belong to the 
 ### Requirement: A tank is charged at the end of a heating run
 When a heating run ends, T_avg and T_ch SHALL both be set to the charged temperature. When flow and return
 temperature sensors are configured, the charged temperature SHALL be the highest mean of their readings over the
-2 minutes before the run ended. Otherwise it SHALL be the tank sensor's reading.
+2 minutes before the run ended, where the reading in force at the start of those 2 minutes counts as well.
+Otherwise, or when flow and return have no reading with both values in that window, it SHALL be the tank sensor's
+reading.
 
 #### Scenario: Run ends below the setpoint
 - **WHEN** a run ends, and over its last 2 minutes the highest mean of flow and return was (52.2 + 48.4) / 2 = 50.3 C

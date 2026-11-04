@@ -18,7 +18,7 @@ only in the git-ignored `private/` folder.
     authorization for those commits only.
 - Live Home Assistant changes (deploy, restart, config entries, dashboards) need the user's explicit
   authorization. Do them through the home-assistant MCP server or the deploy script in the author's config
-  workspace (`<config-workspace>\scripts\deploy.ps1`), never by copying files by hand.
+  workspace (`scripts/deploy.ps1` there; its path is in `private/installation.md`), never by copying files by hand.
 - Never read or print `%USERPROFILE%\.ha_token`. Scripts read it themselves.
 - Plain text only in names, labels and UI strings: no emoji.
 

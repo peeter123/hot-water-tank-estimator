@@ -243,8 +243,8 @@ Applies to every group:
 
 ## 6. Rollout on the development installation (each task needs the user's authorization)
 
-- [x] 6.1 In the config workspace `<config-workspace>` (it moved there from
-  `<config-workspace>` on 2026-10-31), add a `$Mappings` entry to `scripts/deploy.ps1` for
+- [x] 6.1 In the author's config workspace (its path is in `private/installation.md`; it moved on 2026-10-31),
+  add a `$Mappings` entry to `scripts/deploy.ps1` for
   `custom_components/hot_water_tank_estimator/` -> `custom_components/hot_water_tank_estimator/`, without
   `__pycache__` files, and document it in its `docs/deploy.md`. With authorization: deploy and restart Home
   Assistant. Verify: the deploy reports the upload, and the integration appears in the list of integrations that
@@ -402,10 +402,10 @@ controls they asked for go to the follow-up change `add-tank-insights-and-contro
       pipes in the light grey, because the dark outline disappears on a dark background;
     - the hot layer in #FF4809 and the cold layer in #186CFF;
     - the yellow band between them 1.5 times as thick, blending by a gradient into the layers on either side.
-- [ ] 8.5 **User review.** Ask the user to authorize creating the GitHub repository, pushing, tagging `v0.1.0` and
-  publishing a release. Record the decision with its date. With authorization: set the manifest version to 0.1.0,
-  push, tag and release. Verify: the workflows pass on GitHub, and HACS on the development installation shows
-  version 0.1.0 when the repository is added as a custom repository.
+
+The release task (8.5: tag `v0.1.0`, publish the release, set the manifest version) moved to task 8.1 of
+`add-tank-insights-and-controls` on 2026-11-04, at the user's request, so that this change can be archived. The
+first push to GitHub stays with this change: it follows the archive.
 
 ## Workflow follow-up
 

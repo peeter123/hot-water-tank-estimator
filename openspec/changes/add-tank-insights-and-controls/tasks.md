@@ -384,13 +384,27 @@ Applies to every group:
     diagnostic and enabled, and reads 57.5 C like the source. Its `source_entity` names the source, and
     `sensor_height` is 58. T_avg was kept (49.43 to 49.42 C), and the system log is clean.
 
+## 8. Release (moved from `add-hot-water-estimator` task 8.5 on 2026-11-04)
+
+- [ ] 8.1 **User review.** Ask the user to authorize tagging `v0.1.0` and publishing a release. Record the decision
+  with its date. With authorization: set the manifest version to 0.1.0, push, tag and release. Verify: the
+  workflows pass on GitHub, and HACS on the development installation shows version 0.1.0 when the repository is
+  added as a custom repository.
+  - Decision 2026-11-03 (under the first change): the user created the repository
+    `peeter123/hot-water-tank-estimator` on GitHub and authorized a push once 6.3 of `add-hot-water-estimator` is
+    done. No tag, release or manifest version change yet: that waits for a later decision.
+  - Moved here on 2026-11-04 at the user's request, so that `add-hot-water-estimator` could be archived. The release
+    then includes this change.
+
 ## Workflow follow-up
 
 - `add-hot-water-estimator` was not archived before group 1, because its tasks 6.3 (live check) and 8.5 (release)
-  were still open. The user decided on 2026-11-03 to keep both changes open, in this order:
-  1. finish 6.3 and the release (8.5) of `add-hot-water-estimator`;
-  2. archive `add-hot-water-estimator`, so that the modified capabilities exist under `openspec/specs/`;
-  3. archive this change.
+  were still open. The user decided on 2026-11-03 to keep both changes open, and on 2026-11-04 moved the release
+  here (group 8). The order is:
+  1. finish 6.3 of `add-hot-water-estimator` (done 2026-11-04);
+  2. archive `add-hot-water-estimator`, so that the modified capabilities exist under `openspec/specs/` (done
+     2026-11-04, `openspec/changes/archive/2026-11-04-add-hot-water-estimator/`);
+  3. archive this change after the release (8.1).
 
   This change's delta specs modify those capabilities, so archiving it first would fail.
 - One fresh Opus review of the whole change before archiving (`openspec/config.yaml`, Review loop). It was started

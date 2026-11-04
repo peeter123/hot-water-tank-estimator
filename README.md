@@ -194,10 +194,11 @@ Both take a tank (an entity of the tank) as target. The temperatures of `set_tan
 
 The integration fits its parameters to your tank, so the defaults are only a start:
 - At setup, and with the recalibrate action, it replays the recorder history of the sources (up to the history
-  days) through the model, in the background. The fit reruns at each start until it has run once. Sources that
-  are excluded from the recorder weaken it, and with no history the values stay at the options. The fit covers the
-  other draws hot share, the start-up energy, the loss coefficient and the thermocline width. The share and the start-up
-  energy need at least 5 heating runs in the history.
+  days) through the model, in the background. The fit reruns at each start until it has run once, and it counts as run
+  when the recorder is set up but holds no history. Sources that are excluded from the recorder weaken it, and with no
+  history the values stay at the options. The fit covers the other draws hot share, the start-up energy, the loss
+  coefficient and the thermocline width. The share and the start-up energy need at least 5 valid closures, which takes
+  at least 6 heating runs in the history.
 - The model of the tank itself starts from the tank sensor's reading, not from the end state of the replay.
 - At the end of every heating run the run's energy shows how far the model was off at the start of the run. This
   needs an energy counter or a power sensor. The share, the start-up energy and the loss coefficient are refitted
@@ -340,8 +341,9 @@ with the fitted ones. The usage, all arguments and what the numbers mean are in
 - **No values after setup:** the sensors need a reading of the tank sensor first, and the heating-run based
   estimates need at least one heating run. Check that the sources are available. The diagnostics download shows which
   are.
-- **The setup fit did nothing:** the recorder holds no history for the sources, or they are excluded from it. Run the
-  recalibrate action later, or set the values in the options.
+- **The setup fit did nothing:** the recorder holds no history for the sources, or they are excluded from it. With no
+  history the fit counts as done and does not run again by itself. After you enable recording, run the recalibrate
+  action, or set the values in the options.
 - **Hot water remaining is always lower than the tank volume:** this is the usable fraction, see above.
 - **A steady error after each charge:** check the sensor height, then the tank volume.
 - **Shower detected is unavailable:** there is no humidity sensor and the long draw rule is off. Add a sensor or set
