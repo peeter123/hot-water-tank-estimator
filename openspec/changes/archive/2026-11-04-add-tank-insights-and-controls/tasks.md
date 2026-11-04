@@ -306,7 +306,7 @@ Applies to every group:
     fallback, the 3-minute minimum and the 24-hour undo. Splitting two showers in one detection is left to the
     backlog item `improve-shower-end-detection`, because a better end rule would split them. No default changed,
     so the docs only need the session-gap note above.
-- [ ] 5.6 Fix the findings of the whole-change review (2026-11-03), then deploy with authorization:
+- [x] 5.6 Fix the findings of the whole-change review (2026-11-03), then deploy with authorization:
   - the README dashboard example's `perform_action` key;
   - undo unavailable after a reset when the press did not change u (calibration scenario "Nothing left to undo after
     a charge", design D5);
@@ -317,6 +317,10 @@ Applies to every group:
   Verify: `python scripts/lint.py --hassfest`, then a follow-up Opus review. After an authorized deploy, verify that
   the undo button is unavailable and the number shows its device class. The deploy can wait for the release of the
   first change.
+  - Done 2026-11-04 at about 21:45, from master at `be615fc` (`v0.1.0`), with the user's authorization. The deploy
+    uploaded 4 files, the entry was `loaded` again after about a minute, and the state was kept. The undo button is
+    unavailable, and the "Shower flow" number has the volume flow rate device class (6.66 L/min learned). The system
+    log is clean.
 
 ## 6. Shower flow lock switch (added 2026-11-03 at the user's request)
 
@@ -386,7 +390,7 @@ Applies to every group:
 
 ## 8. Release (moved from `add-hot-water-estimator` task 8.5 on 2026-11-04)
 
-- [ ] 8.1 **User review.** Ask the user to authorize tagging `v0.1.0` and publishing a release. Record the decision
+- [x] 8.1 **User review.** Ask the user to authorize tagging `v0.1.0` and publishing a release. Record the decision
   with its date. With authorization: set the manifest version to 0.1.0, push, tag and release. Verify: the
   workflows pass on GitHub, and HACS on the development installation shows version 0.1.0 when the repository is
   added as a custom repository.
@@ -398,6 +402,11 @@ Applies to every group:
   - Decision 2026-11-04: the user authorized the version bump to 0.1.0, the tag `v0.1.0` and the push of master
     with the tag. The user creates the GitHub release from the tag. Task 5.6 (its deploy) is still open; the
     release does not depend on it.
+  - Done 2026-11-04: master `be615fc` and the tag `v0.1.0` were pushed, and the user published the release
+    "Hot Water Tank Estimator 0.1.0". Lint passed on master and the tag. Validate (HACS and hassfest) first failed
+    because the repository had no topics; after the user added them, the rerun on the tag passed. The HACS check on
+    the development installation was not done: the integration there is deployed by the script, and the user chose
+    to archive without adding the repository to HACS.
 
 ## Workflow follow-up
 
@@ -407,9 +416,10 @@ Applies to every group:
   1. finish 6.3 of `add-hot-water-estimator` (done 2026-11-04);
   2. archive `add-hot-water-estimator`, so that the modified capabilities exist under `openspec/specs/` (done
      2026-11-04, `openspec/changes/archive/2026-11-04-add-hot-water-estimator/`);
-  3. archive this change after the release (8.1).
+  3. archive this change after the release (8.1) (done 2026-11-04).
 
   This change's delta specs modify those capabilities, so archiving it first would fail.
 - One fresh Opus review of the whole change before archiving (`openspec/config.yaml`, Review loop). It was started
-  on 2026-11-03, and it also serves as the review of group 5.
+  on 2026-11-03, and it also serves as the review of group 5. Closed 2026-11-03 (`1e9f98d`), after groups 6 and 7;
+  since then only the version bump changed code.
 - Sync the delta specs into `openspec/specs/` and archive the change (`/opsx:archive`).

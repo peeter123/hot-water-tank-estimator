@@ -21,7 +21,8 @@ The config flow SHALL ask for:
 - the tank sensor and its height (20-80 %, default 50 %);
 - the total water meter;
 - at least one heat input: an energy counter, a heat power sensor or a heating-active binary sensor;
-- optionally: flow and return temperature sensors (as a pair), humidity sensors, and a cold water sensor.
+- optionally: flow and return temperature sensors (as a pair), humidity sensors, a cold water sensor and an ambient
+  temperature sensor for the air around the tank.
 
 #### Scenario: Required fields
 - **WHEN** a user leaves the tank sensor or the water meter empty
@@ -47,22 +48,29 @@ The config flow SHALL ask for:
 ### Requirement: Options flow tunes the model without losing its state
 The options flow SHALL let the user change:
 - every tuning value named in the defaults requirements below, and the sensor height;
-- the optional source entities (flow and return, humidity, cold water);
-- a lock for each learned parameter (see calibration);
+- the optional source entities (flow and return, humidity, cold water, ambient temperature);
+- a lock for each learned parameter, the shower flow included (see calibration);
 - the history days for the setup fit (1-30, default 30).
 
-Saving SHALL keep the current tank average, the charged temperature and the calibration state.
+Saving SHALL keep the current tank average, the charged temperature and the calibration state. Adding, removing or
+replacing the ambient temperature sensor SHALL start a recalibration, because the loss coefficient depends on it.
 
 #### Scenario: Change sensor height
 - **WHEN** T_avg is 44 C and the user changes the sensor height from 50 % to 65 %
 - **THEN** T_avg stays 44 C, and the next sensor bound uses 65 %
+
+#### Scenario: Add an ambient sensor
+- **WHEN** T_avg is 52 C and the user adds an ambient temperature sensor in the options
+- **THEN** T_avg stays 52 C, and a recalibration over the history days runs with that sensor's history
 
 ### Requirement: Reconfigure changes the tank and its sources
 A reconfigure step SHALL let the user change everything the config flow asked for, with the config flow's
 validation: the volume, the tank sensor and its height, the water meter, the heat inputs and the optional sources.
 The volume, the tank sensor, the water meter and the heat inputs SHALL change only here, not in the options flow. It
 SHALL refuse a tank sensor that another entry uses. Saving SHALL keep the tuning values, the locks, the history days,
-the tank average, the charged temperature and the calibration state, and SHALL reload the entry.
+the tank average, the charged temperature and the calibration state, and SHALL reload the entry. When the save
+adds, removes or replaces the ambient temperature sensor, a recalibration SHALL replace the calibration state, as in
+the options flow, because the loss coefficient depends on it.
 
 #### Scenario: Replace the water meter
 - **WHEN** T_avg is 50 C, the usable fraction is locked, and the user picks another water meter in reconfigure
@@ -71,6 +79,11 @@ the tank average, the charged temperature and the calibration state, and SHALL r
 #### Scenario: Tank sensor of another entry
 - **WHEN** the user picks a tank sensor that another entry already uses
 - **THEN** reconfigure refuses it and the entry stays unchanged
+
+#### Scenario: Ambient sensor in reconfigure
+- **WHEN** T_avg is 52 C and the user adds an ambient temperature sensor in reconfigure
+- **THEN** the entry reloads, T_avg stays 52 C, and a recalibration over the history days runs with that sensor's
+  history
 
 ### Requirement: Temperature and shape defaults
 Every tuning value SHALL have a default, so that a fresh entry runs without opening the options. The defaults for
@@ -83,11 +96,12 @@ temperatures and tank shape SHALL be those in the scenario below. The design rec
   - usable fraction 0.85;
   - mix temperature 38 C and maximum temperature 95 C;
   - sensor tolerance 1.5 K and sensor margin 2 K;
-  - ambient temperature 20 C;
+  - ambient temperature 20 C, and an ambient sensor fallback time of 3 hours;
   - cold water curve mean 12.5 C, amplitude 5 K and coldest day 46.
 
 ### Requirement: Draw and heat defaults
-The defaults for draws, losses and heat input SHALL be those in the scenario below.
+The defaults for draws, losses and heat input SHALL be those in the scenario below. The shower flow is a learned
+parameter, not a tuning value: its default applies until the first shower is learned, and only its lock is an option.
 
 #### Scenario: Fresh entry, draws and heat
 - **WHEN** a user finishes the config flow without opening the options
@@ -106,21 +120,25 @@ Each tank SHALL provide sensors (state class measurement) for:
 - shower water remaining (L), named "Shower water remaining";
 - percent charged (%), named "Charge level";
 - shower minutes remaining (min), named "Shower time remaining";
+- heat loss (W), named "Heat loss";
 - charged temperature, tank average and cold water temperature (C).
 
-It SHALL also provide a shower detected binary sensor, a "Shower ran cold" button and the calibration diagnostic
-sensors. Names SHALL be translated, without emoji. The user-facing names differ from the model's vocabulary where
-the model's terms read wrongly: "tank water" alone does not say that it is hot, and "percent charged" at 100 %
-beside fewer litres than the tank holds reads as an error, while "charge level" compares with the last charge.
+It SHALL also provide a shower detected binary sensor, a "Hot water ran out" button, an "Undo hot water ran out"
+button, a "Shower flow" number (L/min), a "Shower flow locked" switch, a "Tank sensor temperature" diagnostic
+sensor and the calibration diagnostic sensors.
+Names SHALL be translated, without emoji. The user-facing names differ from the model's vocabulary where the
+model's terms read wrongly: "tank water" alone does not say that it is hot, and "percent charged" at 100 % beside
+fewer litres than the tank holds reads as an error, while "charge level" compares with the last charge.
 
 #### Scenario: Units shown
 - **WHEN** the entities are listed
-- **THEN** both remaining sensors are in litres, the charge level in %, the minutes sensor in min, and the three
-  temperatures in degrees Celsius
+- **THEN** both remaining sensors are in litres, the charge level in %, the minutes sensor in min, the heat loss in
+  W, the shower flow in L/min, and the three temperatures and the tank sensor temperature in degrees Celsius
 
 #### Scenario: Names shown
 - **WHEN** a new entry titled "Hot Water Tank" is added
-- **THEN** its sensors include "Hot Water Tank Hot water remaining" and "Hot Water Tank Charge level"
+- **THEN** its entities include "Hot Water Tank Hot water remaining", "Hot Water Tank Charge level", "Hot Water Tank
+  Heat loss", "Hot Water Tank Hot water ran out" and "Hot Water Tank Shower flow"
 
 ### Requirement: Set tank state action
 The action `hot_water_tank_estimator.set_tank_state` SHALL take a target tank and optionally a tank average and a
@@ -153,7 +171,10 @@ After a Home Assistant restart or an entry reload, each tank SHALL restore:
 - the last water meter reading and the last energy counter reading;
 - the heating-run state, including the start-up energy used;
 - the current draw session;
-- the humidity window history.
+- the humidity window history;
+- the end of the last draw and the time T_avg was last reset (see draw-classification and calibration);
+- the shower in progress, with its flow so far;
+- the last ambient reading and when it was last good, for a sensor that is still configured.
 
 On the first start, with nothing restored, the tank SHALL start charged at the tank sensor's reading. If that is
 unavailable, it SHALL start at 50 C.
@@ -190,10 +211,85 @@ The integration SHALL provide config entry diagnostics with:
 - whether each source is available;
 - the most recent 100 model events, each with its time, kind, input change, and T_avg and T_ch before and after;
 - the calibration state: the parameters in use with their sources, the stored intervals with their charge errors,
-  and the width estimates.
+  the width estimates, the shower flow history and the undo record of the last "Hot water ran out" press.
 
-Event kinds are draw, heat, charge, loss, sensor bound and calibration.
+Event kinds are draw, heat, charge, loss, sensor bound, calibration, hot water ran out (accepted, rejected with its
+reason, or undone) and shower flow.
 
 #### Scenario: Download diagnostics
 - **WHEN** a user downloads diagnostics for a tank
 - **THEN** the file contains T_avg, T_ch, the options and the recent events
+
+#### Scenario: Rejected press in the diagnostics
+- **WHEN** a "Hot water ran out" press was rejected because no draw ended in the last 20 minutes
+- **THEN** the events contain a hot water ran out event marked rejected, with that reason
+
+### Requirement: Shower flow number
+The "Shower flow" number (device class volume flow rate) SHALL show the shower flow in use, with a `source`
+attribute (default, learned or locked),
+and `low` and `high` attributes with the lowest and highest flow in the shower flow history. Setting it SHALL set
+the shower flow to that value, within the bounds of 3-20 L/min, and lock it. Turning the lock off, with the "Shower
+flow locked" switch or in the options, SHALL turn learning back on.
+
+#### Scenario: Set the shower flow
+- **WHEN** the learned shower flow is 7.65 L/min and the user sets the number to 9
+- **THEN** the shower flow in use is 9 L/min with source locked, and later showers add to the history without
+  changing it
+
+#### Scenario: Unlock in the options
+- **WHEN** the shower flow is locked at 9 L/min and the user turns its lock off in the options
+- **THEN** the shower flow in use is the median of the history again, with source learned
+
+### Requirement: Shower flow lock switch
+The "Shower flow locked" switch SHALL show and set the shower flow lock, which is the same lock as in the options
+and the number, also after a restart or a reload. On SHALL lock the flow in use at that moment. Off SHALL return to
+the median of the history, within its bounds, with source learned, or to the starting value while the history is
+empty. Setting the number SHALL turn the switch on. The history SHALL keep filling while it is on.
+
+#### Scenario: Lock the learned flow
+- **WHEN** the learned shower flow is 7.65 L/min and the user turns the switch on
+- **THEN** the shower flow in use stays 7.65 L/min with source locked, and later showers do not change it
+
+#### Scenario: Setting the number turns the switch on
+- **WHEN** the switch is off and the user sets the number to 9
+- **THEN** the switch is on, and the shower flow in use is 9 L/min with source locked
+
+#### Scenario: Unlock with the switch
+- **WHEN** the shower flow is locked at 9 L/min, the history's median is 7.65 L/min, and the user turns the switch
+  off
+- **THEN** the number shows 7.65 L/min with source learned, and the shower flow lock in the options is off
+
+#### Scenario: Unlock with an empty history
+- **WHEN** the shower flow is locked at 9 L/min, the history is empty, and the user turns the switch off
+- **THEN** the number shows the default of 7.5 L/min with source default
+
+#### Scenario: Lock in the options
+- **WHEN** the user turns the shower flow lock on in the options
+- **THEN** the switch is on after the reload
+
+### Requirement: Tank sensor temperature diagnostic sensor
+The "Tank sensor temperature" sensor SHALL be a diagnostic sensor (C, device class temperature, state class
+measurement) that shows the tank sensor reading as the model receives it, in degrees Celsius. It SHALL be
+unavailable while the tank sensor is unavailable or not numeric. Its `source_entity` attribute SHALL give the tank
+sensor's entity ID, and its `sensor_height` attribute the configured sensor height in %.
+
+#### Scenario: Reading shown
+- **WHEN** the tank sensor `sensor.tank_probe` reads 55.8 C and the sensor height is 58 %
+- **THEN** the tank sensor temperature is 55.8 C, with `source_entity` `sensor.tank_probe` and `sensor_height` 58
+
+#### Scenario: Reading in Fahrenheit
+- **WHEN** the tank sensor reads 132.8 F
+- **THEN** the tank sensor temperature is 56.0 C
+
+#### Scenario: Source unavailable
+- **WHEN** the tank sensor becomes unavailable
+- **THEN** the tank sensor temperature is unavailable, while the tank average keeps its value
+
+### Requirement: Heat loss sensor
+The "Heat loss" sensor SHALL show the standing heat loss of the tank in W as `k * C * (T_avg - T_ambient) * 1000`,
+with k the loss coefficient in use, `C = 1.163 * V / 1000` kWh/K and T_ambient the ambient temperature in use (see
+tank-model), rounded to whole watts. It SHALL read 0 W when T_avg is at or below T_ambient.
+
+#### Scenario: Standing loss of a charged tank
+- **WHEN** V is 285 L, k 0.0039 per hour, T_avg 58 C and T_ambient 19.5 C
+- **THEN** the heat loss is 0.0039 * 0.331 * 38.5 * 1000 = 50 W
