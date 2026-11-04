@@ -1,6 +1,6 @@
 [project]
 name = "hot-water-tank-estimator"
-version = "0.0.1"
+version = "0.1.0"
 description = "Home Assistant custom integration that estimates the hot water left in a DHW tank"
 license = "MIT"
 requires-python = ">=3.14.2"

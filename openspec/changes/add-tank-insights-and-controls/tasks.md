@@ -395,6 +395,9 @@ Applies to every group:
     done. No tag, release or manifest version change yet: that waits for a later decision.
   - Moved here on 2026-11-04 at the user's request, so that `add-hot-water-estimator` could be archived. The release
     then includes this change.
+  - Decision 2026-11-04: the user authorized the version bump to 0.1.0, the tag `v0.1.0` and the push of master
+    with the tag. The user creates the GitHub release from the tag. Task 5.6 (its deploy) is still open; the
+    release does not depend on it.
 
 ## Workflow follow-up
 

@@ -14,5 +14,5 @@
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/peeter123/hot-water-tank-estimator/issues",
   "requirements": [],
-  "version": "0.0.1"
+  "version": "0.1.0"
 }
