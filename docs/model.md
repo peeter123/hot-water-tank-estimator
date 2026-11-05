@@ -551,10 +551,16 @@ from quiet windows.
 
 ### The backtest
 
-`scripts/backtest.py` is the developer's view of what an entry's setup fit does. It runs the setup fit on a fixture
-or on a history export, then replays the history with the options as given and with the fitted ones. It prints the
-charge error at every closure for both, the outputs through every shower, the fitted parameters with their sources
-and the mean absolute error for both. On a fixture:
+`scripts/backtest.py` is the developer's view of what an entry's setup fit does. It runs the setup fit on a fixture or
+on a history export, then replays the history with the options as given and with the fitted ones. It prints the charge
+error at every closure for both, the showers, the fitted parameters with their sources and the mean absolute error for
+both. The shower list has the sessions with at least 50 L counted as mixed. A line gives the session's start and end
+(first and last litre, UTC), its litres, the litres counted as mixed (a detection's reclassified litres included), its
+minutes of flow and its shower flow sample, or `no sample`, then the tank and shower litres at the start, each quarter
+and the end. A shower's sample is the first one the model reports after its last litre and before the next draw counted
+as other; it needs 3 minutes of flow. Showers held by one detection share one sample. A second list gives every shower
+flow sample the model reported (time, litres, minutes, flow), so samples of fragments and of small detections show too,
+and the totals give the litres drawn, counted as mixed and reclassified, per options set. On a fixture:
 
 ```sh
 uv run --no-project scripts/backtest.py tests/fixtures/week.json

@@ -4,44 +4,6 @@ Follow-up changes that are agreed but not yet proposed. Each one becomes an Open
 when it is taken up. Installation-specific evidence stays in `private/installation.md`; the items here only point
 to it.
 
-## improve-shower-end-detection
-
-Added 2026-11-03 at the user's request, after the live shower check of `add-tank-insights-and-controls` (task 5.4).
-
-**Problem.**
-- Humidity detection ends when the reading falls to less than half the rise (3 points by default) above the
-  lowest reading in the humidity window (60 minutes by default). The pre-shower readings set that minimum and stay
-  in the window, so detection lasts about one window after the rise, even though the bathroom humidity drops
-  sharply once the water stops.
-- On the development installation on 2026-11-03, the shower ended at 20:45. The humidity peaked at 83.8 % at 20:49
-  and was at 69.3 % at 20:57. Detection began at 20:40 and ended only at 21:39.
-- While detection is on, every draw counts as mixed and adds to the shower's flow sample. That holds for a toilet
-  flush or a washbasin in the tail as well: about 0.4 K too much for a 7 L flush.
-- The shower end, and so its flow sample, is reported late.
-- While detection is on, "Shower time remaining" keeps `flow_basis: current_shower`, with the rolling flow of the
-  shower's last 2 minutes of flow, long after the water stopped. On 2026-11-03 it still showed 6.54 L/min and
-  current_shower at 21:20, 35 minutes after the shower.
-- It is related to the open question in `add-tank-insights-and-controls` task 5.5: two showers one after the other
-  within one detection make one shower flow sample.
-
-**Options to evaluate.**
-- End on a fall from the peak. For example, end when the reading has fallen a set number of points below the
-  highest reading since detection began, or when it keeps falling after the water has stopped.
-- End at the end of the last draw session, once the humidity is falling and no water has run for a few minutes.
-- A shorter humidity window. This is the simplest option, but it also changes the start rule, for example for a
-  bath that fills slowly or a bathroom that warms up slowly.
-- A combination: humidity for the start, water flow and a falling humidity for the end.
-
-**Evidence needed.**
-- An export of humidity, meter and detection history over several showers, including tail draws and back-to-back
-  showers.
-- A backtest of each option: shower start and end times, the litres classified as mixed, the shower flow samples,
-  and the charge errors.
-
-**Must keep.**
-- A shower with a short pause (the 3-minute pause scenario) stays one shower.
-- The 60 s session gap stays, the user's decision of 2026-11-03.
-
 ## add-source-health-repairs
 
 Added 2026-11-03 at the user's request. The trigger is a battery-powered humidity sensor: on the development
@@ -71,6 +33,11 @@ installation its battery was at 30 % on 2026-10-31.
   unavailable for 1-2 s now and then.
 - "Shower detected" unavailable while no detection method works, that is, every humidity sensor is unavailable and
   the long-draw rule is off. Today it is unavailable only when no method is configured.
+- A long-draw backup while the humidity sensor is unavailable. `improve-shower-end-detection` makes the long-draw
+  duration apply only without a humidity sensor, so a configured sensor that is unavailable has no backup. In
+  October the shower of 2026-10-10 (a 10.2-minute draw) ran during an hour without humidity readings and was counted
+  as an other draw. Option: while every humidity sensor is unavailable, start a shower on a session of the long-draw
+  duration, as without a sensor, and drop the backup when a reading returns.
 - To decide: also a warning for a sensor that stays available but stops changing, for a device that keeps its last
   value. And whether to watch the device's battery entity, if there is one.
 - The quality-scale rule `repair-issues` (todo since 0.1.0) then becomes done.

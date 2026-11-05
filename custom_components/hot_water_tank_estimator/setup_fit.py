@@ -30,7 +30,6 @@ from .calibration import (
     Calibrator,
     Closure,
 )
-from .const import DEFAULT_SESSION_GAP
 from .model import EventKind, ModelEvent, ModelOptions, Outputs, Sources, TankModel
 
 TICK = timedelta(minutes=5)
@@ -399,7 +398,8 @@ class Shower:
         start: Time of the session's first litre.
         end: Time of its last litre.
         litres: All litres of the session.
-        mixed_litres: The litres that counted as a mixed draw.
+        mixed_litres: The litres that counted as a mixed draw, the litres a detection
+            reclassified into this session included.
         points: `(litres drawn so far, snapshot)` at the start, each quarter and the end.
     """
 
@@ -436,12 +436,17 @@ class Evaluation:
         return sum(errors) / len(errors) if errors else None
 
     def showers(
-        self, minimum_mixed: float = 50.0, gap: float = DEFAULT_SESSION_GAP
+        self, minimum_mixed: float = 50.0, gap: float | None = None
     ) -> list[Shower]:
         """Return the sessions with at least `minimum_mixed` litres of mixed draw.
 
-        A gap of more than `gap` seconds between draws starts a new session.
+        A gap of more than `gap` seconds (default: the options' session gap) between draws
+        starts a new session. The litres that
+        a detection reclassified count as mixed in the session they were drawn in, the latest
+        one that began before the detection.
         """
+        if gap is None:
+            gap = self.options.session_gap
         draws = [
             e
             for e in self.replay.events
@@ -453,9 +458,20 @@ class Evaluation:
                 sessions[-1].append(event)
             else:
                 sessions.append([event])
+        starts = [session[0].time for session in sessions]
+        reclassified = [0.0] * len(sessions)
+        for event in self.replay.events:
+            litres = event.change.get("reclassified_litres")
+            if event.kind != EventKind.DRAW or not litres:
+                continue
+            owner = bisect_right(starts, event.time) - 1
+            if owner >= 0:
+                reclassified[owner] += litres
         result = []
-        for session in sessions:
-            mixed = sum(e.change["litres"] for e in session if e.change["mixed"])
+        for index, session in enumerate(sessions):
+            mixed = reclassified[index] + sum(
+                e.change["litres"] for e in session if e.change["mixed"]
+            )
             if mixed < minimum_mixed:
                 continue
             total = sum(e.change["litres"] for e in session)

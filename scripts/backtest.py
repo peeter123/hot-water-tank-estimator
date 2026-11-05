@@ -53,7 +53,7 @@ def load_pure() -> types.SimpleNamespace:
     """Load the pure modules without the package `__init__` (which imports Home Assistant).
 
     Returns:
-        A namespace with the modules `model`, `calibration` and `setup_fit`.
+        A namespace with the modules `const`, `model`, `calibration` and `setup_fit`.
     """
     if sys.version_info < MIN_PYTHON:
         raise SystemExit(
@@ -66,7 +66,7 @@ def load_pure() -> types.SimpleNamespace:
     return types.SimpleNamespace(
         **{
             name: importlib.import_module(f"{PURE_PACKAGE}.{name}")
-            for name in ("model", "calibration", "setup_fit")
+            for name in ("const", "model", "calibration", "setup_fit")
         }
     )
 
@@ -172,6 +172,83 @@ def _fmt(value: float | None, digits: int = 2) -> str:
     return "-" if value is None else f"{value:.{digits}f}"
 
 
+def shower_sample(
+    evaluation: Any, shower: Any, pure: types.SimpleNamespace
+) -> Any | None:
+    """Return the shower flow event that ends the shower, None when it has no sample.
+
+    A shower is a sample of the shower flow with at least `SHOWER_MIN_MINUTES` of flow. The
+    model reports it when detection ends, so the sample is the first shower flow event
+    reported after the session's last litre and before the next draw counted as other.
+
+    Note: after a late-found run end (counter timeout) `TankModel._replay_late_draws` records
+    the draws since the run end a second time with their past times. Those draws can come out of time order here.
+    Neither baseline is affected (drawn equals the meter rise).
+    """
+    minutes = (shower.end - shower.start).total_seconds() / 60
+    if minutes < pure.const.SHOWER_MIN_MINUTES:
+        return None
+    sample_kind = pure.model.EventKind.SHOWER_FLOW
+    draw_kind = pure.model.EventKind.DRAW
+    for event in evaluation.replay.events:
+        if event.time < shower.end:
+            continue
+        if event.kind == sample_kind:
+            return event
+        if (
+            event.kind == draw_kind
+            and event.time > shower.end
+            and event.change.get("mixed") is False
+        ):
+            return None
+    return None
+
+
+def shower_summary(evaluation: Any, shower: Any, pure: types.SimpleNamespace) -> str:
+    """Return a shower's times, litres, minutes of flow and flow sample as text."""
+    minutes = (shower.end - shower.start).total_seconds() / 60
+    event = shower_sample(evaluation, shower, pure)
+    if event is None:
+        sample = "no sample"
+    else:
+        change = event.change
+        sample = (
+            f"sample {change['flow']:.2f} L/min ({change['litres']:.0f} L in "
+            f"{change['minutes']:.1f} min, reported {event.time:%H:%M})"
+        )
+    end_format = "%H:%M" if shower.end.date() == shower.start.date() else "%m-%d %H:%M"
+    return (
+        f"{shower.start:%Y-%m-%d %H:%M}-{shower.end.strftime(end_format)} "
+        f"{shower.litres:4.0f} L "
+        f"({shower.mixed_litres:3.0f} mixed) {minutes:4.1f} min, {sample}"
+    )
+
+
+def litre_totals(evaluation: Any, pure: types.SimpleNamespace) -> tuple[float, ...]:
+    """Return the litres drawn, counted as mixed and reclassified in a replay.
+
+    Litres counted as mixed include the reclassified ones, which are drawn litres that first
+    counted as other draws.
+
+    Note: after a late-found run end (counter timeout) `TankModel._replay_late_draws` records
+    the draws since the run end a second time with their past times. They would be counted twice in these totals.
+    Neither baseline is affected (drawn equals the meter rise).
+    """
+    draw_kind = pure.model.EventKind.DRAW
+    drawn = mixed = reclassified = 0.0
+    for event in evaluation.replay.events:
+        if event.kind != draw_kind:
+            continue
+        change = event.change
+        if "litres" in change:
+            drawn += change["litres"]
+            if change["mixed"]:
+                mixed += change["litres"]
+        else:
+            reclassified += change.get("reclassified_litres", 0.0)
+    return drawn, mixed + reclassified, reclassified
+
+
 def report(result: BacktestResult, pure: types.SimpleNamespace) -> str:
     """Return the backtest as text."""
     lines: list[str] = []
@@ -205,7 +282,8 @@ def report(result: BacktestResult, pure: types.SimpleNamespace) -> str:
 
     lines += [
         "",
-        "Showers (tank litres / shower litres at the start, each quarter and the end)",
+        "Showers: start-end (UTC), litres, minutes of flow and the shower flow sample, then",
+        "tank litres / shower litres at the start, each quarter and the end",
     ]
     for label, evaluation in (("given", result.given), ("fitted", result.fitted)):
         for shower in evaluation.showers():
@@ -214,9 +292,27 @@ def report(result: BacktestResult, pure: types.SimpleNamespace) -> str:
                 for litres, snap in shower.points
             )
             lines.append(
-                f"{shower.start:%Y-%m-%d %H:%M} {shower.litres:4.0f} L "
-                f"({shower.mixed_litres:3.0f} mixed) {label:<6} {points}"
+                f"{shower_summary(evaluation, shower, pure)} {label:<6} {points}"
             )
+
+    lines += ["", "Shower flow samples the model reported (every one, UTC)"]
+    for label, evaluation in (("given", result.given), ("fitted", result.fitted)):
+        kind = pure.model.EventKind.SHOWER_FLOW
+        for event in evaluation.replay.events:
+            if event.kind == kind:
+                change = event.change
+                lines.append(
+                    f"{event.time:%Y-%m-%d %H:%M} {label:<6} {change['litres']:4.0f} L "
+                    f"{change['minutes']:5.1f} min {change['flow']:5.2f} L/min"
+                )
+
+    lines += ["", "Litres over the history: drawn, counted as mixed, reclassified"]
+    for label, evaluation in (("given", result.given), ("fitted", result.fitted)):
+        drawn, mixed, reclassified = litre_totals(evaluation, pure)
+        lines.append(
+            f"{label:<6} options: {drawn:.0f} L drawn, {mixed:.0f} L counted as mixed, "
+            f"{reclassified:.0f} L of them reclassified"
+        )
 
     lines += ["", f"{'parameter':<20} {'given':>9} {'fitted':>9}  source"]
     for name, (value, source) in fit.parameters.items():
