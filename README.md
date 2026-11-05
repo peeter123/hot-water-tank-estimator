@@ -24,7 +24,7 @@ It provides:
 - the cold water temperature used;
 - the standing heat loss of the tank, in W;
 - a shower detected binary sensor, a "Hot water ran out" button and an "Undo hot water ran out" button;
-- calibration diagnostics, and the tank sensor temperature the model works from.
+- calibration diagnostics, the tank sensor temperature the model works from, and the shower timing sensors.
 
 ## What it is for
 
@@ -133,8 +133,8 @@ entry and keeps the model state (the tank average, the charged temperature and t
 | Draws, losses and heat | Start-up energy per run | 0 kWh | Energy of each run that does not reach the tank. Learned. |
 | Draws, losses and heat | Humidity rise | 6 points | Rise above the lowest humidity of the window that counts as a shower. |
 | Draws, losses and heat | Humidity window | 60 min | The window of that lowest value. |
-| Draws, losses and heat | Shower end time | 5 min | A shower ends when no water has been drawn for this long. Must be longer than the session gap. An entry saved before this option existed, with a session gap of 300 s or more, runs with a shower end time not above the gap until its options are saved; saving them asks for a shower end time longer than the gap. |
-| Draws, losses and heat | Next shower time | 5 min | While the bathroom is still humid after a shower, a draw that lasts this long starts a new shower. |
+| Draws, losses and heat | Shower end after no water | 5 min | A shower ends when no water has been drawn for this long. Must be longer than the session gap. An entry saved before this option existed, with a session gap of 300 s or more, runs with a shower end time not above the gap until its options are saved; saving them asks for a value longer than the gap. |
+| Draws, losses and heat | New shower draw while humid | 5 min | While the bathroom is still humid after a shower, a draw that lasts this long starts a new shower. |
 | Draws, losses and heat | Long draw duration | 0 min | A draw this long counts as a shower. 0 is off. Applies only without a humidity sensor. **Changed:** an entry that sets both a humidity sensor and a long draw duration no longer uses the duration. |
 | Draws, losses and heat | Reclassify window | 10 min | Litres drawn this long before detection count as shower water. |
 | Draws, losses and heat | Session gap | 60 s | Draws closer than this belong to one session. |
@@ -163,7 +163,8 @@ Each tank has one device with these entities. All names are translated.
 | Shower flow | L/min | Number, 3-20. The flow that turns shower water into minutes: the median of your last 10 showers, 7.5 L/min until the first one. Setting it turns the Shower flow locked switch on. Attributes: `source` (default, learned or locked), and `low` and `high` (the lowest and highest flow of the last showers). See "Tuning". |
 | Shower flow locked | | Switch, in the configuration category. On when the shower flow is locked: it is the same lock as in the options, so the switch, the Shower flow number and the options always agree. Turning it on locks the flow in use now. Turning it off returns the flow to the median of your last showers, or to the starting value (7.5 L/min, or one an older version kept in the options) while there are none. See "Tuning". |
 
-The calibration diagnostic sensors and the Tank sensor temperature are listed under "Diagnostic sensors" below.
+The calibration diagnostic sensors, the Tank sensor temperature and the four shower timing sensors are listed
+under "Diagnostic sensors" below.
 
 ## Why the hot water remaining is less than the tank volume
 
@@ -234,6 +235,10 @@ These sensors have the diagnostic category, so they are hidden from dashboards b
 | Loss coefficient | 1/h | The same, with its `source`. |
 | Thermocline width | % | The same, with its `source`. |
 | Usable fraction | % | The same, with its `source`. |
+| Shower end after no water | min | The setting in use: how long without water ends a shower. Follows the option of the same name. |
+| New shower draw while humid | min | The setting in use: how long a draw must last to start a new shower while the bathroom is still humid. Unavailable while there are no humidity sensors. |
+| Shower ends | | The time the shower in progress ends if no more water is drawn: Shower end after no water, counted from the last litre, or from the shower's start while it has drawn nothing. It moves with every litre. Unknown while no shower is in progress. Unavailable while no detection method (humidity sensor or long draw duration) is configured. |
+| Draw counts as shower | | While no shower is in progress and a draw is under way: the time that draw becomes a shower, which is the start of the draw plus New shower draw while humid (bathroom still humid) or plus the long draw duration (no humidity sensor). The shower starts at the first litre at or after that time. Unknown otherwise. Unavailable while no detection method (humidity sensor or long draw duration) is configured. |
 | Calibration samples | | The number of valid heating runs (closures) in the fit. Sensor starts and excluded runs are not counted. The first heating run after adding an entry is a sensor start, so it does not raise the count. |
 | Last charge error | K | The error of the model at the start of the last run. |
 | Mean charge error | K | The mean absolute error over the last 10 runs. |
@@ -355,11 +360,11 @@ with the fitted ones. The usage, all arguments and what the numbers mean are in
   a long draw duration in the options.
 - **A shower is not detected:** lower the humidity rise or, without a humidity sensor, the long draw duration;
   several humidity sensors are allowed.
-- **Shower detected stays on after the water stopped:** it turns off 5 minutes after the last litre (the shower end
-  time), not when the bathroom has dried. A shower with a longer pause counts as two.
+- **Shower detected stays on after the water stopped:** it turns off 5 minutes after the last litre (the option Shower
+  end after no water), not when the bathroom has dried. A shower with a longer pause counts as two.
 - **A second shower right after the first counts as other draws at first:** while the bathroom is still humid, a
-  draw becomes a shower only after it has lasted the next shower time (5 min), and then its litres from the
-  start of that draw are counted as shower water.
+  draw becomes a shower only after it has lasted the option New shower draw while humid (5 min), and then its
+  litres from the start of that draw are counted as shower water.
 - **A value you set by hand is overwritten:** lock the parameter in the options.
 
 ## Removal
@@ -380,8 +385,8 @@ touched. To remove the integration completely, then remove it in HACS (or delete
 - Garden watering and other large draws count at the other draws share, and the next charge resets them.
 - A humidity rise without a shower (cooking, humid weather) ends after the shower end time without water drawn and
   has no other effect; with a draw it errs towards showing less.
-- A short draw in a humid bathroom after a shower (a washbasin) stays an other draw; a second shower shorter than the
-  next shower time is counted as other draws, which errs towards showing more water.
+- A short draw in a humid bathroom after a shower (a washbasin) stays an other draw; a second shower shorter than
+  the New shower draw while humid setting is counted as other draws, which errs towards showing more water.
 - A water meter that misses low flows loses small trickles, which errs towards showing more water.
 - Learning can drift in unusual weeks (guests, holidays). The error sensors show it, and locks and the recalibrate
   action undo it.

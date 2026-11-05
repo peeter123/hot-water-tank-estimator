@@ -53,6 +53,18 @@
       "usable_fraction": {
         "default": "mdi:water-percent"
       },
+      "shower_end_time": {
+        "default": "mdi:timer-outline"
+      },
+      "next_shower_time": {
+        "default": "mdi:timer-sand"
+      },
+      "shower_ends": {
+        "default": "mdi:timer-off-outline"
+      },
+      "draw_counts_as_shower": {
+        "default": "mdi:shower-head"
+      },
       "calibration_samples": {
         "default": "mdi:counter"
       },

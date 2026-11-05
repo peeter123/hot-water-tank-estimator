@@ -408,7 +408,7 @@ class TankEstimator:
 
     @callback
     def _handle_shower_end(self, now: datetime) -> None:
-        """Run the tick path when the shower in progress is due to end."""
+        """Run the tick path when the shower is due to end or a draw session has expired."""
         if self._stopped:
             return
         self._shower_timer = None
@@ -430,8 +430,8 @@ class TankEstimator:
 
     @callback
     def _schedule_shower_end(self) -> None:
-        """Point the one-shot timer at the model's next shower end, or cancel it when there is none."""
-        deadline = None if self._stopped else self.model.next_shower_end
+        """Point the one-shot timer at the model's next wake-up, or cancel it when there is none."""
+        deadline = None if self._stopped else self.model.next_wake_up
         if deadline == self._shower_timer_at and (
             deadline is None or self._shower_timer is not None
         ):

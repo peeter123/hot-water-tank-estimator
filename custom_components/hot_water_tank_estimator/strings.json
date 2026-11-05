@@ -173,8 +173,8 @@
           "startup_energy": "Start-up energy per run",
           "humidity_rise": "Humidity rise",
           "humidity_window": "Humidity window",
-          "shower_end_minutes": "Shower end time",
-          "next_shower_minutes": "Next shower time",
+          "shower_end_minutes": "Shower end after no water",
+          "next_shower_minutes": "New shower draw while humid",
           "long_draw_minutes": "Long draw duration",
           "reclassify_window": "Reclassify window",
           "session_gap": "Session gap",
@@ -215,7 +215,7 @@
       "water_meter_unit": "The water meter must have a volume unit: L, m3, gal or ft3.",
       "no_heat_source": "Give at least one of the energy counter, the heat power sensor and the heating active binary sensor.",
       "flow_return_pair": "Give both the flow and the return temperature sensor, or neither.",
-      "shower_end_not_after_gap": "The shower end time must be longer than the session gap."
+      "shower_end_not_after_gap": "Shower end after no water must be longer than the session gap."
     }
   },
   "selector": {
@@ -345,6 +345,18 @@
             "name": "Sensor height"
           }
         }
+      },
+      "shower_end_time": {
+        "name": "Shower end after no water"
+      },
+      "next_shower_time": {
+        "name": "New shower draw while humid"
+      },
+      "shower_ends": {
+        "name": "Shower ends"
+      },
+      "draw_counts_as_shower": {
+        "name": "Draw counts as shower"
       }
     },
     "binary_sensor": {

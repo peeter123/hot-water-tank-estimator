@@ -27,6 +27,11 @@ minutes. The water meter is the only source that sees the end quickly. This is t
   end. It is no longer on through the humidity tail. The user agreed on 2026-11-05.
 - **Shower flow samples** follow from the new end: a shower is reported when the water has stopped for the shower
   end time, and two showers separated by more than that are two samples.
+- **Clearer names for the two options, and four diagnostic sensors.** The options are labelled "Shower end after no
+  water" (the shower end time) and "New shower draw while humid" (the next shower time), and two diagnostic sensors
+  with the same names show the values in use, in minutes. Two diagnostic timestamp sensors, "Shower ends" and "Draw
+  counts as shower", count down to the end of the shower in progress and to the moment a running draw becomes a
+  shower. Asked by the user on 2026-11-05, after the live check.
 - **Docs.** The README options, entities, troubleshooting and limitations, and `docs/model.md` (draw
   classification, shower flow) describe the new rules with the evidence.
 
@@ -47,13 +52,15 @@ None.
 - `integration-setup`:
   - "Draw and heat defaults": the shower end time and the next shower time;
   - "State survives a restart": the classifier state, including a shower that has ended while the bathroom is
-    still humid.
+    still humid;
+  - "Entities and units": the four diagnostic sensors, and two new requirements for them.
 
 ## Impact
 
 - **Code:** `classification.py` (the shower states, the end rule, the next-shower rule, the long-draw gate, the
   saved state), `model.py` (the options and the time of the next shower end), `estimator.py` (a timer for the shower
-  end between ticks), `const.py`, `config_flow.py`, `strings.json` and the translations.
+  end between ticks), `const.py`, `config_flow.py`, `sensor.py` (the four diagnostic sensors), `strings.json` and
+  the translations.
 - **Tests:** `tests/test_classification.py`, the model, options-flow and replay tests (the `back_to_back` fixture),
   and a test that the end timer fires between ticks.
 - **Evidence:** a replay of the October export and of the November history still in the recorder (export it to

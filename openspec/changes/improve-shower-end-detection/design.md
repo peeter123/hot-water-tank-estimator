@@ -170,6 +170,41 @@ The shower list counts the litres a detection reclassifies into the session they
 group 1 review: before, a reclassified shower read too few mixed litres or fell out of the list). The comparison
 runs the backtest on the same export at the previous rule and at the change.
 
+### D7: Names of the two options, and their diagnostic sensors
+
+Added 2026-11-05 at the user's request, after the live check of task 4.4. The labels "Shower end time" and "Next
+shower time" did not say what the values do. The options form, the README options table and two new diagnostic
+sensors use the same names:
+
+| Option key | Label and sensor name | Meaning |
+|---|---|---|
+| `shower_end_minutes` (N) | Shower end after no water | no water for this long ends a shower |
+| `next_shower_minutes` (M) | New shower draw while humid | a draw this long, while still humid, starts a new shower |
+
+- The option keys and the stored options stay as they are, so no entry needs a migration.
+- The sensors are diagnostic (entity category diagnostic), in min with device class duration and no state class: they
+  show a setting, not a measurement, so they get no long-term statistics. They follow the entry's options, which a
+  save applies through the reload.
+- "New shower draw while humid" is unavailable without a humidity sensor (design D4: without one, M does not apply),
+  as "Shower detected" is unavailable without a detection method.
+- Two countdown sensors, also asked by the user on 2026-11-05: "Shower ends" (the shower end of the shower in
+  progress, the model's next shower end) and "Draw counts as shower" (the start of the draw session in progress plus
+  M while humid with no shower in progress, or plus the long-draw duration without a humidity sensor). They are
+  diagnostic timestamp sensors, unknown when there is nothing to count down: the frontend shows the time left ("in
+  3 minutes") without the integration writing a state every second. "Draw counts as shower" is the earliest moment:
+  the shower starts at the first meter increase at or after it. "Shower ends" moves with every meter increase, so
+  during a shower it is written every 5-10 s, as the other draw-driven sensors already are.
+- "Draw counts as shower" clears when its session ends, not at the next tick (decided 2026-11-05, group 5 review).
+  A session ends by the session gap, which the classifier only notices at its next call, so the runtime's one-shot
+  timer (D2) targets the earlier of the shower end and, while "Draw counts as shower" has a time, just after the
+  session expiry (the last increase plus the session gap; the classifier's strict comparison needs a moment past it).
+  The model exposes that wake-up time (`next_wake_up`); the timer callback runs the same path as the tick. The
+  classification does not change.
+- Both countdown sensors are unavailable while no detection method is configured, as "Shower detected" is (decided
+  2026-11-05, group 5 review).
+- The docs keep "shower end time" and "next shower time" as the concept names in `docs/model.md` and the design, and
+  name the options by their labels where the README tells the user what to set.
+
 ## Risks / Trade-offs
 
 - [A second shower shorter than M while the bathroom is humid stays other draws, about 1.5-2 K for a 30 L shower.]

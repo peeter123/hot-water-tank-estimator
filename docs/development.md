@@ -114,7 +114,8 @@ core integrations:
   be turned into; the reading of files and of the recorder stays outside the pure modules.
 - One `TankEstimator` (`estimator.py`) per config entry, kept in `entry.runtime_data`. It owns the subscriptions
   (`async_track_state_change_event`, a 5-minute `async_track_time_interval`, and a one-shot
-  `async_track_point_in_utc_time` at the model's next shower end, rescheduled in `_finish` after every input and
+  `async_track_point_in_utc_time` at the model's next wake-up (the shower end, or just past a session expiry while a
+  draw can still become a shower), rescheduled in `_finish` after every input and
   tick and cancelled in `async_stop`), the model and the calibrator. Entities
   read from it through a dispatcher signal. There is no coordinator, because nothing is polled.
   - A source state goes to the model with the state's `last_updated` as its time: the moment the reading was

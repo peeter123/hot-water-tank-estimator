@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -42,7 +43,7 @@ PARALLEL_UPDATES = 0
 class TankSensorDescription(SensorEntityDescription):
     """A sensor of the tank and how to read its value."""
 
-    value_fn: Callable[[TankEstimator], float | int | None]
+    value_fn: Callable[[TankEstimator], float | int | datetime | None]
     parameter: str | None = (
         None  # the learned parameter shown, for the source attribute
     )
@@ -234,6 +235,39 @@ DIAGNOSTIC_SENSORS: tuple[TankSensorDescription, ...] = (
         available_fn=lambda e: e.fed and e.model.tank_sensor is not None,
     ),
     TankSensorDescription(
+        key="shower_end_time",
+        translation_key="shower_end_time",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        value_fn=lambda e: e.model.options.shower_end_minutes,
+    ),
+    TankSensorDescription(
+        key="next_shower_time",
+        translation_key="next_shower_time",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        value_fn=lambda e: e.model.options.next_shower_minutes,
+        available_fn=lambda e: bool(e.model.sources.humidity_sensors),
+    ),
+    TankSensorDescription(
+        key="shower_ends",
+        translation_key="shower_ends",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda e: e.model.next_shower_end,
+        available_fn=lambda e: e.model.detection_available,
+    ),
+    TankSensorDescription(
+        key="draw_counts_as_shower",
+        translation_key="draw_counts_as_shower",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda e: e.model.next_shower_start,
+        available_fn=lambda e: e.model.detection_available,
+    ),
+    TankSensorDescription(
         key="calibration_samples",
         translation_key="calibration_samples",
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -295,7 +329,7 @@ class TankSensor(TankEntity, SensorEntity):
         self.entity_description = description
 
     @property
-    def native_value(self) -> float | int | None:
+    def native_value(self) -> float | int | datetime | None:
         """Return the value."""
         return self.entity_description.value_fn(self.estimator)
 

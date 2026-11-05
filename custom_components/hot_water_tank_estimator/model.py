@@ -803,6 +803,29 @@ class TankModel:
         return self._classifier.shower_end
 
     @property
+    def next_shower_start(self) -> datetime | None:
+        """Return when the draw session in progress becomes a shower, None when it cannot.
+
+        With no shower in progress it is the session start plus the next shower time while the
+        bathroom is humid, or plus the long-draw duration without a humidity sensor. It is the
+        earliest moment: the shower starts at the first meter increase at or after it.
+        """
+        return self._classifier.session_shower_time
+
+    @property
+    def next_wake_up(self) -> datetime | None:
+        """Return when the runtime must call the model next without an input, None when never.
+
+        It is the earlier of the shower end and, only while a draw can still become a shower
+        (`next_shower_start` has a time), just past the session expiry, so the countdown to
+        a shower start clears when its session ends. The runtime schedules a callback for it.
+        """
+        wakes = [self.next_shower_end]
+        if self.next_shower_start is not None:
+            wakes.append(self._classifier.session_expiry)
+        return min((wake for wake in wakes if wake is not None), default=None)
+
+    @property
     def detection_available(self) -> bool:
         """Return whether a detection method (humidity or the long-draw rule) is configured."""
         return bool(self.sources.humidity_sensors) or self.options.long_draw_minutes > 0

@@ -47,6 +47,7 @@ from .common import (
     set_sources,
     setup_entry,
     setup_fitted_entry,
+    value,
 )
 
 TANK_FIELDS = {CONF_SENSOR_HEIGHT: 50}
@@ -460,3 +461,14 @@ async def test_the_shower_end_time_must_be_longer_than_the_session_gap(
     else:
         assert result["step_id"] == "draws"
         assert result["errors"] == {"shower_end_minutes": "shower_end_not_after_gap"}
+
+
+async def test_option_saved(hass: HomeAssistant) -> None:
+    """Integration-setup scenario "Option saved": a saved shower end time of 7.5 shows after the reload."""
+    set_sources(hass)
+    entry = await setup_entry(hass)
+    result = await walk(hass, entry.entry_id, draws={"shower_end_minutes": 7.5})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    assert float(value(hass, entry, "sensor", "shower_end_time")) == 7.5
+    assert float(value(hass, entry, "sensor", "next_shower_time")) == 5.0

@@ -931,3 +931,157 @@ def test_the_model_restores_a_shower_in_progress() -> None:
     restored.tick(last + 5 * MINUTE)
     assert not restored.shower_detected
     assert restored.next_shower_end is None
+
+
+def test_the_session_shower_time_in_the_humid_bathroom() -> None:
+    """Humid with no shower and a session open: the session start plus the next shower time."""
+    classifier = DrawClassifier(
+        ClassifierOptions(humidity_configured=True, next_shower_minutes=5.0)
+    )
+    assert classifier.session_shower_time is None
+    classifier.on_humidity(T0, "bath", 61.0)
+    classifier.on_humidity(T0 + 10 * MINUTE, "bath", 75.0)
+    assert classifier.detected
+    classifier.on_meter(T0 + 10 * MINUTE, 1000.0, "L")
+    classifier.on_meter(T0 + 10 * MINUTE + 8 * SECOND, 1001.0, "L")
+    assert classifier.session_shower_time is None  # a shower is in progress
+    classifier.update(T0 + 16 * MINUTE)
+    assert not classifier.detected
+    assert classifier.humid
+    assert classifier.session_shower_time is None  # no session is open
+    start = T0 + 20 * MINUTE
+    classifier.on_meter(start, 1002.0, "L")
+    assert classifier.session_shower_time == start + 5 * MINUTE
+    classifier.update(start + 2 * MINUTE)  # the session ended
+    assert classifier.session_shower_time is None
+
+
+def _humid_after_a_shower() -> tuple[DrawClassifier, datetime]:
+    """Return a classifier in the humid tail of a shower, and a time with no session open."""
+    classifier = DrawClassifier(
+        ClassifierOptions(humidity_configured=True, next_shower_minutes=5.0)
+    )
+    classifier.on_humidity(T0, "bath", 61.0)
+    classifier.on_humidity(T0 + 10 * MINUTE, "bath", 75.0)
+    classifier.on_meter(T0 + 10 * MINUTE, 1000.0, "L")
+    classifier.on_meter(T0 + 10 * MINUTE + 8 * SECOND, 1001.0, "L")
+    classifier.update(T0 + 16 * MINUTE)
+    assert not classifier.detected
+    assert classifier.humid
+    return classifier, T0 + 20 * MINUTE
+
+
+def test_a_draw_one_second_before_the_session_shower_time_stays_an_other_draw() -> None:
+    """The shower starts at the first meter increase at or after the session shower time."""
+    early, start = _humid_after_a_shower()
+    early.on_meter(start, 1002.0, "L")
+    time = early.session_shower_time
+    assert time == start + 5 * MINUTE
+    for second in range(1, 301, 30):  # keep the session open with a draw every 30 s
+        early.on_meter(start + second * SECOND, 1002.0 + second, "L")
+    before = early.on_meter(time - SECOND, 1274.0, "L")
+    assert before is not None
+    assert not before.mixed
+    assert not early.detected
+    at = early.on_meter(time, 1275.0, "L")
+    assert at is not None
+    assert at.mixed
+    assert early.detected
+
+
+def test_the_session_expiry_is_a_moment_past_the_session_gap() -> None:
+    """A draw at the gap continues the session; one at the expiry time opens a new one."""
+    classifier, start = _humid_after_a_shower()
+    assert classifier.session_expiry is None
+    classifier.on_meter(start, 1002.0, "L")
+    assert classifier.session_expiry == start + 61 * SECOND
+    classifier.on_meter(start + 60 * SECOND, 1003.0, "L")  # exactly the session gap
+    assert classifier.session_shower_time == start + 5 * MINUTE
+    expiry = classifier.session_expiry
+    assert expiry == start + 121 * SECOND
+    classifier.update(expiry - SECOND)
+    assert classifier.session_expiry == expiry  # the session is still open
+    classifier.update(expiry)
+    assert classifier.session_expiry is None
+    assert classifier.session_shower_time is None
+
+
+def test_the_model_exposes_the_next_shower_start() -> None:
+    """In the humid tail the model gives the session start plus the next shower time."""
+    model = make_model(next_shower_minutes=5.0)
+    assert model.next_shower_start is None
+    model.on_humidity(T0, "bath", 55.0)
+    model.on_humidity(T0 + MINUTE, "bath", 70.0)
+    model.on_water_meter(T0 + MINUTE, 1000.0, "L")
+    model.on_water_meter(T0 + MINUTE + 8 * SECOND, 1001.0, "L")
+    assert model.next_shower_start is None  # a shower is in progress
+    model.tick(T0 + 7 * MINUTE)
+    assert not model.shower_detected
+    start = T0 + 10 * MINUTE
+    model.on_water_meter(start, 1002.0, "L")
+    assert model.next_shower_start == start + 5 * MINUTE
+    model.tick(start + 2 * MINUTE)
+    assert model.next_shower_start is None
+
+
+def test_the_next_wake_up_is_the_earlier_of_the_shower_end_and_the_session_expiry() -> (
+    None
+):
+    """The runtime wakes at the shower end, or just past a session expiry while a draw can become a shower."""
+    model = make_model(next_shower_minutes=5.0)
+    assert model.next_wake_up is None
+    # A shower end alone: no session can become a shower while one is in progress.
+    model.on_humidity(T0, "bath", 55.0)
+    model.on_humidity(T0 + MINUTE, "bath", 70.0)
+    model.on_water_meter(T0 + MINUTE, 1000.0, "L")
+    model.on_water_meter(T0 + MINUTE + 8 * SECOND, 1001.0, "L")
+    assert model.next_shower_end == T0 + MINUTE + 8 * SECOND + 5 * MINUTE
+    assert model.next_wake_up == model.next_shower_end
+    model.tick(T0 + 7 * MINUTE)
+    assert not model.shower_detected
+    assert model.next_wake_up is None
+    # A session expiry alone: the bathroom is humid, no shower is in progress.
+    start = T0 + 10 * MINUTE
+    model.on_water_meter(start, 1002.0, "L")
+    assert model.next_shower_end is None
+    assert model.next_wake_up == start + 61 * SECOND
+    # The humidity falling away leaves nothing to count down, so no wake-up.
+    model.on_humidity(start + 10 * SECOND, "bath", 50.0)
+    assert model.next_shower_start is None
+    assert model.next_wake_up is None
+
+
+def test_the_next_wake_up_picks_the_earlier_of_both(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The classifier never has both at once, so give the model each in turn to check the minimum."""
+    model = make_model(next_shower_minutes=5.0)
+    start = T0 + 10 * MINUTE
+    model.on_humidity(T0, "bath", 55.0)
+    model.on_humidity(T0 + MINUTE, "bath", 70.0)
+    model.on_water_meter(T0 + 5 * MINUTE, 1000.0, "L")  # the meter baseline
+    model.tick(T0 + 7 * MINUTE)
+    model.on_water_meter(start, 1002.0, "L")
+    expiry = start + 61 * SECOND
+    assert model.next_wake_up == expiry
+    for end, earlier in ((expiry - SECOND, expiry - SECOND), (expiry + SECOND, expiry)):
+        monkeypatch.setattr(TankModel, "next_shower_end", property(lambda _, e=end: e))
+        assert model.next_wake_up == earlier
+
+
+def test_the_session_shower_time_without_a_humid_bathroom() -> None:
+    """A dry bathroom with a humidity sensor gives none; the long draw rule needs no sensor."""
+    configured = DrawClassifier(
+        ClassifierOptions(humidity_configured=True, long_draw_minutes=8.0)
+    )
+    configured.on_meter(T0, 1000.0, "L")
+    configured.on_meter(T0 + 8 * SECOND, 1001.0, "L")
+    assert configured.session_shower_time is None
+    plain = DrawClassifier(ClassifierOptions(long_draw_minutes=8.0))
+    plain.on_meter(T0, 1000.0, "L")
+    plain.on_meter(T0 + 8 * SECOND, 1001.0, "L")
+    assert plain.session_shower_time == T0 + 8 * SECOND + 8 * MINUTE
+    off = DrawClassifier(ClassifierOptions())
+    off.on_meter(T0, 1000.0, "L")
+    off.on_meter(T0 + 8 * SECOND, 1001.0, "L")
+    assert off.session_shower_time is None

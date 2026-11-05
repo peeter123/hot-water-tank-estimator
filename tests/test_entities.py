@@ -1,9 +1,12 @@
 """Tests for the entities: units, classes, the device, the model store and the detection sensor (task 5.5)."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_time_changed,
+)
 
 from custom_components.hot_water_tank_estimator.const import (
     CONF_AMBIENT_SENSOR,
@@ -44,6 +47,7 @@ SENSORS = {
     "heat_loss": ("W", "power", "measurement"),
     "tank_sensor_temperature": ("°C", "temperature", "measurement"),
 }
+SETTING_SENSORS = ("shower_end_time", "next_shower_time")
 PARAMETER_SENSORS = {
     "other_hot_share": None,
     "startup_energy": "kWh",
@@ -65,6 +69,12 @@ async def test_units_and_classes(hass: HomeAssistant) -> None:
         assert state.attributes.get("unit_of_measurement") == unit, key
         assert state.attributes.get("device_class") == device_class, key
         assert state.attributes.get("state_class") == state_class, key
+    for key in SETTING_SENSORS:
+        state = hass.states.get(entity_id(hass, entry, "sensor", key))
+        assert state is not None, key
+        assert state.attributes.get("unit_of_measurement") == "min", key
+        assert state.attributes.get("device_class") == "duration", key
+        assert state.attributes.get("state_class") is None, key
     flow = hass.states.get(entity_id(hass, entry, "number", "shower_flow"))
     assert flow is not None
     assert flow.attributes.get("unit_of_measurement") == "L/min"
@@ -169,6 +179,34 @@ async def test_the_tank_sensor_temperature_is_unavailable_without_a_source_state
     assert value(hass, entry, "sensor", "tank_sensor_temperature") == "unavailable"
 
 
+async def test_defaults_shown(hass: HomeAssistant) -> None:
+    """Integration-setup scenario "Defaults shown": with a humidity sensor both shower times show 5 min."""
+    set_sources(hass)
+    entry = await setup_entry(hass)
+    registry = er.async_get(hass)
+    for key in SETTING_SENSORS:
+        eid = entity_id(hass, entry, "sensor", key)
+        assert registry.async_get(eid).entity_category is er.EntityCategory.DIAGNOSTIC
+        assert registry.async_get(eid).disabled_by is None
+        assert float(value(hass, entry, "sensor", key)) == 5.0
+    shower_end = hass.states.get(entity_id(hass, entry, "sensor", "shower_end_time"))
+    assert (
+        shower_end.attributes["friendly_name"] == "Hot water Shower end after no water"
+    )
+    next_shower = hass.states.get(entity_id(hass, entry, "sensor", "next_shower_time"))
+    assert next_shower.attributes["friendly_name"] == (
+        "Hot water New shower draw while humid"
+    )
+
+
+async def test_no_humidity_sensor(hass: HomeAssistant) -> None:
+    """Integration-setup scenario "No humidity sensor": the shower end shows 5 min, the other is unavailable."""
+    set_sources(hass)
+    entry = await setup_entry(hass, {**MINIMAL_OPTIONS, "long_draw_minutes": 8.0})
+    assert float(value(hass, entry, "sensor", "shower_end_time")) == 5.0
+    assert value(hass, entry, "sensor", "next_shower_time") == "unavailable"
+
+
 async def test_diagnostic_sensors_and_their_source(hass: HomeAssistant) -> None:
     """The calibration sensors are diagnostic, and each parameter shows its source."""
     set_sources(hass)
@@ -207,7 +245,7 @@ async def test_every_entity_is_on_one_device_with_a_translated_name(
     assert len(devices) == 1
     assert devices[0].name == TITLE
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
-    assert len(entities) == 8 + 9 + 1 + 1 + 1 + 1 + 1
+    assert len(entities) == 8 + 13 + 1 + 1 + 1 + 1 + 1
     assert {e.device_id for e in entities} == {devices[0].id}
     state = hass.states.get(entity_id(hass, entry, "sensor", "tank_litres"))
     assert state is not None
@@ -410,3 +448,87 @@ async def test_unique_ids_unchanged(hass: HomeAssistant) -> None:
     assert level is not None
     assert level.attributes["friendly_name"] == "Hot Water Tank Charge level"
     assert hass.states.get("sensor.hot_water_tank_hot_water_remaining") is None
+
+
+def _time(hass: HomeAssistant, entry: MockConfigEntry, key: str) -> datetime | None:
+    """Return the timestamp a sensor shows, None while it is unknown."""
+    text = value(hass, entry, "sensor", key)
+    assert text != "unavailable"
+    return None if text == "unknown" else dt_util.parse_datetime(text)
+
+
+def _at(hour: int, minute: int, second: int = 0) -> datetime:
+    """Return the wall-clock time on the rig's day in UTC, the zone the sensors report."""
+    return datetime(2026, 10, 15, hour, minute, second, tzinfo=dt_util.UTC)
+
+
+async def _fire(hass: HomeAssistant) -> None:
+    """Fire the timers that are due at the frozen time."""
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+
+async def test_shower_ends_counts_down(hass: HomeAssistant, freezer) -> None:
+    """Integration-setup scenario "Shower ends counts down": last increase 20:25:21, ends 20:30:21, then unknown."""
+    rig = await Rig.start(hass, freezer)
+    assert _time(hass, rig.entry, "shower_ends") is None
+    freezer.move_to(_at(20, 20))
+    await rig.set("sensor.bathroom_humidity", "55.0")
+    await rig.set("sensor.bathroom_humidity", "72.0", after=4 * 60 + 51)
+    await rig.set("sensor.water_meter", "100.020", after=30)
+    assert dt_util.utcnow() == _at(20, 25, 21)
+    assert rig.read("binary_sensor", "shower_detected") == "on"
+    assert _time(hass, rig.entry, "shower_ends") == _at(20, 30, 21)
+    freezer.move_to(_at(20, 30, 21))
+    await _fire(hass)
+    assert rig.read("binary_sensor", "shower_detected") == "off"
+    assert _time(hass, rig.entry, "shower_ends") is None
+
+
+async def test_draw_in_the_humid_bathroom(hass: HomeAssistant, freezer) -> None:
+    """Integration-setup scenario "Draw in the humid bathroom": 20:45:00, unknown at 20:42:00 by the timer alone."""
+    rig = await Rig.start(hass, freezer)
+    freezer.move_to(_at(20, 20))
+    await rig.set("sensor.bathroom_humidity", "55.0")
+    await rig.set("sensor.bathroom_humidity", "72.0", after=8 * 60 + 40)
+    await rig.set("sensor.water_meter", "100.020", after=30)
+    assert rig.read("binary_sensor", "shower_detected") == "on"
+    freezer.move_to(_at(20, 34, 10))
+    await _fire(hass)
+    assert rig.read("binary_sensor", "shower_detected") == "off"
+    assert _time(hass, rig.entry, "draw_counts_as_shower") is None
+    # The interval tick has fired and is set again for 20:45:00, so none falls before 20:42:02.
+    freezer.move_to(_at(20, 40))
+    await _fire(hass)
+    await rig.set("sensor.water_meter", "100.040")
+    assert _time(hass, rig.entry, "draw_counts_as_shower") == _at(20, 45)
+    await rig.set("sensor.water_meter", "100.060", after=60)
+    assert dt_util.utcnow() == _at(20, 41)
+    assert _time(hass, rig.entry, "draw_counts_as_shower") == _at(20, 45)
+    # No reading and no interval tick follow: the session expiry timer clears it.
+    assert rig.entry.runtime_data.shower_timer_at == _at(20, 42, 1)
+    freezer.move_to(_at(20, 42, 1))
+    await _fire(hass)
+    assert _time(hass, rig.entry, "draw_counts_as_shower") is None
+
+
+async def test_long_draw_without_humidity_sensor(hass: HomeAssistant, freezer) -> None:
+    """Integration-setup scenario "Long draw without humidity sensor": first increase 07:00:00, 07:08:00."""
+    freezer.move_to(_at(7, 0))
+    set_sources(hass)
+    entry = await setup_entry(hass, {**MINIMAL_OPTIONS, "long_draw_minutes": 8.0})
+    assert _time(hass, entry, "draw_counts_as_shower") is None
+    hass.states.async_set(METER, "100.010", ATTRIBUTES[METER])
+    await hass.async_block_till_done()
+    assert _time(hass, entry, "draw_counts_as_shower") == _at(7, 8)
+
+
+async def test_the_countdown_sensors_are_unavailable_without_a_detection_method(
+    hass: HomeAssistant,
+) -> None:
+    """No humidity sensor and no long draw duration: both countdown sensors are unavailable."""
+    set_sources(hass)
+    entry = await setup_entry(hass, MINIMAL_OPTIONS)
+    assert not entry.runtime_data.model.detection_available
+    for key in ("shower_ends", "draw_counts_as_shower"):
+        assert value(hass, entry, "sensor", key) == "unavailable"

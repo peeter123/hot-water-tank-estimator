@@ -197,6 +197,39 @@ class DrawClassifier:
         return reference + timedelta(minutes=self.options.shower_end_minutes)
 
     @property
+    def session_shower_time(self) -> datetime | None:
+        """Return when the draw session in progress becomes a shower, None when it cannot.
+
+        With no shower in progress and a session open, it is the session start plus the next
+        shower time while the bathroom is humid, or plus the long-draw duration without a
+        humidity sensor and with the rule on. It is the earliest moment: the shower starts at
+        the first meter increase at or after it. Read-only; it changes nothing.
+        """
+        start = self._session_start
+        if self._shower is not None or start is None:
+            return None
+        options = self.options
+        if self.humid:
+            return start + timedelta(minutes=options.next_shower_minutes)
+        if options.long_draw_minutes > 0 and not options.humidity_configured:
+            return start + timedelta(minutes=options.long_draw_minutes)
+        return None
+
+    @property
+    def session_expiry(self) -> datetime | None:
+        """Return the first moment the open draw session is noticed as ended, None without one.
+
+        It is the last meter increase plus the session gap, plus one second: the session
+        expires on a strict comparison, so a call at exactly the gap still sees it open.
+        Read-only; it changes nothing.
+        """
+        if self._last_increase is None:
+            return None
+        # The margin makes a call at this time see the session as ended (`_expire_session`
+        # compares with a strict `>`).
+        return self._last_increase + timedelta(seconds=self.options.session_gap + 1)
+
+    @property
     def session_active(self) -> bool:
         """Return whether a draw session is open."""
         return self._last_increase is not None

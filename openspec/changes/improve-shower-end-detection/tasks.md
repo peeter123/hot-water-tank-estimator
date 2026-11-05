@@ -119,6 +119,35 @@ Applies to every group:
     20:30:21, 5 min 0 s after the last meter increase; the shower flow sample (6.74 L/min) was logged at that moment
     by the timer; a 1 L draw at 20:31:51, with the bathroom still humid, stayed an other draw.
 
+## 5. Option names and diagnostic sensors
+
+Added 2026-11-05 at the user's request (design D7).
+
+- [x] 5.1 Rename the labels of the two options in `strings.json` and `translations/en.json` (design D7), keeping
+  the keys, and say in their descriptions what they do. Add the two timing diagnostic sensors in `sensor.py` with their
+  translated names, unit, device class and entity category, and the availability rule of design D7. Verify: tests for
+  the integration-setup scenarios "Defaults shown", "Option saved" and "No humidity sensor", the "Units shown"
+  scenario extended to the two sensors, and `python scripts/lint.py`.
+- [x] 5.2 Add the two countdown sensors of design D7, "Shower ends" and "Draw counts as shower", as diagnostic
+  timestamp sensors from the model (the next shower end, and a new model property for the time the draw session in
+  progress becomes a shower). Verify: tests for the integration-setup scenarios "Shower ends counts down", "Draw in the
+  humid bathroom" and "Long draw without humidity sensor", a model test for the new property, and `python
+  scripts/lint.py`. The runtime timer also wakes just after the session expiry while "Draw counts as shower" has a
+  time, and both countdown sensors are unavailable without a detection method (design D7, group 5 review).
+- [x] 5.3 Update the README (the options table labels, the entities table with the four sensors) and any text that
+  names the options by their old labels. `docs/model.md` keeps the concept names (design D7). Verify: `python
+  scripts/lint.py` (including `tests/test_readme.py`) and `python scripts/lint.py --hassfest`.
+- [x] 5.4 With authorization, deploy and restart from master after 5.1-5.3 are committed. Verify through the
+  home-assistant MCP server: the entry loads, the two timing sensors show 5 min, the two countdown sensors are
+  unknown with no shower and no draw, the options form shows the new labels (read through an options flow that is
+  aborted), and the system log has no entries for the integration. Record the result in `private/installation.md`.
+  Roll back by deploying the previous commit and restarting.
+  - Done 2026-11-05: 8 files deployed from `5254a42`; the user restarted Home Assistant (back at 21:25). The entry
+    loaded with its state kept (T_avg 48.55 C, shower flow 6.66 L/min), the timing sensors show 5.0 min, both
+    countdown sensors are unknown, the draws step shows both options at 5 min in an aborted options flow (the flow
+    API gives keys only; the new labels load from the same translations as the new entity names), and the system
+    log is clean.
+
 ## Workflow follow-up
 
 - One fresh Opus review of the whole change before archiving (`openspec/config.yaml`, Review loop).
