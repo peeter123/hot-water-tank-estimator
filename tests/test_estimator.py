@@ -3,9 +3,11 @@
 from datetime import timedelta
 
 import pytest
+from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.hot_water_tank_estimator.model import EventKind
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from .common import (
     ENERGY,
@@ -253,3 +255,52 @@ async def test_a_replaced_energy_counter_starts_a_new_baseline(
     )
     await hass.async_block_till_done()
     assert heat() == [pytest.approx(0.5)]
+
+
+async def test_the_shower_ends_on_the_timer_at_its_deadline(
+    hass: HomeAssistant, freezer
+) -> None:
+    """With no reading and no interval tick, the binary sensor turns off at the shower end time."""
+    rig = await Rig.start(hass, freezer)
+    start = dt_util.utcnow()
+    runtime = rig.entry.runtime_data
+    await shower(rig)
+    assert rig.read("binary_sensor", "shower_detected") == "on"
+    deadline = runtime.model.next_shower_end
+    assert deadline is not None
+    # The interval ticks fall every 5 minutes from the start: none is in (deadline - 1 s, deadline].
+    assert (deadline - start).total_seconds() % 300 > 1
+    freezer.move_to(deadline - timedelta(seconds=1))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert rig.read("binary_sensor", "shower_detected") == "on"
+    freezer.move_to(deadline)
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert rig.read("binary_sensor", "shower_detected") == "off"
+    assert runtime.model.next_shower_end is None
+    assert runtime.shower_timer_at is None
+
+
+async def test_one_timer_follows_the_deadline_and_a_stop_leaves_none(
+    hass: HomeAssistant, freezer
+) -> None:
+    """Each meter increase moves the one pending timer, and stopping the entry cancels it."""
+    rig = await Rig.start(hass, freezer)
+    runtime = rig.entry.runtime_data
+    await shower(rig)
+    first = runtime.shower_timer_at
+    assert first is not None
+    await rig.set(METER, "100.080", after=60)
+    assert runtime.shower_timer_at == runtime.model.next_shower_end
+    assert runtime.shower_timer_at > first
+    pending = runtime.model.next_shower_end
+    await hass.config_entries.async_unload(rig.entry.entry_id)
+    await hass.async_block_till_done()
+    assert runtime.shower_timer_at is None
+    events = len(runtime.model.events)
+    freezer.move_to(pending + timedelta(minutes=1))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert runtime.model.next_shower_end == pending
+    assert len(runtime.model.events) == events

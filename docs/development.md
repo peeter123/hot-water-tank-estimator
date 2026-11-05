@@ -113,7 +113,9 @@ core integrations:
   ID, unit and `(time, state)` rows), which a fixture, a recorder export and Home Assistant's recorder states can all
   be turned into; the reading of files and of the recorder stays outside the pure modules.
 - One `TankEstimator` (`estimator.py`) per config entry, kept in `entry.runtime_data`. It owns the subscriptions
-  (`async_track_state_change_event`, a 5-minute `async_track_time_interval`), the model and the calibrator. Entities
+  (`async_track_state_change_event`, a 5-minute `async_track_time_interval`, and a one-shot
+  `async_track_point_in_utc_time` at the model's next shower end, rescheduled in `_finish` after every input and
+  tick and cancelled in `async_stop`), the model and the calibrator. Entities
   read from it through a dispatcher signal. There is no coordinator, because nothing is polled.
   - A source state goes to the model with the state's `last_updated` as its time: the moment the reading was
     produced. `last_changed` only moves with the value.

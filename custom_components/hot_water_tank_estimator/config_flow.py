@@ -67,6 +67,7 @@ from .const import (
     DEFAULT_MAX_DRAW,
     DEFAULT_MAX_TEMPERATURE,
     DEFAULT_MIX_TEMPERATURE,
+    DEFAULT_NEXT_SHOWER_MINUTES,
     DEFAULT_OTHER_HOT_SHARE,
     DEFAULT_POWER_THRESHOLD,
     DEFAULT_RECLASSIFY_WINDOW,
@@ -74,6 +75,7 @@ from .const import (
     DEFAULT_SENSOR_MARGIN,
     DEFAULT_SENSOR_TOLERANCE,
     DEFAULT_SESSION_GAP,
+    DEFAULT_SHOWER_END_MINUTES,
     DEFAULT_STARTUP_ENERGY,
     DEFAULT_THERMOCLINE_WIDTH,
     DEFAULT_USABLE_FRACTION,
@@ -157,6 +159,17 @@ DRAW_TUNING = (
     ),
     Tuning("humidity_rise", DEFAULT_HUMIDITY_RISE, 1, 40, 0.5, PERCENTAGE),
     Tuning("humidity_window", DEFAULT_HUMIDITY_WINDOW, 5, 720, 5, UnitOfTime.MINUTES),
+    Tuning(
+        "shower_end_minutes", DEFAULT_SHOWER_END_MINUTES, 2, 30, 0.5, UnitOfTime.MINUTES
+    ),
+    Tuning(
+        "next_shower_minutes",
+        DEFAULT_NEXT_SHOWER_MINUTES,
+        1,
+        30,
+        0.5,
+        UnitOfTime.MINUTES,
+    ),
     Tuning(
         "long_draw_minutes", DEFAULT_LONG_DRAW_MINUTES, 0, 60, 0.5, UnitOfTime.MINUTES
     ),
@@ -320,6 +333,15 @@ def validate_height(user_input: Mapping[str, Any]) -> dict[str, str]:
         <= MAX_SENSOR_HEIGHT
     ):
         return {CONF_SENSOR_HEIGHT: "height_out_of_range"}
+    return {}
+
+
+def validate_shower_end(user_input: Mapping[str, Any]) -> dict[str, str]:
+    """Check that the shower end time is longer than the session gap. Returns the errors by field."""
+    end = user_input.get("shower_end_minutes", DEFAULT_SHOWER_END_MINUTES)
+    gap = user_input.get("session_gap", DEFAULT_SESSION_GAP)
+    if float(end) * 60 <= float(gap):
+        return {"shower_end_minutes": "shower_end_not_after_gap"}
     return {}
 
 
@@ -578,10 +600,13 @@ class HotWaterTankEstimatorOptionsFlow(OptionsFlowWithReload):
     ) -> ConfigFlowResult:
         """The draw, loss and heat values."""
         fields = _tuning_fields(DRAW_TUNING)
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._store(user_input, fields)
-            return await self.async_step_learning()
-        return self._form("draws", fields, user_input)
+            errors = validate_shower_end(user_input)
+            if not errors:
+                self._store(user_input, fields)
+                return await self.async_step_learning()
+        return self._form("draws", fields, user_input, errors)
 
     async def async_step_learning(
         self, user_input: dict[str, Any] | None = None

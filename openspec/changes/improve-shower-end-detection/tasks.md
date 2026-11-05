@@ -72,17 +72,17 @@ Applies to every group:
 
 ## 3. Options and the end timer
 
-- [ ] 3.1 Add the two options to the options flow (design D3 bounds and steps), with their strings and
+- [x] 3.1 Add the two options to the options flow (design D3 bounds and steps), with their strings and
   translations, and change the long-draw option's description: it applies only without a humidity sensor. Reject a
   shower end time that is not longer than the session gap, with an error on the field (design D3). Verify: tests for
   the integration-setup scenarios "Fresh entry, draws and heat" and "Existing entry after the update", an
   options-flow test that saving the two options keeps T_avg and the calibration state, and one that a shower end time
   at or below the session gap is rejected.
-- [ ] 3.2 Implement the runtime timer of design D2 in `estimator.py`: after every update, reschedule a one-shot
+- [x] 3.2 Implement the runtime timer of design D2 in `estimator.py`: after every update, reschedule a one-shot
   callback at the model's next shower end, cancel it when there is none, and cancel it on stop. Verify: a test that
   the binary sensor turns off at the shower end time with no reading and no tick in between, and that a stopped
   entry leaves no timer.
-- [ ] 3.3 Update the README: the options table (the two options, the long-draw option's new scope, marked as a
+- [x] 3.3 Update the README: the options table (the two options, the long-draw option's new scope, marked as a
   change for entries that set both), and the "How it works" text on detection. Verify: `python scripts/lint.py`
   (including `tests/test_readme.py`) and `python scripts/lint.py --hassfest`.
 

@@ -162,8 +162,8 @@ def value(hass: HomeAssistant, entry: MockConfigEntry, domain: str, key: str) ->
 class Oracle:
     """A model driven by the same inputs as the integration, to compare the entities with.
 
-    It also mirrors the end-of-shower timer that the runtime gets in the options and timer
-    group: the model is ticked at its next shower end before a later input.
+    It also mirrors the runtime's end-of-shower timer: the model is ticked at its next shower end
+    before a later input or tick.
     """
 
     def __init__(
@@ -285,7 +285,12 @@ class Rig:
         self.freezer.tick(timedelta(minutes=minutes))
         async_fire_time_changed(self.hass)
         await self.hass.async_block_till_done()
-        self.oracle.model.tick(dt_util.utcnow())
+        now = dt_util.utcnow()
+        # The end-of-shower timer fires at its deadline, before the interval's tick.
+        deadline = self.oracle.model.next_shower_end
+        if deadline is not None and deadline <= now:
+            self.oracle.model.tick(deadline)
+        self.oracle.model.tick(now)
 
     def read(self, domain: str, key: str) -> str:
         """Return the state of an entity of the entry."""

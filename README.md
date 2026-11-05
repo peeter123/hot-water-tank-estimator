@@ -133,7 +133,9 @@ entry and keeps the model state (the tank average, the charged temperature and t
 | Draws, losses and heat | Start-up energy per run | 0 kWh | Energy of each run that does not reach the tank. Learned. |
 | Draws, losses and heat | Humidity rise | 6 points | Rise above the lowest humidity of the window that counts as a shower. |
 | Draws, losses and heat | Humidity window | 60 min | The window of that lowest value. |
-| Draws, losses and heat | Long draw duration | 0 min | A draw this long counts as a shower. 0 is off. For homes without a humidity sensor. |
+| Draws, losses and heat | Shower end time | 5 min | A shower ends when no water has been drawn for this long. Must be longer than the session gap. An entry saved before this option existed, with a session gap of 300 s or more, runs with a shower end time not above the gap until its options are saved; saving them asks for a shower end time longer than the gap. |
+| Draws, losses and heat | Next shower time | 5 min | While the bathroom is still humid after a shower, a draw that lasts this long starts a new shower. |
+| Draws, losses and heat | Long draw duration | 0 min | A draw this long counts as a shower. 0 is off. Applies only without a humidity sensor. **Changed:** an entry that sets both a humidity sensor and a long draw duration no longer uses the duration. |
 | Draws, losses and heat | Reclassify window | 10 min | Litres drawn this long before detection count as shower water. |
 | Draws, losses and heat | Session gap | 60 s | Draws closer than this belong to one session. |
 | Draws, losses and heat | Maximum draw per reading | 100 L | A larger rise of the meter in one reading is ignored. |
@@ -245,15 +247,18 @@ and reason.
 ## How the estimate updates
 
 Nothing is polled. Every state change of a source (water meter, tank sensor, heat input, humidity, cold water,
-ambient) goes to the model at once, and a 5-minute timer lets the standing loss and the cold layer move when nothing
-changes. The entities update after each of those. The model state and the calibration are stored per entry every
-minute or so and at shutdown, so a restart continues where it stopped.
+ambient) goes to the model at once, and a 5-minute timer lets the standing loss and the cold layer move when
+nothing changes. A shower in progress also has a timer set for its end, so the shower detected binary sensor
+turns off on time even when no source changes. The entities update after each of those. The model state and the
+calibration are stored per entry every minute or so and at shutdown, so a restart continues where it stopped.
 
 ## The model in short
 
 The tank is a hot layer above a cold one, with a thermocline between them:
 - a heating run charges the whole tank to the charged temperature;
 - water drawn takes energy out, counted from the litres on the water meter and the cold water temperature;
+- a shower starts on a rise in bathroom humidity (or, without a humidity sensor, on a long draw) and ends when no
+  water has been drawn for the shower end time, so every litre in between counts as mixed water;
 - the standing loss slowly cools the tank;
 - the tank sensor at its height gives a bound: once the cold layer reaches it, the estimate cannot show more water
   than the sensor allows;

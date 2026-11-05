@@ -108,7 +108,10 @@ Alternatives considered:
   5-600 s), so that a session always ends before its shower does. Otherwise a pause longer than N but shorter than
   the gap would end the shower inside a session that has already lasted M, and the next litre would start a new
   shower at once, splitting one wash. The options form rejects a shower end time that is not longer than the session
-  gap, with an error on the field (decided 2026-11-05, group 2 review).
+  gap, with an error on the field (decided 2026-11-05, group 2 review). An existing entry whose session gap is
+  already 300 s or more gets the default N of 5 minutes and runs with N not above the gap until its options are
+  saved again. That is accepted as rare (the shipped gap is 60 s) and the README says so; there is no runtime clamp
+  (decided 2026-11-05, group 3 review).
 - **M = 5 min.** In the humid tail, the draws of 2.0-4.5 minutes were the cold washbasin (the user, 2026-11-05),
   while the two second showers ran 6.7 and 30.5 minutes. Replayed with N = 5:
 

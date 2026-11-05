@@ -6,6 +6,7 @@ entity updates:
 
     source state change -> `TankEstimator._handle_state` -> `TankModel.on_*`
     5-minute interval   -> `TankEstimator._handle_tick`  -> `TankModel.tick`
+    shower end timer    -> `TankEstimator._handle_shower_end` -> `TankModel.tick`
         -> `Calibrator.observe` (learns; changed options go back to `TankModel.set_options`)
         -> a delayed `Store` save, requested after every input and written once a minute at most
         -> a dispatcher signal that the entities listen to
@@ -33,6 +34,7 @@ from homeassistant.const import (
     STATE_UNKNOWN,
 )
 from homeassistant.core import (
+    CALLBACK_TYPE,
     Event,
     EventStateChangedData,
     HomeAssistant,
@@ -42,6 +44,7 @@ from homeassistant.core import (
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
+    async_track_point_in_utc_time,
     async_track_state_change_event,
     async_track_time_interval,
 )
@@ -237,6 +240,9 @@ class TankEstimator:
         self.signal = SIGNAL_UPDATE.format(entry.entry_id)
         self._store = store
         self._unsubscribe: list[Any] = []
+        # The one-shot timer at the model's next shower end, and the time it is set for.
+        self._shower_timer: CALLBACK_TYPE | None = None
+        self._shower_timer_at: datetime | None = None
         self._flow: float | None = None
         self._return: float | None = None
         self._fit_done = False
@@ -382,6 +388,7 @@ class TankEstimator:
         for unsubscribe in self._unsubscribe:
             unsubscribe()
         self._unsubscribe.clear()
+        self._cancel_shower_timer()
         self._save_pending = False
         await self._store.async_save(self.payload())
 
@@ -398,6 +405,45 @@ class TankEstimator:
     def _handle_tick(self, now: datetime) -> None:
         """Advance the model: loss, run timeout, detection windows and sensor bounds."""
         self._finish(self.model.tick(now), now)
+
+    @callback
+    def _handle_shower_end(self, now: datetime) -> None:
+        """Run the tick path when the shower in progress is due to end."""
+        if self._stopped:
+            return
+        self._shower_timer = None
+        self._shower_timer_at = None
+        self._finish(self.model.tick(now), now)
+
+    @property
+    def shower_timer_at(self) -> datetime | None:
+        """Return when the shower end timer is set for, None when none is pending."""
+        return self._shower_timer_at
+
+    @callback
+    def _cancel_shower_timer(self) -> None:
+        """Cancel the shower end timer, if one is pending."""
+        if self._shower_timer is not None:
+            self._shower_timer()
+        self._shower_timer = None
+        self._shower_timer_at = None
+
+    @callback
+    def _schedule_shower_end(self) -> None:
+        """Point the one-shot timer at the model's next shower end, or cancel it when there is none."""
+        deadline = None if self._stopped else self.model.next_shower_end
+        if deadline == self._shower_timer_at and (
+            deadline is None or self._shower_timer is not None
+        ):
+            return
+        self._cancel_shower_timer()
+        if deadline is not None:
+            self._shower_timer_at = deadline
+            self._shower_timer = async_track_point_in_utc_time(
+                self.hass,
+                self._handle_shower_end,
+                deadline,
+            )
 
     def _feed(
         self, entity_id: str, state: State | None, now: datetime
@@ -448,6 +494,7 @@ class TankEstimator:
         if self.calibrator.observe(self.model, events, now):
             self.model.set_options(self.calibrator.options)
             self._log_calibration(now, "learning", before)
+        self._schedule_shower_end()
         self.save_soon()
         async_dispatcher_send(self.hass, self.signal)
 

@@ -173,6 +173,8 @@
           "startup_energy": "Start-up energy per run",
           "humidity_rise": "Humidity rise",
           "humidity_window": "Humidity window",
+          "shower_end_minutes": "Shower end time",
+          "next_shower_minutes": "Next shower time",
           "long_draw_minutes": "Long draw duration",
           "reclassify_window": "Reclassify window",
           "session_gap": "Session gap",
@@ -185,7 +187,9 @@
           "startup_energy": "The energy of each heating run that does not reach the tank. Learned from charges.",
           "humidity_rise": "The rise in bathroom humidity, in percentage points above the lowest value of the window, that counts as a shower.",
           "humidity_window": "The window over which the lowest humidity is taken.",
-          "long_draw_minutes": "A draw that lasts this long counts as a shower. 0 turns the rule off.",
+          "shower_end_minutes": "A shower ends when no water has been drawn for this long. It must be longer than the session gap.",
+          "next_shower_minutes": "While the bathroom is still humid after a shower, a draw that lasts this long starts a new shower.",
+          "long_draw_minutes": "Only without a humidity sensor: a draw that lasts this long counts as a shower. 0 turns the rule off.",
           "reclassify_window": "The litres drawn this long before a shower is detected count as shower water.",
           "session_gap": "Draws less than this far apart belong to one session.",
           "max_draw": "A rise of the water meter above this in one reading is ignored as a meter catching up.",
@@ -210,7 +214,8 @@
       "height_out_of_range": "The sensor height must be 20-80 %.",
       "water_meter_unit": "The water meter must have a volume unit: L, m3, gal or ft3.",
       "no_heat_source": "Give at least one of the energy counter, the heat power sensor and the heating active binary sensor.",
-      "flow_return_pair": "Give both the flow and the return temperature sensor, or neither."
+      "flow_return_pair": "Give both the flow and the return temperature sensor, or neither.",
+      "shower_end_not_after_gap": "The shower end time must be longer than the session gap."
     }
   },
   "selector": {

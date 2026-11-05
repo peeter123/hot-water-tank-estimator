@@ -400,3 +400,63 @@ async def test_the_options_flow_leaves_the_reconfigure_fields_out(
     await hass.async_block_till_done()
     for key in moved:
         assert entry.options.get(key) == before.get(key), key
+
+
+async def test_the_shower_times_keep_the_state(hass: HomeAssistant, freezer) -> None:
+    """Saving the shower end time and the next shower time keeps T_avg, T_ch and the calibration."""
+    rig = await Rig.start(hass, freezer)
+    entry = rig.entry
+    await hass.services.async_call(
+        DOMAIN,
+        "set_tank_state",
+        {
+            "entity_id": entity_id(hass, entry, "sensor", "tank_litres"),
+            "tank_average": 44,
+            "charged_temperature": 55,
+        },
+        blocking=True,
+    )
+    calibrator = entry.runtime_data.calibrator
+    calibrator.values["other_hot_share"] = 0.22
+    calibrator.sources["other_hot_share"] = "learned"
+    state = calibrator.to_dict()
+
+    result = await walk(
+        hass,
+        entry.entry_id,
+        draws={"shower_end_minutes": 8.5, "next_shower_minutes": 3.0},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+
+    new = entry.runtime_data
+    assert new.model.options.shower_end_minutes == 8.5
+    assert new.model.options.next_shower_minutes == 3.0
+    assert new.model.t_avg == pytest.approx(44.0, abs=0.01)
+    assert new.model.t_ch == pytest.approx(55.0, abs=0.01)
+    assert new.calibrator.to_dict() == state
+
+
+@pytest.mark.parametrize(
+    ("end", "gap", "accepted"),
+    [
+        (2.0, 120.0, False),
+        (2.0, 600.0, False),
+        (2.5, 150.0, False),
+        (2.0, 115.0, True),
+        (5.0, 60.0, True),
+    ],
+)
+async def test_the_shower_end_time_must_be_longer_than_the_session_gap(
+    hass: HomeAssistant, end: float, gap: float, accepted: bool
+) -> None:
+    """A shower end time at or below the session gap is refused with an error on the field."""
+    set_sources(hass)
+    entry = await setup_entry(hass)
+    draws = {"shower_end_minutes": end, "session_gap": gap}
+    result = await walk(hass, entry.entry_id, draws=draws)
+    if accepted:
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+    else:
+        assert result["step_id"] == "draws"
+        assert result["errors"] == {"shower_end_minutes": "shower_end_not_after_gap"}

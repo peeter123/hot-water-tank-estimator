@@ -32,6 +32,7 @@ from .common import (
     COLD,
     ENERGY,
     FLOW,
+    FULL_OPTIONS,
     HEATING,
     HUMIDITY,
     METER,
@@ -39,6 +40,7 @@ from .common import (
     RETURN,
     TANK,
     set_sources,
+    setup_entry,
 )
 
 TANK_STEP = {
@@ -176,6 +178,8 @@ async def test_fresh_entry_draw_and_heat_defaults(hass: HomeAssistant) -> None:
     assert options.shower_flow == 7.5
     assert options.humidity_rise == 6
     assert options.humidity_window == 60
+    assert options.shower_end_minutes == 5
+    assert options.next_shower_minutes == 5
     assert options.long_draw_minutes == 0
     assert options.reclassify_window == 10
     assert options.session_gap == 60
@@ -347,3 +351,18 @@ async def test_the_same_tank_sensor_twice_is_aborted(hass: HomeAssistant) -> Non
     result = await hass.config_entries.flow.async_configure(flow_id, TANK_STEP)
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
+
+
+async def test_existing_entry_after_the_update(hass: HomeAssistant) -> None:
+    """An entry saved before the shower end and next shower times uses 5 min each and keeps its other values."""
+    options = {**FULL_OPTIONS, "session_gap": 30.0, "long_draw_minutes": 4.0}
+    assert "shower_end_minutes" not in options
+    assert "next_shower_minutes" not in options
+    set_sources(hass)
+    entry = await setup_entry(hass, options)
+    model_options = entry.runtime_data.model.options
+    assert model_options.shower_end_minutes == 5
+    assert model_options.next_shower_minutes == 5
+    assert model_options.session_gap == 30.0
+    assert model_options.long_draw_minutes == 4.0
+    assert model_options.humidity_rise == 6
