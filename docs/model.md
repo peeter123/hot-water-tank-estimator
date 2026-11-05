@@ -344,20 +344,28 @@ mixed draw while a shower or bath is in progress, and an other draw otherwise.
     median of 15 minutes apart.
   - **Shower end time, 5 minutes.** Pauses within one wash were at most 2 minutes in October (1.6 and 2.0 minutes),
     and a 3-minute pause stays one shower. The second showers of a pair started 5.0 and 5.7 minutes after the first
-    ended; 8 minutes merged the 5.7-minute pair. The shower end time must be longer than the session gap (default 60 s,
-    configurable 5-600 s), so that a session always ends before its shower does, and the options form rejects one
-    that is not. Otherwise a pause longer than the shower end time but shorter than the gap would end the shower
-    inside a session that has already lasted the next shower time, and the next litre would start a new shower at
-    once, splitting one wash.
+    ended; 8 minutes merged the 5.7-minute pair (backtest of the month: 3 minutes counted 2743 L as mixed with 19
+    samples, 5 minutes 2749 L with 19, 8 minutes 2770 L with 18). The shower end time must be longer than the
+    session gap (default 60 s, configurable 5-600 s), so that a session always ends before its shower does, and the
+    options form rejects one that is not. Otherwise a pause longer than the shower end time but shorter than the gap
+    would end the shower inside a session that has already lasted the next shower time, and the next litre would
+    start a new shower at once, splitting one wash.
   - **Next shower time, 5 minutes.** In the humid tail after a shower, the draws of 2.0-4.5 minutes were the cold
-    washbasin, while the two second showers ran 6.7 and 30.5 minutes. Replayed with a shower end time of 5 minutes,
-    3 minutes started 2 washbasin draws as showers, 4 minutes started 1, and 5 or 6 minutes started only the two
-    second showers; the litres counted as mixed in October were 2799, 2772 and 2749 L against 2934 L under the
-    humidity-ends rule.
+    washbasin, while the two second showers ran 6.7 and 30.5 minutes. Backtest of a month on the development
+    installation (shower end time 5 minutes): a next shower time of 3 minutes counted 2799 L as mixed, 4 minutes 2772 L
+    and 5 or 6 minutes 2749 L, against 2923 L under the rule where the humidity ended the shower. At 3 and 4 minutes
+    washbasin draws start showers (21 and 20 shower flow samples against 19 at 5 minutes); at 5 minutes only the two
+    second showers start one. Four days of a later month moved by 1 L with these values.
   - **Effect on the energy balance.** A litre counted as mixed instead of as an other draw costs
     `((T_mix - T_cold) - share * (T_ch - T_cold)) / V` kelvin of T_avg: at T_mix 38 C, T_cold 13.6 C, share 0.16, T_ch
-    57.1 C and V 285 L that is 0.061 K per litre. The 185 L less mixed in October is about 11 K over 24 showers, about
-    0.5 K per shower, all on the side of showing less hot water than there is.
+    57.1 C and V 285 L that is 0.061 K per litre. The month's 174 L less counted as mixed are at most about 10.6 K
+    (0.42 K per closure over 25 charge closures); the backtest measured less, because draws inside a heating run and in
+    the interval of the sensor start do not reach a closure error. The signed charge error with the options as given
+    moved by 0.17 K on average over the 25 closures (4.01 to 4.17 K, about 4.1 K in all): the model shows more hot water
+    than the old rule, and it already showed more than the charge reading. The mean absolute error rose from 4.10 to
+    4.20 K as given and from 1.52 to 1.59 K fitted, and the setup fit raised the other-draws hot share from 0.181 to
+    0.191 to absorb it. On the week fixture the fit moved the hot share from 0.105 to 0.127 and the mean charge error
+    from 1.57 to 2.05 K.
   - **Long draws with a humidity sensor.** In October the draws of at least 3 minutes that the humidity did not catch
     ran up to 8.1 minutes, apart from two: a 14.2-minute draw at 4.2 L/min with the humidity flat (a garden hose) and
     a 10.2-minute draw during an hour without humidity readings. A long-draw backup would only have been right for

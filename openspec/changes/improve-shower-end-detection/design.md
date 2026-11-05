@@ -122,11 +122,14 @@ Alternatives considered:
   | 5 min | both second showers only | 2749 L |
   | 6 min | both second showers only | 2749 L |
 
-  The shipped rule counted 2934 L as mixed over the same month.
+  The shipped rule counted 2923 L as mixed over the same month (numbers from the backtest of task 4.1).
 - **Effect on the energy balance.** A litre wrongly counted as mixed instead of as an other draw costs
   `((T_mix - T_cold) - share * (T_ch - T_cold)) / V` K of T_avg. At T_mix 38 C, T_cold 13.6 C, share 0.16, T_ch
-  57.1 C and V 285 L that is 0.061 K per litre. The 185 L less mixed in October is about 11 K over 24 showers, so
-  about 0.5 K per shower, all on the side of showing less hot water than there is.
+  57.1 C and V 285 L that is 0.061 K per litre, so the 174 L less mixed in October is at most about 10.6 K. The old
+  rule's extra mixed litres made the model show less hot water; the new rule moves the estimate up. The backtest
+  measured a smaller shift, about 0.17 K per charge closure on the signed error over October's 25 closures, and the
+  model already showed more hot water than the charge reading, so the fitted error rose slightly (1.52 to 1.59 K).
+  The user accepted that on 2026-11-05 (task 4.2).
 
 ### D4: The long-draw rule needs no humidity sensor
 

@@ -88,7 +88,7 @@ Applies to every group:
 
 ## 4. Evidence and rollout
 
-- [ ] 4.1 Run the backtest with the new rules on the October and November exports, compare with the baseline of
+- [x] 4.1 Run the backtest with the new rules on the October and November exports, compare with the baseline of
   1.3, and record the comparison in `private/installation.md`: shower starts and ends, litres counted as mixed,
   flow samples, charge errors (mean and worst), and every shower whose classification changed with the reason. Put
   the evidence without entity IDs into `docs/model.md`, replacing the exploration numbers where they differ. Also
@@ -96,18 +96,28 @@ Applies to every group:
   ended (group 2 review), and the effect on the setup fit (in the week fixture the fitted other-draws hot share went
   from 0.105 to 0.127 and the fitted mean charge error from 1.57 to 2.05 K). Verify: the comparison is in
   `private/installation.md` with the date, and `python scripts/lint.py`.
-- [ ] 4.2 **User review.** Show the user the comparison of 4.1 and ask whether the defaults hold (shower end time
+- [x] 4.2 **User review.** Show the user the comparison of 4.1 and ask whether the defaults hold (shower end time
   5 min, next shower time 5 min). Record the decision with its date in this task, and update the docs and the
   defaults if one changes.
-- [ ] 4.3 With authorization, deploy and restart from master after group 3 is committed. Verify through the
+  - Decision 2026-11-05: the user kept both defaults at 5 min, having seen the October and November comparison
+    (same listed showers, 2923 to 2749 L mixed in October, flow samples 5 minutes after the water stops, October
+    charge error given 4.10 to 4.20 K and fitted 1.52 to 1.59 K, November unchanged). The 10-17 draw after a shower
+    stays a second shower (design D3). No default or doc change follows.
+- [x] 4.3 With authorization, deploy and restart from master after group 3 is committed. Verify through the
   home-assistant MCP server: the entry loads, the state is kept (T_avg and the shower flow), the options form shows
   the two new options at 5 min, and the system log has no entries for the integration. Record the result in
   `private/installation.md`. Roll back by deploying the previous commit and restarting.
-- [ ] 4.4 Live check at the next shower (reading the history and the diagnostics only, no change): the shower
+  - Done 2026-11-05 at about 12:59, after a heating run ended: 8 files deployed, state kept (T_avg 57.95 C, shower
+    flow 6.66 L/min), the draws step of the options form shows both options at 5 min (read through an options flow
+    that was aborted, so nothing was saved), and the system log is clean.
+- [x] 4.4 Live check at the next shower (reading the history and the diagnostics only, no change): the shower
   detected binary sensor turns off about 5 minutes after the water stops, a draw shortly after it stays an other draw
   (if there is one), and the shower flow sample is added at the end. Record the evidence in
   `private/installation.md`. Verify: the history of the binary sensor and the water meter, and the diagnostics
   events.
+  - Passed 2026-11-05 on the shower of 20:14-20:25 (74 L): detected from the humidity edge at 20:15:22, off at
+    20:30:21, 5 min 0 s after the last meter increase; the shower flow sample (6.74 L/min) was logged at that moment
+    by the timer; a 1 L draw at 20:31:51, with the bathroom still humid, stayed an other draw.
 
 ## Workflow follow-up
 
