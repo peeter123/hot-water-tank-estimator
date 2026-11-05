@@ -159,11 +159,20 @@ def value(hass: HomeAssistant, entry: MockConfigEntry, domain: str, key: str) ->
     return state.state
 
 
+def _run_wake_ups(model: TankModel, now: datetime) -> None:
+    """Tick the model at each wake-up due by `now`, in order, as the runtime's timer does."""
+    last = None
+    while (deadline := model.next_wake_up) is not None and deadline <= now:
+        assert last is None or deadline > last, "the wake-up does not move forward"
+        last = deadline
+        model.tick(deadline)
+
+
 class Oracle:
     """A model driven by the same inputs as the integration, to compare the entities with.
 
-    It also mirrors the runtime's end-of-shower timer: the model is ticked at its next shower end
-    before a later input or tick.
+    It also mirrors the runtime's wake-up timer: the model is ticked at its next wake-up (a shower
+    end or a session expiry) before a later input or tick.
     """
 
     def __init__(
@@ -181,10 +190,9 @@ class Oracle:
     def set(self, now: datetime, entity: str, state: str) -> None:
         """Apply a source state at a time, as the integration does."""
         model = self.model
-        # The integration's end-of-shower timer fires at the deadline, between the inputs.
-        deadline = model.next_shower_end
-        if deadline is not None and deadline <= now:
-            model.tick(deadline)
+        # The integration's wake-up timer (a shower end or just past a session expiry) fires at its
+        # deadline, between the inputs, and is set again after each callback.
+        _run_wake_ups(model, now)
         number = None if state in ("unavailable", "unknown") else _float(state)
         match entity:
             case _ if entity == TANK:
@@ -286,10 +294,8 @@ class Rig:
         async_fire_time_changed(self.hass)
         await self.hass.async_block_till_done()
         now = dt_util.utcnow()
-        # The end-of-shower timer fires at its deadline, before the interval's tick.
-        deadline = self.oracle.model.next_shower_end
-        if deadline is not None and deadline <= now:
-            self.oracle.model.tick(deadline)
+        # The wake-up timer (shower end or session expiry) fires at its deadline, before the interval's tick.
+        _run_wake_ups(self.oracle.model, now)
         self.oracle.model.tick(now)
 
     def read(self, domain: str, key: str) -> str:

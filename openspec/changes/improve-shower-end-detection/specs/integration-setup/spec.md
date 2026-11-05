@@ -30,7 +30,7 @@ After a Home Assistant restart or an entry reload, each tank SHALL restore:
 - the current draw session;
 - the humidity window history, and whether the bathroom still counts as humid after a shower that has ended;
 - the end of the last draw and the time T_avg was last reset (see draw-classification and calibration);
-- the shower in progress, with its flow so far and the time of its last meter increase;
+- the shower in progress, with its flow so far, its start and the time of its last meter increase;
 - the last ambient reading and when it was last good, for a sensor that is still configured.
 
 On the first start, with nothing restored, the tank SHALL start charged at the tank sensor's reading. If that is
@@ -81,6 +81,29 @@ fewer litres than the tank holds reads as an error, while "charge level" compare
 - **THEN** its entities include "Hot Water Tank Hot water remaining", "Hot Water Tank Charge level", "Hot Water Tank
   Heat loss", "Hot Water Tank Hot water ran out" and "Hot Water Tank Shower flow"
 
+### Requirement: Options flow tunes the model without losing its state
+The options flow SHALL let the user change:
+- every tuning value named in the defaults requirements below, and the sensor height;
+- the optional source entities (flow and return, humidity, cold water, ambient temperature);
+- a lock for each learned parameter, the shower flow included (see calibration);
+- the history days for the setup fit (1-30, default 30).
+
+Saving SHALL keep the current tank average, the charged temperature and the calibration state. Adding, removing or
+replacing the ambient temperature sensor SHALL start a recalibration, because the loss coefficient depends on it. A
+shower end time that is not longer than the session gap SHALL be rejected with an error on that field.
+
+#### Scenario: Change sensor height
+- **WHEN** T_avg is 44 C and the user changes the sensor height from 50 % to 65 %
+- **THEN** T_avg stays 44 C, and the next sensor bound uses 65 %
+
+#### Scenario: Add an ambient sensor
+- **WHEN** T_avg is 52 C and the user adds an ambient temperature sensor in the options
+- **THEN** T_avg stays 52 C, and a recalibration over the history days runs with that sensor's history
+
+#### Scenario: Shower end time not after the session gap
+- **WHEN** the user saves the draws options with the shower end time at 2 min and the session gap at 120 s
+- **THEN** the form shows an error on the shower end time and nothing is saved
+
 ## ADDED Requirements
 
 ### Requirement: Shower timing diagnostic sensors
@@ -113,8 +136,8 @@ start of the draw session in progress plus the next shower time (bathroom still 
 #### Scenario: Draw in the humid bathroom
 - **WHEN** a shower has ended, the bathroom still counts as humid, the next shower time is 5 min and a draw session
   starts at 20:40:00
-- **THEN** "Draw counts as shower" is 20:45:00, and it is unknown again once the session ends at 20:42:00 (its last
-  increase at 20:41:00 and a session gap of 60 s), with no further reading
+- **THEN** "Draw counts as shower" is 20:45:00, and it is unknown again from just after 20:42:00, when the session
+  ends (its last increase at 20:41:00 and a session gap of 60 s), with no further reading
 
 #### Scenario: Long draw without humidity sensor
 - **WHEN** an entry has no humidity sensor, the long-draw duration is 8 min and a draw session starts at 07:00:00

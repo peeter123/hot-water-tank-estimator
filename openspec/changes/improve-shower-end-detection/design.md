@@ -26,12 +26,13 @@ redoes it with the real classifier and adds November.
 - One shower lifecycle, separate from the humidity, so that the shower ends when the water stops, whatever started
   it.
 - The shower end is seen on time in the runtime, not at the next 5-minute tick.
-- Replays (setup fit, backtest) give the same classification as the runtime, whatever their tick.
+- Replays (setup fit, backtest) end a shower at the same time as the runtime, whatever their tick.
 - A rollback to the previous release keeps the model state.
 
 **Non-Goals:**
 - No change to the start rule, the session gap, the reclassify window or the shower flow learning itself.
-- No new entity and no new diagnostics event: the shower flow event already marks a shower's end.
+- No new diagnostics event: the shower flow event already marks a shower's end. (The entities of D7 were added
+  later, at the user's request.)
 
 ## Decisions
 
@@ -158,7 +159,7 @@ new keys: a shower without a start time uses its last increase, or the time of t
 ### D6: Replays and the evidence
 
 The setup fit and the backtest need no change for the rules: they run the classifier through the model, and D2
-makes the result independent of their tick. The backtest's output is extended so the old and new rules can be
+makes the shower end independent of their tick. The backtest's output is extended so the old and new rules can be
 compared from it alone:
 - the shower list gives each shower's start, end, litres, minutes and its flow sample. A shower's sample is the first
   one reported after its last litre and before the next draw counted as other, else "no sample";
@@ -200,6 +201,9 @@ sensors use the same names:
   session expiry (the last increase plus the session gap; the classifier's strict comparison needs a moment past it).
   The model exposes that wake-up time (`next_wake_up`); the timer callback runs the same path as the tick. The
   classification does not change.
+- Without a humidity sensor and with the long-draw rule on, every draw session, even a toilet flush, gives "Draw
+  counts as shower" a time, so the runtime wakes once just after each session expires: one extra tick, harmless
+  (whole-change review, 2026-11-05).
 - Both countdown sensors are unavailable while no detection method is configured, as "Shower detected" is (decided
   2026-11-05, group 5 review).
 - The docs keep "shower end time" and "next shower time" as the concept names in `docs/model.md` and the design, and

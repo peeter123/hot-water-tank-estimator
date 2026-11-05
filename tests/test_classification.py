@@ -441,8 +441,22 @@ def _draw(
     return meter
 
 
+def test_off_after_the_water_stops() -> None:
+    """Scenario "Off after the water stops": 5 minutes after the last litre, still 80 % humid, not detected."""
+    classifier = DrawClassifier(ClassifierOptions())
+    classifier.on_meter(T0, 1000.0, "L")
+    _detect_by_humidity(classifier)
+    classifier.on_humidity(T0 + 5 * SECOND, "bath", 80.0)
+    meter = _draw(classifier, 1000.0, 10, 1.0)
+    meter = _draw(classifier, meter, 70, 6.0)
+    classifier.update(T0 + 70 * SECOND + 5 * MINUTE - SECOND)
+    assert classifier.detected
+    classifier.update(T0 + 70 * SECOND + 5 * MINUTE)
+    assert not classifier.detected
+
+
 def test_shower_with_a_pause() -> None:
-    """A session of 5 minutes, a 3-minute pause and a session of 3 minutes: 60 L over 8 minutes of flow."""
+    """Scenario "Pause in a shower": a 3-minute pause between two sessions stays one shower (60 L over 8 minutes)."""
     classifier = DrawClassifier(ClassifierOptions())
     classifier.on_meter(T0, 1000.0, "L")
     _detect_by_humidity(classifier)

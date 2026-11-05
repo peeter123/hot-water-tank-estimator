@@ -486,7 +486,7 @@ async def test_shower_ends_counts_down(hass: HomeAssistant, freezer) -> None:
 
 
 async def test_draw_in_the_humid_bathroom(hass: HomeAssistant, freezer) -> None:
-    """Integration-setup scenario "Draw in the humid bathroom": 20:45:00, unknown at 20:42:00 by the timer alone."""
+    """Integration-setup scenario "Draw in the humid bathroom": 20:45:00, unknown from just after 20:42:00 by the timer alone."""
     rig = await Rig.start(hass, freezer)
     freezer.move_to(_at(20, 20))
     await rig.set("sensor.bathroom_humidity", "55.0")

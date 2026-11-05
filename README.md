@@ -237,7 +237,7 @@ These sensors have the diagnostic category, so they are hidden from dashboards b
 | Usable fraction | % | The same, with its `source`. |
 | Shower end after no water | min | The setting in use: how long without water ends a shower. Follows the option of the same name. |
 | New shower draw while humid | min | The setting in use: how long a draw must last to start a new shower while the bathroom is still humid. Unavailable while there are no humidity sensors. |
-| Shower ends | | The time the shower in progress ends if no more water is drawn: Shower end after no water, counted from the last litre, or from the shower's start while it has drawn nothing. It moves with every litre. Unknown while no shower is in progress. Unavailable while no detection method (humidity sensor or long draw duration) is configured. |
+| Shower ends | | The time the shower in progress ends if no more water is drawn: Shower end after no water, counted from the last litre or from the shower's start, whichever is later (a shower that starts on a humidity rise or by the next shower rule counts from its start, after the litres it took over). It moves with every litre. Unknown while no shower is in progress. Unavailable while no detection method (humidity sensor or long draw duration) is configured. |
 | Draw counts as shower | | While no shower is in progress and a draw is under way: the time that draw becomes a shower, which is the start of the draw plus New shower draw while humid (bathroom still humid) or plus the long draw duration (no humidity sensor). The shower starts at the first litre at or after that time. Unknown otherwise. Unavailable while no detection method (humidity sensor or long draw duration) is configured. |
 | Calibration samples | | The number of valid heating runs (closures) in the fit. Sensor starts and excluded runs are not counted. The first heating run after adding an entry is a sensor start, so it does not raise the count. |
 | Last charge error | K | The error of the model at the start of the last run. |
@@ -254,8 +254,10 @@ and reason.
 Nothing is polled. Every state change of a source (water meter, tank sensor, heat input, humidity, cold water,
 ambient) goes to the model at once, and a 5-minute timer lets the standing loss and the cold layer move when
 nothing changes. A shower in progress also has a timer set for its end, so the shower detected binary sensor
-turns off on time even when no source changes. The entities update after each of those. The model state and the
-calibration are stored per entry every minute or so and at shutdown, so a restart continues where it stopped.
+turns off on time even when no source changes. The model also wakes just after a draw session ends while Draw
+counts as shower shows a time, so that countdown clears on time. The entities update after each of those. The
+model state and the calibration are stored per entry every minute or so and at shutdown, so a restart continues
+where it stopped.
 
 ## The model in short
 
@@ -364,7 +366,7 @@ with the fitted ones. The usage, all arguments and what the numbers mean are in
   end after no water), not when the bathroom has dried. A shower with a longer pause counts as two.
 - **A second shower right after the first counts as other draws at first:** while the bathroom is still humid, a
   draw becomes a shower only after it has lasted the option New shower draw while humid (5 min), and then its
-  litres from the start of that draw are counted as shower water.
+  litres from the start of that draw count as shower water, but only within the reclassify window.
 - **A value you set by hand is overwritten:** lock the parameter in the options.
 
 ## Removal
@@ -380,7 +382,8 @@ touched. To remove the integration completely, then remove it in HACS (or delete
 - Tanks heated high up (a coil or element in the upper part) and a second heat source such as an electric element
   are not supported. A coil low in the tank is.
 - One tank sensor only, and no probe on the hot outlet.
-- A shower in a room without a humidity sensor is not detected (the long draw rule covers part of it). It then counts
+- A shower in a room without a humidity sensor is not detected (the long draw rule covers part of it, and only for an
+  entry with no humidity sensor at all: with any humidity sensor configured it never fires). It then counts
   at the other draws share, and the sensor bound corrects the estimate once the cold layer reaches the sensor.
 - Garden watering and other large draws count at the other draws share, and the next charge resets them.
 - A humidity rise without a shower (cooking, humid weather) ends after the shower end time without water drawn and

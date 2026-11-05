@@ -327,8 +327,9 @@ mixed draw while a shower or bath is in progress, and an other draw otherwise.
     is classified as the first litre after the shower, whether it comes from the runtime, the setup fit or the
     backtest, and whatever their tick. The shower's litres and minutes do not depend on the call time either. The
     shower flow event is logged by the call that sees the end: at the deadline in the runtime (a timer), at the next
-    reading or tick in a replay. A pause shorter than N keeps the shower. A shower with no water ends N minutes
-    after its start and reports nothing.
+    reading or tick in a replay. This holds for the shower end only: the humidity hysteresis is evaluated at each
+    call, so an extra runtime wake-up can in rare cases differ from a replay. A pause shorter than N keeps the
+    shower. A shower with no water ends N minutes after its start and reports nothing.
   - **After the end.** When the bathroom is no longer humid the classifier is idle. When it is still humid, other
     draws stay other draws, and a new shower needs a session of the next shower time. Nothing else is stored for
     this: it is "humid and no shower in progress".

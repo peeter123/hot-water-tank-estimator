@@ -463,6 +463,21 @@ async def test_the_shower_end_time_must_be_longer_than_the_session_gap(
         assert result["errors"] == {"shower_end_minutes": "shower_end_not_after_gap"}
 
 
+async def test_shower_end_time_not_after_the_session_gap(hass: HomeAssistant) -> None:
+    """Scenario "Shower end time not after the session gap": 2 min and 120 s show an error and save nothing."""
+    set_sources(hass)
+    entry = await setup_entry(hass)
+    before = dict(entry.options)
+    result = await walk(
+        hass,
+        entry.entry_id,
+        draws={"shower_end_minutes": 2.0, "session_gap": 120.0},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"shower_end_minutes": "shower_end_not_after_gap"}
+    assert dict(entry.options) == before
+
+
 async def test_option_saved(hass: HomeAssistant) -> None:
     """Integration-setup scenario "Option saved": a saved shower end time of 7.5 shows after the reload."""
     set_sources(hass)

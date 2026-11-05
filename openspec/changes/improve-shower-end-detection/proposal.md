@@ -44,15 +44,19 @@ None.
 ### Modified Capabilities
 
 - `draw-classification`:
-  - "Shower detection from bathroom humidity": humidity starts a shower; the water ends it; the humidity hold only
-    allows another shower;
+  - "Shower detection from bathroom humidity" is removed and replaced by the new requirement "Humidity starts a
+    shower and the water ends it": humidity starts a shower; the water ends it; the humidity hold only allows
+    another shower;
   - "Long draws count as a shower": only without a humidity sensor, and ended by the shower end time;
   - "Shower detection is exposed": the binary sensor follows the shower in progress;
-  - a new requirement for another shower while the bathroom is still humid.
+  - a second new requirement for another shower while the bathroom is still humid. Both new requirements are
+    appended at the end of the main spec on archive.
 - `integration-setup`:
   - "Draw and heat defaults": the shower end time and the next shower time;
   - "State survives a restart": the classifier state, including a shower that has ended while the bathroom is
     still humid;
+  - "Options flow tunes the model without losing its state": a shower end time not longer than the session gap is
+    rejected;
   - "Entities and units": the four diagnostic sensors, and two new requirements for them.
 
 ## Impact

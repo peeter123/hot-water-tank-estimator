@@ -39,11 +39,11 @@ is configured.
 ## ADDED Requirements
 
 ### Requirement: Humidity starts a shower and the water ends it
-With humidity sensors configured, the bathroom SHALL count as humid from when any sensor reads at least the rise
-(default 6 points) above its lowest value of the window (default 60 minutes), until every sensor that reached the
-rise is below that minimum plus half the rise. A shower SHALL start when the bathroom becomes humid, and SHALL end
-once no water has been drawn for the shower end time (default 5 minutes) since its last meter increase, or its
-start. The humidity falling SHALL NOT end it.
+The bathroom SHALL count as humid from when any humidity sensor reads at least the rise (default 6 points) above its
+minimum over the window (default 60 minutes), until every sensor that reached the rise is below that minimum plus
+half the rise. A shower SHALL start when the bathroom becomes humid, and SHALL end once no water has been drawn for
+the shower end time (default 5 minutes) after the later of its last meter increase and its start; a humidity fall
+SHALL NOT end it.
 
 #### Scenario: Shower starts
 - **WHEN** the lowest bathroom humidity of the last 60 minutes is 61 % and the sensor now reads 72 %
