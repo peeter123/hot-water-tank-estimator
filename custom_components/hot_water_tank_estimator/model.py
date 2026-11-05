@@ -38,6 +38,7 @@ from .const import (
     DEFAULT_MAX_DRAW,
     DEFAULT_MAX_TEMPERATURE,
     DEFAULT_MIX_TEMPERATURE,
+    DEFAULT_NEXT_SHOWER_MINUTES,
     DEFAULT_OTHER_HOT_SHARE,
     DEFAULT_POWER_THRESHOLD,
     DEFAULT_RECLASSIFY_WINDOW,
@@ -45,6 +46,7 @@ from .const import (
     DEFAULT_SENSOR_MARGIN,
     DEFAULT_SENSOR_TOLERANCE,
     DEFAULT_SESSION_GAP,
+    DEFAULT_SHOWER_END_MINUTES,
     DEFAULT_SHOWER_FLOW,
     DEFAULT_STARTUP_ENERGY,
     DEFAULT_THERMOCLINE_WIDTH,
@@ -191,10 +193,18 @@ class ModelOptions:
     reclassify_window: float = DEFAULT_RECLASSIFY_WINDOW  # minutes
     session_gap: float = DEFAULT_SESSION_GAP  # seconds
     max_draw: float = DEFAULT_MAX_DRAW  # litres per reading
+    shower_end_minutes: float = DEFAULT_SHOWER_END_MINUTES  # minutes
+    next_shower_minutes: float = DEFAULT_NEXT_SHOWER_MINUTES  # minutes
     power_threshold: float = DEFAULT_POWER_THRESHOLD  # W
 
-    def classifier_options(self) -> ClassifierOptions:
-        """Return the part of the options the draw classification uses."""
+    def classifier_options(
+        self, humidity_configured: bool = False
+    ) -> ClassifierOptions:
+        """Return the part of the options the draw classification uses.
+
+        Args:
+            humidity_configured: Whether a humidity sensor is configured (the sources say).
+        """
         return ClassifierOptions(
             humidity_rise=self.humidity_rise,
             humidity_window=self.humidity_window,
@@ -202,6 +212,9 @@ class ModelOptions:
             reclassify_window=self.reclassify_window,
             session_gap=self.session_gap,
             max_draw=self.max_draw,
+            shower_end_minutes=self.shower_end_minutes,
+            next_shower_minutes=self.next_shower_minutes,
+            humidity_configured=humidity_configured,
         )
 
 
@@ -366,7 +379,7 @@ class TankModel:
         self._bal_avg = self.t_avg
         self._bal_ch = self.t_ch
         self._now = now
-        self._classifier = DrawClassifier(options.classifier_options())
+        self._classifier = DrawClassifier(self._classifier_options(options))
         # The last draw session that ended, and the state after the latest draw increase,
         # which becomes that record when the classifier reports the session's end.
         self._draw_end: DrawEnd | None = None
@@ -588,10 +601,14 @@ class TankModel:
         self._resnapshot_draw(now, reclassify)
         return events
 
+    def _classifier_options(self, options: ModelOptions) -> ClassifierOptions:
+        """Return the classifier's options, told whether a humidity sensor is configured."""
+        return options.classifier_options(bool(self.sources.humidity_sensors))
+
     def set_options(self, options: ModelOptions) -> None:
         """Use new tuning values. The state is kept."""
         self.options = options
-        self._classifier.set_options(options.classifier_options())
+        self._classifier.set_options(self._classifier_options(options))
         self.t_cold = self._cold_at(self._now)
         self._clamp()
 
@@ -753,7 +770,7 @@ class TankModel:
     def shower_time(self) -> ShowerMinutes:
         """Return the shower minutes left with the flow they use and their range.
 
-        While a shower is detected with at least 1 minute of flow, the flow is the shower's
+        While a shower is in progress with at least 1 minute of flow, the flow is the shower's
         rolling flow; otherwise it is the shower flow in use. The range is the minutes at the
         highest and the lowest flow of the history.
         """
@@ -776,6 +793,14 @@ class TankModel:
     def shower_detected(self) -> bool:
         """Return whether a shower or bath is detected."""
         return self._classifier.detected
+
+    @property
+    def next_shower_end(self) -> datetime | None:
+        """Return when the shower in progress ends if no water is drawn, None without one.
+
+        The runtime schedules a callback for it, so the end is seen on time.
+        """
+        return self._classifier.shower_end
 
     @property
     def detection_available(self) -> bool:

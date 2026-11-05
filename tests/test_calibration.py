@@ -244,12 +244,13 @@ def test_in_run_draws_and_loss_belong_to_the_closure() -> None:
     for minute in range(11, 61):
         now = start + minute * MINUTE
         if minute == 30:
-            rig.call(
-                now, "on_humidity", "bath", 50.0
-            )  # the room has dried: the shower is over
+            rig.call(now, "on_humidity", "bath", 50.0)  # the room has dried
         rig.kwh += 0.1
         rig.call(now, "on_energy", rig.kwh)
-        rig.draw(now, 2.0)
+        # The water stops after minute 15: the shower ends at minute 20, and the later draws
+        # are other draws (the session never reaches the next shower time while humid).
+        if not 16 <= minute <= 25:
+            rig.draw(now, 2.0)
     end = start + 61 * MINUTE
     # The model's tank average now is the true one at the run end.
     expected = rig.model.t_avg
@@ -1536,7 +1537,8 @@ def test_a_shower_with_a_pause_is_7_5_litres_per_minute() -> None:
         meter += litres
         feed(T0 + seconds * SECOND, "on_water_meter", meter, "L")
     assert calibrator.shower_flows == []
-    feed(T0 + 12 * MINUTE, "on_humidity", "bath", 55.0)
+    # The last increase was at 670 s, so the shower ends 5 minutes later.
+    feed(T0 + 670 * SECOND + 5 * MINUTE, "on_humidity", "bath", 55.0)
     assert calibrator.shower_flows == [pytest.approx(7.5)]
     assert model.options.shower_flow == pytest.approx(7.5)
     shower_events = [e for e in model.events if e.kind == "shower_flow"]

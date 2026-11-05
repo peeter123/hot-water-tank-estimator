@@ -42,7 +42,7 @@ Applies to every group:
 
 ## 2. Shower lifecycle in the classifier
 
-- [ ] 2.1 Implement design D1, D2 and D4 in `classification.py`, with the two new options in `ClassifierOptions`
+- [x] 2.1 Implement design D1, D2 and D4 in `classification.py`, with the two new options in `ClassifierOptions`
   and `ModelOptions` (design D3: `shower_end_minutes` 5, `next_shower_minutes` 5) and whether a humidity sensor is
   configured, from the entry's sources:
   - a shower starts on the humid edge, on a session of the next shower time while humid and no shower is in
@@ -55,16 +55,16 @@ Applies to every group:
   dries", "Long draw without humidity sensor", "Pause in a long-draw shower", "Long draw with a humidity sensor",
   "Second shower" and "Washbasin after a shower". Also a test that a reading after the deadline, with no call in
   between, is classified after the shower has ended.
-- [ ] 2.2 Expose the next shower end from the model (the deadline of the shower in progress, or none), for the
+- [x] 2.2 Expose the next shower end from the model (the deadline of the shower in progress, or none), for the
   runtime timer of group 3. Verify: a model test with a shower in progress and one without.
-- [ ] 2.3 Implement the saved state of design D5: the shower start, the humid edge state, the previous release's
+- [x] 2.3 Implement the saved state of design D5: the shower start, the humid edge state, the previous release's
   keys still written, and restore of a state without the new keys. Verify: tests that a store without the new keys
   loads, that a saved state loads in a copy of the previous release's `restore` (or checks the keys it reads), and
   the integration-setup scenarios "Restart in the humid bathroom after a shower" and "Restart during a shower" at
   the model level.
-- [ ] 2.4 Run the replay tests. `back_to_back` should pass unchanged (design, Risks). Verify: `python
+- [x] 2.4 Run the replay tests. `back_to_back` should pass unchanged (design, Risks). Verify: `python
   scripts/lint.py`; if a replay test fails, report its data to the orchestrator instead of changing the test.
-- [ ] 2.5 Update `docs/model.md` ("Draw classification", "Shower flow"): the shower lifecycle with the diagram, the
+- [x] 2.5 Update `docs/model.md` ("Draw classification", "Shower flow"): the shower lifecycle with the diagram, the
   end rule, the next shower rule, the long-draw rule only without a humidity sensor, the binary sensor's meaning, and
   the evidence of design D1, D3 and D4 (October; the backtest numbers follow in group 4). Update the README's
   entities row for "Shower detected", the troubleshooting entries on detection and the limitations (a humidity rise
@@ -73,9 +73,11 @@ Applies to every group:
 ## 3. Options and the end timer
 
 - [ ] 3.1 Add the two options to the options flow (design D3 bounds and steps), with their strings and
-  translations, and change the long-draw option's description: it applies only without a humidity sensor. Verify:
-  tests for the integration-setup scenarios "Fresh entry, draws and heat" and "Existing entry after the update",
-  and an options-flow test that saving the two options keeps T_avg and the calibration state.
+  translations, and change the long-draw option's description: it applies only without a humidity sensor. Reject a
+  shower end time that is not longer than the session gap, with an error on the field (design D3). Verify: tests for
+  the integration-setup scenarios "Fresh entry, draws and heat" and "Existing entry after the update", an
+  options-flow test that saving the two options keeps T_avg and the calibration state, and one that a shower end time
+  at or below the session gap is rejected.
 - [ ] 3.2 Implement the runtime timer of design D2 in `estimator.py`: after every update, reschedule a one-shot
   callback at the model's next shower end, cancel it when there is none, and cancel it on stop. Verify: a test that
   the binary sensor turns off at the shower end time with no reading and no tick in between, and that a stopped
@@ -89,8 +91,11 @@ Applies to every group:
 - [ ] 4.1 Run the backtest with the new rules on the October and November exports, compare with the baseline of
   1.3, and record the comparison in `private/installation.md`: shower starts and ends, litres counted as mixed,
   flow samples, charge errors (mean and worst), and every shower whose classification changed with the reason. Put
-  the evidence without entity IDs into `docs/model.md`, replacing the exploration numbers where they differ. Verify:
-  the comparison is in `private/installation.md` with the date, and `python scripts/lint.py`.
+  the evidence without entity IDs into `docs/model.md`, replacing the exploration numbers where they differ. Also
+  report showers that start with no water from a humidity rise that comes back after a dip, once the shower has
+  ended (group 2 review), and the effect on the setup fit (in the week fixture the fitted other-draws hot share went
+  from 0.105 to 0.127 and the fitted mean charge error from 1.57 to 2.05 K). Verify: the comparison is in
+  `private/installation.md` with the date, and `python scripts/lint.py`.
 - [ ] 4.2 **User review.** Show the user the comparison of 4.1 and ask whether the defaults hold (shower end time
   5 min, next shower time 5 min). Record the decision with its date in this task, and update the docs and the
   defaults if one changes.

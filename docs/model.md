@@ -280,7 +280,7 @@ litres by about 8 %, and every charge absorbs it.
 ## Draw classification
 
 Litres come from a whole-house water meter that also counts toilet flushes, cold taps and appliances. A litre is a
-mixed draw while a shower or bath is detected, and an other draw otherwise.
+mixed draw while a shower or bath is in progress, and an other draw otherwise.
 
 - **Meter deltas.** The litres drawn are the increase between two readings, converted from the meter unit (m3, L, gal
   or ft3). A decrease is a meter reset: no draw, and that reading is the new starting point. A non-numeric or
@@ -291,16 +291,79 @@ mixed draw while a shower or bath is detected, and an other draw otherwise.
   being offline.
 - **Sessions.** Increases no more than 60 s apart belong to one session. At 1 L resolution and the lowest realistic
   shower flow (about 2.5 L/min), increases are at most 24 s apart. A session starts at its first increase.
-- **Humidity detection.** Each humidity sensor is compared with its own lowest value of the last 60 minutes (the
-  value in force during the window counts). A shower is detected while any sensor reads at least the rise (default 6
-  points) above that minimum. It lasts until every sensor that reached the rise is below its minimum plus half the
-  rise, so detection holds until the room has dried most of the way. A sensor that never reached the rise does not
-  hold it. Shower rises are 13-40 points while other draws stay within 2. A tap used in the drying time counts as
-  mixed, which errs on the side of showing less.
-- **Long-draw rule.** When set (minutes, default 0 = off), a session that has lasted that long counts as a shower
-  until it ends. It is for homes without a humidity sensor, and it also fires on garden watering.
+- **Humid bathroom.** Each humidity sensor is compared with its own lowest value of the last 60 minutes (the value
+  in force during the window counts). The bathroom counts as humid from when any sensor reads at least the rise
+  (default 6 points) above that minimum, until every sensor that reached the rise is below its minimum plus half the
+  rise. A sensor that never reached the rise does not hold it. Shower rises are 13-40 points while other draws stay
+  within 2. Being humid starts a shower (see "Shower lifecycle"); it does not keep one going.
+- **Shower lifecycle.** A shower is in progress from its start until the water stops, whatever started it. The
+  "Shower detected" binary sensor, the rolling flow and the shower report all follow that one state, not the humidity.
+
+  ```
+                      bathroom becomes humid (rise edge)
+     +--------+  --------------------------------------->  +-----------+
+     |  idle  |                                           |  SHOWER   |  every litre is mixed
+     +--------+  <-------------------+                    +-----------+
+       ^   |                         |                       |     ^
+       |   | no humidity sensor:     | not humid             |     | still humid and a session
+       |   | a session of the        |                       |     | has lasted the next
+       |   | long-draw duration      |       no water for    |     | shower time (M)
+       |   +-------------------------|-----> the shower end  |     |
+       |        (to SHOWER)          |       time (N)        v     |
+       |                        +------------------------------------+
+       +------------------------|  ended, humid: other draws, and   |
+            not humid           |  no humidity edge can occur       |
+                                +------------------------------------+
+  ```
+
+  - **Start.** A shower starts on one of three triggers: the bathroom becomes humid (the edge, so a bathroom that is
+    still humid after a shower cannot restart one from the humidity); a draw session that has lasted the next
+    shower time (default 5 minutes) while the bathroom is humid and no shower is in progress; or, with no humidity
+    sensor configured, a session of the long-draw duration. At the start, the litres of the current session drawn
+    within the reclassify window become mixed draws.
+  - **End.** A shower ends at `t_ref + N`, where `t_ref` is the later of its last meter increase and its start,
+    and N the shower end time (default 5 minutes). The classification ends then, not at the next reading: every call
+    into the classifier first ends a shower whose time has passed, dating the end at that time, so a reading after it
+    is classified as the first litre after the shower, whether it comes from the runtime, the setup fit or the
+    backtest, and whatever their tick. The shower's litres and minutes do not depend on the call time either. The
+    shower flow event is logged by the call that sees the end: at the deadline in the runtime (a timer), at the next
+    reading or tick in a replay. A pause shorter than N keeps the shower. A shower with no water ends N minutes
+    after its start and reports nothing.
+  - **After the end.** When the bathroom is no longer humid the classifier is idle. When it is still humid, other
+    draws stay other draws, and a new shower needs a session of the next shower time. Nothing else is stored for
+    this: it is "humid and no shower in progress".
+  - **Long-draw rule.** When set (minutes, default 0 = off) and no humidity sensor is configured, a session that has
+    lasted that long starts a shower, which ends like any other. With a humidity sensor configured the duration starts
+    nothing: a long draw without a humidity rise is not in the bathroom (a garden hose). The classifier is told
+    whether a sensor is configured by the entry's sources, not by readings, because a configured sensor may not have
+    reported yet. Without a humidity sensor there is no humid state, so the next shower time does not apply.
+  - **Why the water ends it.** In the October data of the development installation the humidity had fallen only 1-3
+    points from its peak 10 minutes after the water stopped in most showers (the bathroom stays at 85-90 %), so ending
+    on a fall would still be late, or would need a threshold that also fires during a shower. The bathroom
+    temperature rose 0.2-0.9 K per shower, peaked 2-25 minutes after the water stopped, and its sensor reported a
+    median of 15 minutes apart.
+  - **Shower end time, 5 minutes.** Pauses within one wash were at most 2 minutes in October (1.6 and 2.0 minutes),
+    and a 3-minute pause stays one shower. The second showers of a pair started 5.0 and 5.7 minutes after the first
+    ended; 8 minutes merged the 5.7-minute pair. The shower end time must be longer than the session gap (default 60 s,
+    configurable 5-600 s), so that a session always ends before its shower does, and the options form rejects one
+    that is not. Otherwise a pause longer than the shower end time but shorter than the gap would end the shower
+    inside a session that has already lasted the next shower time, and the next litre would start a new shower at
+    once, splitting one wash.
+  - **Next shower time, 5 minutes.** In the humid tail after a shower, the draws of 2.0-4.5 minutes were the cold
+    washbasin, while the two second showers ran 6.7 and 30.5 minutes. Replayed with a shower end time of 5 minutes,
+    3 minutes started 2 washbasin draws as showers, 4 minutes started 1, and 5 or 6 minutes started only the two
+    second showers; the litres counted as mixed in October were 2799, 2772 and 2749 L against 2934 L under the
+    humidity-ends rule.
+  - **Effect on the energy balance.** A litre counted as mixed instead of as an other draw costs
+    `((T_mix - T_cold) - share * (T_ch - T_cold)) / V` kelvin of T_avg: at T_mix 38 C, T_cold 13.6 C, share 0.16, T_ch
+    57.1 C and V 285 L that is 0.061 K per litre. The 185 L less mixed in October is about 11 K over 24 showers, about
+    0.5 K per shower, all on the side of showing less hot water than there is.
+  - **Long draws with a humidity sensor.** In October the draws of at least 3 minutes that the humidity did not catch
+    ran up to 8.1 minutes, apart from two: a 14.2-minute draw at 4.2 L/min with the humidity flat (a garden hose) and
+    a 10.2-minute draw during an hour without humidity readings. A long-draw backup would only have been right for
+    the second, which belongs to the sensor outage, not to detection.
 - **Reclassify window.** Humidity rose 0.9-6.3 minutes after a shower started on the development installation, and
-  the long-draw rule fires only after its duration. When detection starts, the litres of the current session that
+  the other triggers fire only after their duration. When a shower starts, the litres of the current session that
   were drawn within the last 10 minutes (the window) and counted as other draws become mixed draws, and the model is
   corrected by the energy difference
   `dV * (min(t_mix, t_ch) - t_cold) / V - share * dV * (t_ch - t_cold) / V`. With a 3-minute window, six showers of
@@ -317,9 +380,10 @@ mixed draw while a shower or bath is detected, and an other draw otherwise.
 
 ### Shower flow
 
-A shower in the history or in progress is a group of draw sessions, from the rise of detection to its fall (the
-humidity or the long-draw session). The classifier reports, when it ends:
-- the **mixed litres** drawn within those minutes: those reclassified at detection included, the first increase of
+A shower in the history or in progress is a group of draw sessions, from its start to its end (see "Shower
+lifecycle"): a pause shorter than the shower end time is part of it. The classifier reports, when it ends, which is
+the shower end time after its last increase:
+- the **mixed litres** drawn within those minutes: those reclassified at the start included, the first increase of
   each session left out, because it was drawn before the session began;
 - the **minutes of flow**: the summed duration of its sessions, each from its first to its last increase. A pause
   longer than the session gap is no flow, so a shower with a 3-minute pause in the middle counts its two sessions
@@ -328,7 +392,7 @@ humidity or the long-draw session). The classifier reports, when it ends:
   in an 8-minute session: 16 count, so 60 L over 8 minutes is 7.5 L/min, and not the 8.0 that counting the first
   reading would give.
 
-While a shower is detected the classifier also gives its **rolling flow**: the mixed litres over the last 2 minutes
+While a shower is in progress the classifier also gives its **rolling flow**: the mixed litres over the last 2 minutes
 of flow, divided by those minutes. Only the time between the increases of a session counts, so a pause with the water
 off neither dilutes the flow nor ends it, and the litre of a session's first increase, drawn before the session
 began, is left out of the window. With less than 1 minute of flow in the shower there are too few litres for a flow,
@@ -336,8 +400,8 @@ and there is none. Two minutes are about 15 L at 7.5 L/min: a meter that counts 
 to about 7 %, and a change at the tap still shows within a minute or two. The rolling flow is for display only; at
 the shower's end the whole-shower flow goes to the learner (see "Learning").
 
-The shower minutes divide the shower water by the **flow in use**: the rolling flow while a shower is detected and has
-1 minute of flow, otherwise the shower flow in use (the median of the history, or the locked value). The sensor says
+The shower minutes divide the shower water by the **flow in use**: the rolling flow while a shower is in progress and
+has 1 minute of flow, otherwise the shower flow in use (the median of the history, or the locked value). The sensor says
 which in its `flow` and `flow_basis` attributes (`current_shower` or `median`), and gives the minutes at the highest
 and the lowest flow of the history as `minutes_low` and `minutes_high` (the state itself when the history is empty).
 The meter's resolution shows: with whole litres the rolling flow steps by about 0.5 L/min, so the minutes can change
@@ -558,7 +622,7 @@ both. The shower list has the sessions with at least 50 L counted as mixed. A li
 (first and last litre, UTC), its litres, the litres counted as mixed (a detection's reclassified litres included), its
 minutes of flow and its shower flow sample, or `no sample`, then the tank and shower litres at the start, each quarter
 and the end. A shower's sample is the first one the model reports after its last litre and before the next draw counted
-as other; it needs 3 minutes of flow. Showers held by one detection share one sample. A second list gives every shower
+as other; it needs 3 minutes of flow. A second list gives every shower
 flow sample the model reported (time, litres, minutes, flow), so samples of fragments and of small detections show too,
 and the totals give the litres drawn, counted as mixed and reclassified, per options set. On a fixture:
 

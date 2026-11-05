@@ -116,18 +116,23 @@ def test_shower_starts() -> None:
     assert classifier.detected
 
 
-def test_shower_ends_with_hysteresis() -> None:
-    """Detected with minimum 61 % and rise 6: still detected at 65 %, ended below 64 %."""
-    classifier = DrawClassifier(ClassifierOptions())
+def test_bathroom_dries() -> None:
+    """Minimum 61 %, rise 6: humid at 64 %, dry at 63.9 %, and a new rise of 6 starts a shower."""
+    classifier = DrawClassifier(ClassifierOptions(humidity_configured=True))
     classifier.on_humidity(T0, "bath", 61.0)
     classifier.on_humidity(T0 + 10 * MINUTE, "bath", 75.0)
     assert classifier.detected
-    classifier.on_humidity(T0 + 20 * MINUTE, "bath", 65.0)
-    assert classifier.detected
-    classifier.on_humidity(T0 + 21 * MINUTE, "bath", 64.0)
-    assert classifier.detected
-    classifier.on_humidity(T0 + 22 * MINUTE, "bath", 63.9)
+    classifier.update(T0 + 15 * MINUTE)  # no water: the shower is over
     assert not classifier.detected
+    classifier.on_humidity(T0 + 20 * MINUTE, "bath", 65.0)
+    assert classifier.humid
+    classifier.on_humidity(T0 + 21 * MINUTE, "bath", 64.0)
+    assert classifier.humid
+    classifier.on_humidity(T0 + 22 * MINUTE, "bath", 63.9)
+    assert not classifier.humid
+    assert not classifier.detected
+    classifier.on_humidity(T0 + 23 * MINUTE, "bath", 67.0)
+    assert classifier.detected
 
 
 def test_humidity_sensors_have_their_own_window_minimum() -> None:
@@ -140,7 +145,7 @@ def test_humidity_sensors_have_their_own_window_minimum() -> None:
     classifier.on_humidity(T0 + 6 * MINUTE, "bath", 57.0)
     assert classifier.detected
     classifier.on_humidity(T0 + 20 * MINUTE, "bath", 51.0)
-    assert not classifier.detected
+    assert not classifier.humid
 
 
 def test_humidity_window_slides() -> None:
@@ -148,17 +153,17 @@ def test_humidity_window_slides() -> None:
     classifier = DrawClassifier(ClassifierOptions(humidity_window=60.0))
     classifier.on_humidity(T0, "bath", 50.0)
     classifier.on_humidity(T0 + 50 * MINUTE, "bath", 60.0)
-    assert classifier.detected
+    assert classifier.humid
     # The 50 % reading was in force until minute 50, so it still counts at minute 100...
     classifier.update(T0 + 100 * MINUTE)
-    assert classifier.detected
+    assert classifier.humid
     # ...and no longer at minute 111, when the window holds only 60 %.
     classifier.update(T0 + 111 * MINUTE)
-    assert not classifier.detected
+    assert not classifier.humid
 
 
 def test_long_draw_without_humidity_sensor() -> None:
-    """A session of 3 minutes counts as a shower until the session ends."""
+    """No humidity sensor, 3 minutes: a session of 3 minutes is a shower, ending 5 minutes after the water."""
     classifier = DrawClassifier(ClassifierOptions(long_draw_minutes=3.0))
     litres = 1000.0
     classifier.on_meter(T0, litres, "L")
@@ -168,8 +173,78 @@ def test_long_draw_without_humidity_sensor() -> None:
         assert result is not None
         assert result.mixed == ((i - 1) * 10 >= 180)
     assert classifier.detected
-    classifier.update(T0 + 210 * SECOND + 61 * SECOND)
+    last = T0 + 210 * SECOND
+    classifier.update(last + 5 * MINUTE - SECOND)
+    assert classifier.detected
+    classifier.update(last + 5 * MINUTE)
     assert not classifier.detected
+
+
+def test_pause_in_a_long_draw_shower() -> None:
+    """A long-draw shower that pauses for 3 minutes and runs again stays one shower."""
+    classifier = DrawClassifier(ClassifierOptions(long_draw_minutes=3.0))
+    classifier.on_meter(T0, 1000.0, "L")
+    meter = 1000.0
+    for step in range(1, 25):  # 4 minutes of water, 1 L every 10 s
+        meter = _draw(classifier, meter, step * 10, 1.0)
+    assert classifier.detected
+    classifier.update(T0 + 240 * SECOND + 3 * MINUTE)
+    assert classifier.detected
+    for step in range(1, 7):  # and one more minute
+        meter = _draw(classifier, meter, 240 + 180 + step * 10, 1.0)
+    classifier.update(T0 + 480 * SECOND + 5 * MINUTE)
+    report = classifier.take_shower_end()
+    assert report is not None
+    assert report.litres == pytest.approx(
+        28.0
+    )  # 23 + 5: the first of each session is left out
+    assert classifier.take_shower_end() is None
+
+
+def test_long_draw_with_a_humidity_sensor() -> None:
+    """A humidity sensor, 10 minutes, a 14-minute draw and a flat humidity: all other draws."""
+    classifier = DrawClassifier(
+        ClassifierOptions(long_draw_minutes=10.0, humidity_configured=True)
+    )
+    classifier.on_humidity(T0, "bath", 55.0)
+    classifier.on_meter(T0, 1000.0, "L")
+    for step in range(1, 15 * 6):  # 14.8 minutes, 1 L every 10 s
+        classifier.on_humidity(T0 + step * 10 * SECOND, "bath", 55.0 + step % 2)
+        result = classifier.on_meter(T0 + step * 10 * SECOND, 1000.0 + step, "L")
+        assert result is not None
+        assert not result.mixed
+    assert not classifier.detected
+    assert classifier.take_shower_end() is None
+
+
+def test_a_reading_after_the_deadline_is_handled_after_the_shower() -> None:
+    """With no call between, a draw 7 minutes after the last is a new draw, and the shower is reported."""
+    classifier = DrawClassifier(ClassifierOptions(long_draw_minutes=3.0))
+    classifier.on_meter(T0, 1000.0, "L")
+    meter = 1000.0
+    for step in range(1, 25):
+        meter = _draw(classifier, meter, step * 10, 1.0)
+    assert classifier.detected
+    result = classifier.on_meter(T0 + 240 * SECOND + 7 * MINUTE, meter + 1.0, "L")
+    assert result is not None
+    assert not result.mixed
+    assert not classifier.detected
+    report = classifier.take_shower_end()
+    assert report is not None
+
+
+def test_the_next_shower_end_is_the_last_increase_plus_the_end_time() -> None:
+    """The deadline of the shower in progress, none without one."""
+    classifier = DrawClassifier(ClassifierOptions(shower_end_minutes=5.0))
+    assert classifier.shower_end is None
+    classifier.on_humidity(T0, "bath", 55.0)
+    classifier.on_humidity(T0 + MINUTE, "bath", 70.0)
+    assert classifier.shower_end == T0 + 6 * MINUTE  # no water yet: from the start
+    classifier.on_meter(T0 + 2 * MINUTE, 1000.0, "L")
+    classifier.on_meter(T0 + 3 * MINUTE, 1001.0, "L")
+    assert classifier.shower_end == T0 + 8 * MINUTE
+    classifier.update(T0 + 8 * MINUTE)
+    assert classifier.shower_end is None
 
 
 def test_long_draw_is_off_by_default() -> None:
@@ -308,9 +383,9 @@ def test_sensor_that_never_reached_the_rise_does_not_hold_detection() -> None:
     classifier.on_humidity(T0, "b", 50.0)
     classifier.on_humidity(T0 + 5 * MINUTE, "b", 54.0)
     classifier.on_humidity(T0 + 6 * MINUTE, "a", 62.0)
-    assert classifier.detected
+    assert classifier.humid
     classifier.on_humidity(T0 + 20 * MINUTE, "a", 51.0)
-    assert not classifier.detected
+    assert not classifier.humid
 
 
 def test_unknown_unit_warns_once(caplog: pytest.LogCaptureFixture) -> None:
@@ -379,7 +454,11 @@ def test_shower_with_a_pause() -> None:
     for seconds in (550, 610, 670):  # 30 L after the first increase
         meter = _draw(classifier, meter, seconds, 10.0)
     assert classifier.take_shower_end() is None
-    classifier.on_humidity(T0 + 700 * SECOND, "bath", 55.0)
+    classifier.on_humidity(
+        T0 + 700 * SECOND, "bath", 55.0
+    )  # the humidity does not end it
+    assert classifier.take_shower_end() is None
+    classifier.update(T0 + 670 * SECOND + 5 * MINUTE)
     report = classifier.take_shower_end()
     assert report is not None
     assert report.litres == pytest.approx(60.0)
@@ -397,7 +476,7 @@ def test_shower_detected_by_the_long_draw_rule() -> None:
         meter = _draw(classifier, meter, 10 + 36 * step, 3.0 if step == 0 else 70 / 15)
     assert classifier.detected
     assert classifier.take_shower_end() is None
-    classifier.update(T0 + 10 * SECOND + 9 * MINUTE + 61 * SECOND)
+    classifier.update(T0 + 10 * SECOND + 15 * 36 * SECOND + 5 * MINUTE)
     report = classifier.take_shower_end()
     assert report is not None
     assert report.litres == pytest.approx(70.0)
@@ -412,7 +491,9 @@ def test_polled_meter() -> None:
     meter = 1000.0
     for step in range(17):
         meter = _draw(classifier, meter, 10 + 30 * step, 3.75)
-    classifier.on_humidity(T0 + 10 * MINUTE, "bath", 55.0)
+    classifier.on_humidity(
+        T0 + 14 * MINUTE, "bath", 55.0
+    )  # 5 min 50 s after the last increase (490 s), past its end at 13 min 10 s
     report = classifier.take_shower_end()
     assert report is not None
     assert report.litres == pytest.approx(60.0)
@@ -430,7 +511,7 @@ def test_litres_reclassified_at_detection_belong_to_the_shower() -> None:
     classifier.on_humidity(T0 + 75 * SECOND, "bath", 55.0)
     classifier.on_humidity(T0 + 80 * SECOND, "bath", 70.0)
     meter = _draw(classifier, meter, 100, 1.0)
-    classifier.on_humidity(T0 + 120 * SECOND, "bath", 55.0)
+    classifier.update(T0 + 100 * SECOND + 5 * MINUTE)
     report = classifier.take_shower_end()
     assert report is not None
     assert report.litres == pytest.approx(3.0)
@@ -509,7 +590,7 @@ def test_the_shower_in_progress_is_saved() -> None:
     restored = DrawClassifier(ClassifierOptions())
     restored.restore(json.loads(json.dumps(state)))
     assert restored.rolling_flow == pytest.approx(7.5)
-    restored.on_humidity(T0 + 5 * MINUTE, "bath", 55.0)
+    restored.update(T0 + 130 * SECOND + 5 * MINUTE)
     report = restored.take_shower_end()
     assert report is not None
     assert report.litres == pytest.approx(15.0)
@@ -518,3 +599,335 @@ def test_the_shower_in_progress_is_saved() -> None:
     old = DrawClassifier(ClassifierOptions())
     old.restore(state)
     assert old.rolling_flow is None
+
+
+HOUR_ = 60 * MINUTE
+
+
+def _humid_classifier(**overrides: float) -> DrawClassifier:
+    """A classifier with a bathroom sensor, a 4-hour humidity window and a reading before T0."""
+    options = ClassifierOptions(
+        humidity_configured=True, humidity_window=240.0, **overrides
+    )
+    classifier = DrawClassifier(options)
+    classifier.on_humidity(T0 - 30 * MINUTE, "bath", 60.0)
+    return classifier
+
+
+def test_the_water_stops() -> None:
+    """Last increase at 20:45:08, humidity 83 %: the shower ends at 20:50:08, the bathroom stays humid."""
+    start = datetime(2026, 10, 31, 20, 0, tzinfo=UTC)
+    classifier = DrawClassifier(
+        ClassifierOptions(humidity_configured=True, humidity_window=240.0)
+    )
+    classifier.on_humidity(start - 30 * MINUTE, "bath", 60.0)
+    classifier.on_meter(start, 1000.0, "L")
+    classifier.on_humidity(start + 10 * MINUTE, "bath", 83.0)
+    assert classifier.detected
+    meter = 1000.0
+    last = start + 45 * MINUTE + 8 * SECOND
+    now = start + 10 * MINUTE
+    while now < last:
+        meter += 5.0
+        classifier.on_meter(now, meter, "L")
+        now += 30 * SECOND
+    meter += 5.0
+    classifier.on_meter(last, meter, "L")
+    classifier.on_humidity(last + 2 * MINUTE, "bath", 83.0)
+    assert classifier.detected
+    classifier.update(last + 5 * MINUTE - SECOND)
+    assert classifier.detected
+    classifier.update(last + 5 * MINUTE)  # 20:50:08
+    assert not classifier.detected
+    assert classifier.humid
+    assert classifier.take_shower_end() is not None
+    # The humidity reading that follows starts nothing.
+    classifier.on_humidity(last + 6 * MINUTE, "bath", 83.0)
+    assert not classifier.detected
+
+
+def test_humidity_dips_while_the_water_runs() -> None:
+    """Detected at 60.6 % with a minimum of 50.7 %, then 53.4 % while the water runs: the shower continues."""
+    classifier = DrawClassifier(ClassifierOptions(humidity_configured=True))
+    classifier.on_meter(T0, 1000.0, "L")
+    classifier.on_humidity(T0, "bath", 50.7)
+    classifier.on_humidity(T0 + 10 * MINUTE, "bath", 60.6)
+    assert classifier.detected
+    meter = 1000.0
+    for step in range(61):  # water from minute 10 to minute 20, every 10 s
+        meter = _draw(classifier, meter, 600 + step * 10, 1.0)
+    classifier.on_humidity(T0 + 20 * MINUTE, "bath", 53.4)
+    assert not classifier.humid
+    assert classifier.detected
+    result = classifier.on_meter(T0 + 20 * MINUTE + 10 * SECOND, meter + 1.0, "L")
+    assert result is not None
+    assert result.mixed
+
+
+def test_humidity_rise_without_water() -> None:
+    """A rise of 8 points with no water: detected, ended 5 minutes later, no shower reported."""
+    classifier = DrawClassifier(ClassifierOptions())
+    classifier.on_humidity(T0, "bath", 55.0)
+    classifier.on_humidity(T0 + MINUTE, "bath", 63.0)
+    assert classifier.detected
+    classifier.update(T0 + 6 * MINUTE)
+    assert not classifier.detected
+    assert classifier.take_shower_end() is None
+
+
+def _first_shower(classifier: DrawClassifier, start: datetime, end: datetime) -> float:
+    """Run a shower by humidity from `start` to a last increase at `end`, 5 L every 30 s.
+
+    Returns:
+        The meter reading after the last increase.
+    """
+    classifier.on_meter(start, 1000.0, "L")
+    classifier.on_humidity(start + SECOND, "bath", 85.0)
+    meter = 1000.0
+    now = start + 30 * SECOND
+    while now <= end:
+        meter += 5.0
+        classifier.on_meter(now, meter, "L")
+        now += 30 * SECOND
+    classifier.update(end + 5 * MINUTE)
+    assert not classifier.detected
+    assert classifier.humid
+    assert classifier.take_shower_end() is not None
+    return meter
+
+
+def test_second_shower() -> None:
+    """Ended at 18:23, still humid: a session from 18:25 starts a shower at 18:30 and is its own shower."""
+    day = datetime(2026, 10, 31, 18, 0, tzinfo=UTC)
+    classifier = _humid_classifier()
+    meter = _first_shower(
+        classifier, day - 20 * MINUTE, day + 18 * MINUTE
+    )  # ends 18:23
+    results = []
+    for step in range(21):  # 2 L every 20 s from 18:25:00 to 18:31:40: 42 L
+        meter += 2.0
+        results.append(
+            classifier.on_meter(day + 25 * MINUTE + step * 20 * SECOND, meter, "L")
+        )
+    assert all(r is not None for r in results)
+    mixed = [r.mixed for r in results if r is not None]
+    assert mixed == [False] * 15 + [True] * 6  # the shower starts at 18:30:00
+    assert results[15] is not None
+    assert results[15].reclassified == pytest.approx(30.0)  # the litres since 18:25
+    classifier.update(day + 25 * MINUTE + 400 * SECOND + 5 * MINUTE)
+    report = classifier.take_shower_end()
+    assert report is not None
+    assert report.litres == pytest.approx(
+        40.0
+    )  # 42 L less the first increase of the session
+    assert report.minutes == pytest.approx(400 / 60)
+
+
+def test_washbasin_after_a_shower() -> None:
+    """Humid after a shower, a washbasin draw of 12 L in 2.3 minutes: other draws."""
+    day = datetime(2026, 10, 31, 18, 0, tzinfo=UTC)
+    classifier = _humid_classifier()
+    meter = _first_shower(classifier, day - 20 * MINUTE, day + 18 * MINUTE)
+    results = []
+    for step in range(1, 7):  # 2 L every 23 s: 12 L over 138 s
+        meter += 2.0
+        results.append(
+            classifier.on_meter(day + 25 * MINUTE + step * 23 * SECOND, meter, "L")
+        )
+    assert all(r is not None and not r.mixed for r in results)
+    assert not classifier.detected
+    assert classifier.take_shower_end() is None
+
+
+def test_the_humid_edge_is_saved_so_a_restart_starts_no_shower() -> None:
+    """Restarted 10 minutes after a shower ended, still humid: the humidity starts nothing, a draw needs 5 minutes."""
+    day = datetime(2026, 10, 31, 18, 0, tzinfo=UTC)
+    classifier = _humid_classifier()
+    meter = _first_shower(classifier, day - 20 * MINUTE, day + 18 * MINUTE)
+    state = json.loads(json.dumps(classifier.to_dict()))
+    restored = DrawClassifier(classifier.options)
+    restored.restore(state)
+    restored.on_humidity(day + 33 * MINUTE, "bath", 85.0)
+    assert not restored.detected
+    results = []
+    for step in range(17):  # 1 L every 20 s from 18:35 for 5.3 minutes
+        meter += 1.0
+        results.append(
+            restored.on_meter(day + 35 * MINUTE + step * 20 * SECOND, meter, "L")
+        )
+    mixed = [r.mixed for r in results if r is not None]
+    assert mixed[:15] == [False] * 15
+    assert mixed[15]
+
+
+def test_a_shower_in_progress_ends_at_its_deadline_after_a_restart() -> None:
+    """Back 2 minutes after the water stopped: still detected, ended 5 minutes after the last increase."""
+    classifier = DrawClassifier(ClassifierOptions(long_draw_minutes=3.0))
+    classifier.on_meter(T0, 1000.0, "L")
+    meter = 1000.0
+    for step in range(1, 25):
+        meter = _draw(classifier, meter, step * 10, 1.0)
+    assert classifier.detected
+    restored = DrawClassifier(classifier.options)
+    restored.restore(json.loads(json.dumps(classifier.to_dict())))
+    restored.update(T0 + 240 * SECOND + 2 * MINUTE)
+    assert restored.detected
+    restored.update(T0 + 240 * SECOND + 5 * MINUTE)
+    assert not restored.detected
+    assert restored.take_shower_end() is not None
+
+
+def test_a_store_without_the_new_keys_loads() -> None:
+    """A state of the previous release has no shower start: the shower takes its last increase."""
+    classifier = DrawClassifier(ClassifierOptions(long_draw_minutes=3.0))
+    classifier.on_meter(T0, 1000.0, "L")
+    meter = 1000.0
+    for step in range(1, 25):
+        meter = _draw(classifier, meter, step * 10, 1.0)
+    state = json.loads(json.dumps(classifier.to_dict()))
+    del state["shower"]["start"]
+    restored = DrawClassifier(classifier.options)
+    restored.restore(state)
+    assert restored.detected
+    assert restored.shower_end == T0 + 240 * SECOND + 5 * MINUTE
+    # A shower with no increase and no start time:
+    state["shower"]["last"] = None
+    # With neither, it starts at the next call.
+    unknown = DrawClassifier(classifier.options)
+    unknown.restore(state)
+    assert unknown.shower_end is None
+    unknown.update(T0 + 2 * HOUR_)
+    assert unknown.shower_end == T0 + 2 * HOUR_ + 5 * MINUTE
+
+
+def _previous_release_restore(data: dict) -> dict:
+    """Read the keys the previous release's `DrawClassifier.restore` reads (commit 228b3d9)."""
+    shower = data.get("shower")
+    return {
+        "last_litres": data["last_litres"],
+        "session_start": data["session_start"],
+        "last_increase": data["last_increase"],
+        "others": [(datetime.fromisoformat(t), a) for t, a in data["others"]],
+        "long_active": bool(data["long_active"]),
+        "was_detected": bool(data["was_detected"]),
+        "shower": None
+        if shower is None
+        else (
+            float(shower["litres"]),
+            float(shower["seconds"]),
+            shower["last"],
+            [(float(a), float(b)) for a, b in shower["recent"]],
+        ),
+        "humidity": {
+            sensor_id: (
+                [(datetime.fromisoformat(t), v) for t, v in item["readings"]],
+                bool(item["active"]),
+            )
+            for sensor_id, item in data["humidity"].items()
+        },
+    }
+
+
+def test_the_saved_state_keeps_the_keys_the_previous_release_reads() -> None:
+    """A rollback restores the model: every key the previous release reads is written."""
+    classifier = DrawClassifier(ClassifierOptions(humidity_configured=True))
+    classifier.on_humidity(T0, "bath", 55.0)
+    classifier.on_humidity(T0 + MINUTE, "bath", 70.0)
+    meter = 1000.0
+    classifier.on_meter(T0, meter, "L")
+    for step in range(1, 5):
+        meter = _draw(classifier, meter, 60 + step * 10, 1.0)
+    state = json.loads(json.dumps(classifier.to_dict()))
+    old = _previous_release_restore(state)
+    assert old["long_active"] is False
+    assert old["was_detected"] is True  # the humid edge state
+    assert old["shower"] is not None
+    assert old["humidity"]["bath"][1] is True
+    # A shower with no water: `last` is still a key.
+    empty = DrawClassifier(ClassifierOptions())
+    empty.on_humidity(T0, "bath", 55.0)
+    empty.on_humidity(T0 + MINUTE, "bath", 70.0)
+    old = _previous_release_restore(json.loads(json.dumps(empty.to_dict())))
+    assert old["shower"] == (0.0, 0.0, None, [])
+
+
+def test_the_model_exposes_the_next_shower_end() -> None:
+    """With a shower in progress the model gives its deadline, without one none."""
+    model = make_model()
+    assert model.next_shower_end is None
+    model.on_water_meter(T0, 1000.0, "L")
+    model.on_humidity(T0, "bath", 55.0)
+    model.on_humidity(T0 + MINUTE, "bath", 70.0)
+    assert model.next_shower_end == T0 + 6 * MINUTE
+    model.on_water_meter(T0 + 2 * MINUTE, 1010.0, "L")
+    assert model.next_shower_end == T0 + 7 * MINUTE
+    model.tick(T0 + 7 * MINUTE)
+    assert model.next_shower_end is None
+    assert not model.shower_detected
+
+
+def test_the_model_tells_the_classifier_a_humidity_sensor_is_configured() -> None:
+    """The long-draw rule starts a shower only when the sources have no humidity sensor."""
+    for sources, expected in (
+        (Sources(energy_counter=True, humidity_sensors=("bath",)), False),
+        (Sources(energy_counter=True), True),
+    ):
+        model = TankModel(
+            ModelOptions(volume=281.0, long_draw_minutes=3.0), sources, T0, 57.0
+        )
+        meter = 1000.0
+        model.on_water_meter(T0, meter, "L")
+        for step in range(1, 25):  # 4 minutes of water, 1 L every 10 s
+            meter += 1.0
+            model.on_water_meter(T0 + step * 10 * SECOND, meter, "L")
+        assert model.shower_detected is expected
+        model.set_options(ModelOptions(volume=281.0, long_draw_minutes=3.0))
+        assert model.shower_detected is expected
+
+
+def test_the_model_restores_the_humid_bathroom_after_a_shower() -> None:
+    """Restarted 10 minutes after a shower ended: no shower from the humidity, a draw needs 5 minutes."""
+    model = make_model(humidity_window=240.0)
+    model.on_humidity(T0 - 30 * MINUTE, "bath", 60.0)
+    model.on_water_meter(T0, 1000.0, "L")
+    model.on_humidity(T0 + SECOND, "bath", 85.0)
+    meter = 1000.0
+    for step in range(1, 21):  # 10 minutes of shower
+        meter += 5.0
+        model.on_water_meter(T0 + step * 30 * SECOND, meter, "L")
+    model.tick(T0 + 15 * MINUTE)  # ended at 10:00 + 5 minutes
+    assert not model.shower_detected
+    saved = json.loads(json.dumps(model.to_dict()))
+    restored = TankModel.from_dict(model.options, model.sources, saved)
+    restored.on_humidity(T0 + 25 * MINUTE, "bath", 85.0)
+    assert not restored.shower_detected
+    meter += 1.0
+    restored.on_water_meter(T0 + 26 * MINUTE, meter, "L")
+    for step in range(1, 15):  # 1 L every 20 s: the session runs until 4 min 40 s
+        meter += 1.0
+        restored.on_water_meter(T0 + 26 * MINUTE + step * 20 * SECOND, meter, "L")
+    assert not restored.shower_detected
+    meter += 1.0
+    restored.on_water_meter(T0 + 31 * MINUTE, meter, "L")  # 5 minutes of session
+    assert restored.shower_detected
+
+
+def test_the_model_restores_a_shower_in_progress() -> None:
+    """Restarted during a shower, back 2 minutes after the water stopped: detected, ended 5 minutes after the last increase."""
+    model = make_model()
+    model.on_water_meter(T0, 1000.0, "L")
+    model.on_humidity(T0, "bath", 55.0)
+    model.on_humidity(T0 + SECOND, "bath", 70.0)
+    meter = 1000.0
+    for step in range(1, 11):
+        meter += 5.0
+        model.on_water_meter(T0 + step * 30 * SECOND, meter, "L")
+    last = T0 + 5 * MINUTE
+    saved = json.loads(json.dumps(model.to_dict()))
+    restored = TankModel.from_dict(model.options, model.sources, saved)
+    restored.tick(last + 2 * MINUTE)
+    assert restored.shower_detected
+    assert restored.next_shower_end == last + 5 * MINUTE
+    restored.tick(last + 5 * MINUTE)
+    assert not restored.shower_detected
+    assert restored.next_shower_end is None

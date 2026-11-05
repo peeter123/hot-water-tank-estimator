@@ -75,12 +75,15 @@ water stopped, and its sensor reported a median of 15 minutes apart.
 
 ### D2: The water ends a shower, dated at its deadline
 
-A shower ends at `t_end = t_ref + N`, where `t_ref` is the time of its last meter increase, or its start when it
-has drawn nothing, and `N` is the shower end time in minutes. Every call into the classifier first ends a shower
-whose `t_end` is at or before the call's time, **dated `t_end`**, before it handles the new reading. So a meter
-increase after `t_end` is classified as the first litre after the shower, whether the call comes from the runtime,
-the setup fit or the backtest, and whatever their tick. A pause shorter than `N` keeps the shower: the next increase
-moves `t_ref`.
+A shower ends at `t_end = t_ref + N`, where `t_ref` is the later of its last meter increase and its start (its
+start when it has drawn nothing, or when its last increase came before the start, as with litres a humidity edge
+takes over), and `N` is the shower end time in minutes. Every call into the classifier first ends a shower whose
+`t_end` is at or before the call's time, **dated `t_end`**, before it handles the new reading. So a meter increase
+after `t_end` is classified as the first litre after the shower, whether the call comes from the runtime, the setup
+fit or the backtest, and whatever their tick. A pause shorter than `N` keeps the shower: the next increase moves
+`t_ref`. The shower's litres and minutes do not depend on the call time either. The shower flow event is logged by
+the call that ends the shower, at that call's time: in the runtime the timer below makes that `t_end`; in a replay
+it is the next reading or tick (decided 2026-11-05, group 2 review).
 
 The runtime notices `t_end` on time with a one-shot timer: the model exposes the next shower end (`t_end` of the
 shower in progress, or none), and the estimator reschedules a point-in-time callback to it after every update. The
@@ -101,8 +104,11 @@ Alternatives considered:
 
 - **N = 5 min.** Pauses within one wash were at most 2 minutes in October (1.6 and 2.0), and the spec keeps a
   3-minute pause as one shower. The second showers of a pair started 5.0 and 5.7 minutes after the first ended. N = 8
-  merged the 5.7-minute pair. The lower bound, 2 minutes, stays above the 60 s session gap, so a session always ends
-  before its shower does.
+  merged the 5.7-minute pair. The shower end time must be longer than the session gap (default 60 s, configurable
+  5-600 s), so that a session always ends before its shower does. Otherwise a pause longer than N but shorter than
+  the gap would end the shower inside a session that has already lasted M, and the next litre would start a new
+  shower at once, splitting one wash. The options form rejects a shower end time that is not longer than the session
+  gap, with an error on the field (decided 2026-11-05, group 2 review).
 - **M = 5 min.** In the humid tail, the draws of 2.0-4.5 minutes were the cold washbasin (the user, 2026-11-05),
   while the two second showers ran 6.7 and 30.5 minutes. Replayed with N = 5:
 
@@ -137,10 +143,11 @@ sensor.
 
 ### D5: Saved state and rollback
 
-The classifier's saved state gains the time each shower started (for a shower with no water, D2) and the humid edge
-state, and keeps writing every key the previous release reads (`long_active` as false, `was_detected` with the
-humid edge state), so that a rollback restores the model instead of dropping it. Restore accepts a state without the
-new keys: a shower without a start time uses its last increase, or the restore time.
+The classifier's saved state gains the time each shower started (for a shower with no water, D2) and saves the
+humid edge state in the previous release's `was_detected` key (no separate key, decided 2026-11-05 in group 2). It
+keeps writing every key the previous release reads (`long_active` as false), so that a rollback restores the model
+instead of dropping it. Restore accepts a state without the
+new keys: a shower without a start time uses its last increase, or the time of the next call.
 
 ### D6: Replays and the evidence
 

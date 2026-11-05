@@ -155,7 +155,7 @@ Each tank has one device with these entities. All names are translated.
 | Tank average temperature | C | The estimated average temperature of the tank. |
 | Cold water temperature | C | The cold water temperature in use: the sensor, or the seasonal curve. |
 | Heat loss | W | The standing heat loss of the tank: the loss coefficient times the tank's heat capacity times the excess of the tank average over the ambient temperature in use. 0 W at or below the ambient temperature. |
-| Shower detected | | On while a shower or bath is detected. Unavailable when there are no humidity sensors and the long draw rule is off. |
+| Shower detected | | On while a shower or bath is in progress: from a humidity rise (or a draw in a still humid bathroom, or a long draw without humidity sensor) until the shower end time (5 min) after the water stops. It is off while the bathroom only still counts as humid. Unavailable when there are no humidity sensors and the long draw rule is off. |
 | Hot water ran out | | Button. Press it when hot water ran out earlier than predicted. See "Tuning". |
 | Undo hot water ran out | | Button. Undoes the last accepted press. Unavailable unless there is a press to undo. See "Tuning". |
 | Shower flow | L/min | Number, 3-20. The flow that turns shower water into minutes: the median of your last 10 showers, 7.5 L/min until the first one. Setting it turns the Shower flow locked switch on. Attributes: `source` (default, learned or locked), and `low` and `high` (the lowest and highest flow of the last showers). See "Tuning". |
@@ -348,8 +348,13 @@ with the fitted ones. The usage, all arguments and what the numbers mean are in
 - **A steady error after each charge:** check the sensor height, then the tank volume.
 - **Shower detected is unavailable:** there is no humidity sensor and the long draw rule is off. Add a sensor or set
   a long draw duration in the options.
-- **A shower is not detected:** lower the humidity rise or the long draw duration; several humidity sensors are
-  allowed.
+- **A shower is not detected:** lower the humidity rise or, without a humidity sensor, the long draw duration;
+  several humidity sensors are allowed.
+- **Shower detected stays on after the water stopped:** it turns off 5 minutes after the last litre (the shower end
+  time), not when the bathroom has dried. A shower with a longer pause counts as two.
+- **A second shower right after the first counts as other draws at first:** while the bathroom is still humid, a
+  draw becomes a shower only after it has lasted the next shower time (5 min), and then its litres from the
+  start of that draw are counted as shower water.
 - **A value you set by hand is overwritten:** lock the parameter in the options.
 
 ## Removal
@@ -368,8 +373,10 @@ touched. To remove the integration completely, then remove it in HACS (or delete
 - A shower in a room without a humidity sensor is not detected (the long draw rule covers part of it). It then counts
   at the other draws share, and the sensor bound corrects the estimate once the cold layer reaches the sensor.
 - Garden watering and other large draws count at the other draws share, and the next charge resets them.
-- A humidity rise without a shower (cooking, humid weather) has no effect without water drawn; with a draw it errs
-  towards showing less.
+- A humidity rise without a shower (cooking, humid weather) ends after the shower end time without water drawn and
+  has no other effect; with a draw it errs towards showing less.
+- A short draw in a humid bathroom after a shower (a washbasin) stays an other draw; a second shower shorter than the
+  next shower time is counted as other draws, which errs towards showing more water.
 - A water meter that misses low flows loses small trickles, which errs towards showing more water.
 - Learning can drift in unusual weeks (guests, holidays). The error sensors show it, and locks and the recalibrate
   action undo it.

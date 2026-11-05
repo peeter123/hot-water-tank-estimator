@@ -178,7 +178,7 @@ def shower_sample(
     """Return the shower flow event that ends the shower, None when it has no sample.
 
     A shower is a sample of the shower flow with at least `SHOWER_MIN_MINUTES` of flow. The
-    model reports it when detection ends, so the sample is the first shower flow event
+    model reports it when the shower ends, so the sample is the first shower flow event
     reported after the session's last litre and before the next draw counted as other.
 
     Note: after a late-found run end (counter timeout) `TankModel._replay_late_draws` records

@@ -160,7 +160,11 @@ def value(hass: HomeAssistant, entry: MockConfigEntry, domain: str, key: str) ->
 
 
 class Oracle:
-    """A model driven by the same inputs as the integration, to compare the entities with."""
+    """A model driven by the same inputs as the integration, to compare the entities with.
+
+    It also mirrors the end-of-shower timer that the runtime gets in the options and timer
+    group: the model is ticked at its next shower end before a later input.
+    """
 
     def __init__(
         self,
@@ -177,6 +181,10 @@ class Oracle:
     def set(self, now: datetime, entity: str, state: str) -> None:
         """Apply a source state at a time, as the integration does."""
         model = self.model
+        # The integration's end-of-shower timer fires at the deadline, between the inputs.
+        deadline = model.next_shower_end
+        if deadline is not None and deadline <= now:
+            model.tick(deadline)
         number = None if state in ("unavailable", "unknown") else _float(state)
         match entity:
             case _ if entity == TANK:

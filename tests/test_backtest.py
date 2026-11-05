@@ -130,12 +130,11 @@ def test_the_shower_list_has_times_litres_minutes_and_the_flow_sample(
     meter rows (not from the script): its session starts at the first increase at 16:36:15
     UTC, ends at the last at 16:48:45 (12.5 min, a gap above 60 s starts the next session) and
     the meter rose 88.0 L from the reading before the first increase to the last. The flow
-    sample is the model's own report at the end of detection. The humidity flickers in the
-    first shower: detection starts at 16:37:17, drops after 16:38:50 and returns at
-    16:41:40. The first fragment (16:36:15-16:38:50, 21 L, about 2.6 min) is under
-    3 minutes, so it gives no sample. The sample counts from 16:39:00:
-    (67 - 1) + (4 - 1) + (200 - 1) = 268 L in 9.75 + 0.42 + 30.53 = 40.70 min (the first
-    increase of each session is left out), and `flow` is their quotient.
+    sample is the model's own report when the shower ends, 5 minutes after its last increase
+    (16:53:45): the humidity flicker in the shower does not split it, and the second shower
+    (200 L, 30.53 min) has a sample of its own. The first shower's sample counts
+    88 - 1 = 87 L (the first increase of its session is left out) in 12.5 min, and `flow` is
+    their quotient.
     """
     script = load_script()
     pure = script.load_pure()
@@ -156,13 +155,17 @@ def test_the_shower_list_has_times_litres_minutes_and_the_flow_sample(
     sample = script.shower_sample(result.given, first, pure)
     assert sample is not None
     assert sample.time >= first.end
-    assert sample.change["litres"] == pytest.approx(268, abs=0.5)
-    assert sample.change["minutes"] == pytest.approx(40.7, abs=0.05)
+    assert sample.time.replace(microsecond=0).isoformat() == "2026-10-22T16:53:45+00:00"
+    assert sample.change["litres"] == pytest.approx(87.0)
+    assert sample.change["minutes"] == pytest.approx(12.5, abs=0.05)
     assert sample.change["flow"] == pytest.approx(
         sample.change["litres"] / sample.change["minutes"]
     )
-    # Detection holds across both showers, so they share the one sample.
-    assert script.shower_sample(result.given, second, pure) is sample
+    # The water ends each shower, so the second one has its own sample.
+    second_sample = script.shower_sample(result.given, second, pure)
+    assert second_sample is not None
+    assert second_sample is not sample
+    assert second_sample.change["litres"] == pytest.approx(199.0)
 
     assert script.main([str(BACK_TO_BACK)]) == 0
     line = next(
@@ -173,9 +176,9 @@ def test_the_shower_list_has_times_litres_minutes_and_the_flow_sample(
     assert (
         "88 L ( 88 mixed)" in line
         and "12.5 min" in line
-        and "sample 6.58 L/min" in line
+        and "sample 6.96 L/min" in line
     )
-    assert "268 L in 40.7 min" in line
+    assert "87 L in 12.5 min" in line
 
 
 def test_a_shower_under_three_minutes_of_flow_has_no_sample() -> None:
@@ -219,8 +222,10 @@ def test_the_report_lists_every_sample_and_the_litre_totals(
     """The report has the list of all shower flow samples and the litres per options set.
 
     Expected values derived from the `back_to_back` fixture: the meter rose 373 L over the
-    window (345.979 less 345.606 m3 in its raw rows), and the replay test of that fixture
-    reclassifies 8 + 19 L in the first session and 9 L at 17:49:54 UTC, 36 L in all.
+    window (345.979 less 345.606 m3 in its raw rows). The model reclassifies 8 L when the
+    first shower starts (16:37:17 UTC, the humidity rise), 29 L when the second one starts
+    after 5 minutes of its session (17:00:21) and 9 L at the humidity rise of 17:49:54, 46 L
+    in all.
     """
     script = load_script()
     pure = script.load_pure()
@@ -231,12 +236,13 @@ def test_the_report_lists_every_sample_and_the_litre_totals(
     result = script.run_backtest(pure, history, options)
     drawn, mixed, reclassified = script.litre_totals(result.given, pure)
     assert drawn == pytest.approx(373.0)
-    assert reclassified == pytest.approx(36.0)
+    assert reclassified == pytest.approx(46.0)
     assert 288.0 <= mixed <= drawn  # both showers are fully mixed
 
     assert script.main([str(BACK_TO_BACK)]) == 0
     out = capsys.readouterr().out
     assert "Shower flow samples the model reported" in out
-    assert "2026-10-22 17:44 given   268 L  40.7 min  6.58 L/min" in out
+    assert "2026-10-22 16:53 given    87 L  12.5 min  6.96 L/min" in out
+    assert "2026-10-22 17:33 given   199 L  30.5 min  6.52 L/min" in out
     assert "given  options: 373 L drawn" in out
-    assert "36 L of them reclassified" in out
+    assert "46 L of them reclassified" in out

@@ -114,7 +114,7 @@ async def test_setup_fit_from_the_recorder(
     share = float(value(hass, entry, "sensor", "other_hot_share"))
     startup = float(value(hass, entry, "sensor", "startup_energy"))
     loss = float(value(hass, entry, "sensor", "loss_coefficient"))
-    assert share == pytest.approx(0.105, abs=0.01)
+    assert share == pytest.approx(0.127, abs=0.01)
     assert startup == pytest.approx(2.19, abs=0.1)
     assert loss == pytest.approx(0.0040, abs=0.0005)
     for key in ("other_hot_share", "startup_energy"):
