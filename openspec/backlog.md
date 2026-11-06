@@ -12,6 +12,18 @@ few days with a changing room temperature, check that the "Heat loss" sensor fol
 temperature after a long sensor outage. Record the result in `private/installation.md`. It can be done
 in any later change that touches the loss model, or on its own.
 
+## Live check carried over: humidity silence and the detection backup
+
+Moved out of `harden-sources-and-heat-input` (task 7.3) at the user's request on 2026-11-06, because a silence of 2
+hours or more is rare (two in October 2026, none in November up to the 6th). Reading only, with the user's
+authorization: at the next humidity silence of at least 2 hours, check that
+- the humidity repair issue appears 2 hours after the last report and goes at the next report;
+- the diagnostics show the sensor silent and the fallback on;
+- a draw of at least 5 minutes in that time counts as a shower, if there is one;
+- the diagnostics' last report against the last recorded change shows whether the sensor reports unchanged values.
+
+Record the evidence in `private/installation.md`.
+
 ## Live check carried over: heat outside a heating run
 
 Carried over from `harden-sources-and-heat-input`, which counts a counter increase outside a heating run as energy

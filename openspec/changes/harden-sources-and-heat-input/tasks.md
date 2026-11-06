@@ -222,6 +222,8 @@ Applies to every group:
 
   Record the evidence in `private/installation.md`. Verify: the diagnostics and the Repairs list during the silence,
   and the history after it.
+  - Carried over 2026-11-06 at the user's request: moved to `openspec/backlog.md` ("Live check carried over: humidity
+    silence and the detection backup"), because no silence of 2 h came before the archive. Not done here.
 
 ## Workflow follow-up
 
