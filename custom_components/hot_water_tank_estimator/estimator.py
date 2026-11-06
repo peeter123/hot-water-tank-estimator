@@ -42,6 +42,7 @@ from homeassistant.core import (
     callback,
 )
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
     async_track_point_in_utc_time,
@@ -80,6 +81,7 @@ from .const import (
     DIAGNOSTIC_EVENTS,
     DOMAIN,
     FALLBACK_TEMPERATURE,
+    REPAIR_THRESHOLD_MINUTES,
     SHOWER_HISTORY,
     SIGNAL_UPDATE,
     STORAGE_SAVE_DELAY,
@@ -127,11 +129,30 @@ __all__ = [
     "TankConfig",
     "TankConfigEntry",
     "TankEstimator",
+    "async_delete_issues",
 ]
 
 _UNAVAILABLE = {STATE_UNAVAILABLE, STATE_UNKNOWN}
 # The roles whose last reading is a baseline, and the model source that forgets it.
 _BASELINES = {WATER_METER: "water_meter", DHW_ENERGY: "energy_counter"}
+
+
+def _minutes_text(minutes: int) -> str:
+    """Return a threshold as text: "30 minutes", "1 hour", "2 hours"."""
+    if minutes % 60:
+        return f"{minutes} minutes"
+    hours = minutes // 60
+    return f"{hours} hour" if hours == 1 else f"{hours} hours"
+
+
+@callback
+def async_delete_issues(hass: HomeAssistant, entry_id: str) -> None:
+    """Remove the repair issues of an entry."""
+    registry = ir.async_get(hass)
+    prefix = f"{entry_id}_"
+    for domain, issue_id in list(registry.issues):
+        if domain == DOMAIN and issue_id.startswith(prefix):
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
 
 
 class _Tolerant(dict[str, Any]):
@@ -268,6 +289,12 @@ class TankEstimator:
         # Counts the button presses and manual resets, so a fit that was running while one
         # happened can keep its effect.
         self._manual = 0
+        # The ids of the repair issues this estimator has raised, and when it started (a missing
+        # source counts as out since then, or since it disappeared).
+        self._issues: set[str] = set()
+        # When a source that existed disappeared (it counts from the start when missing then).
+        self._gone: dict[str, datetime] = {}
+        self._started = dt_util.utcnow()
 
         stored_locks: Iterable[str] = ()
         calibration: Mapping[str, Any] | None = None
@@ -386,6 +413,7 @@ class TankEstimator:
             events += self._feed(entity_id, self.hass.states.get(entity_id), now)
         self.fed = True
         self._finish(events, now)
+        self._check_sources(now)
         self._unsubscribe.append(
             async_track_state_change_event(
                 self.hass, list(self.config.routes), self._handle_state
@@ -412,6 +440,8 @@ class TankEstimator:
         self._unsubscribe.clear()
         self._cancel_shower_timer()
         self._save_pending = False
+        self._issues.clear()
+        async_delete_issues(self.hass, self.entry.entry_id)
         await self._store.async_save(self.payload())
 
     # ----- inputs -------------------------------------------------------------------------
@@ -421,12 +451,18 @@ class TankEstimator:
         """Pass a source's new state to the model."""
         state = event.data["new_state"]
         now = state.last_updated if state is not None else dt_util.utcnow()
+        if state is None:
+            self._gone.setdefault(event.data["entity_id"], now)
+        else:
+            self._gone.pop(event.data["entity_id"], None)
         self._finish(self._feed(event.data["entity_id"], state, now), now)
+        self._check_sources(now)
 
     @callback
     def _handle_tick(self, now: datetime) -> None:
         """Advance the model: loss, run timeout, detection windows and sensor bounds."""
         self._finish(self.model.tick(now, self._humidity_reports()), now)
+        self._check_sources(now)
 
     @callback
     def _handle_shower_end(self, now: datetime) -> None:
@@ -436,6 +472,79 @@ class TankEstimator:
         self._shower_timer = None
         self._shower_timer_at = None
         self._finish(self.model.tick(now, self._humidity_reports()), now)
+
+    @property
+    def open_issues(self) -> list[str]:
+        """Return the ids of the repair issues this tank has open, sorted."""
+        return sorted(self._issues)
+
+    def _out_since(
+        self, entity_id: str, roles: tuple[str, ...], now: datetime
+    ) -> datetime | None:
+        """Return since when a source has been out, None when it is usable.
+
+        Out is an unavailable, unknown or non-numeric state (since its `last_changed`), a missing
+        entity (since the estimator's start, or since it disappeared) and, for a humidity sensor, silence (since its last
+        report).
+        """
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            return self._gone.get(entity_id, self._started)
+        role = roles[0]
+        if role == DHW_HEATING:
+            usable = state.state in (STATE_ON, STATE_OFF)
+        else:
+            usable = (
+                convert_reading(
+                    role, state.state, state.attributes.get(ATTR_UNIT_OF_MEASUREMENT)
+                )
+                is not None
+            )
+        if not usable:
+            return state.last_changed
+        if BATHROOM_HUMIDITY in roles:
+            status = self.model.humidity_status(now).get(entity_id)
+            if status is not None and status["silent"]:
+                # The state's own last report is newer than the model's until the next tick.
+                reported = state.last_reported
+                if now - reported < timedelta(
+                    hours=self.model.options.humidity_silence
+                ):
+                    return None
+                return reported
+        return None
+
+    @callback
+    def _check_sources(self, now: datetime) -> None:
+        """Raise the repair issue of each source that has been out for its threshold, remove the others."""
+        if self._stopped:
+            return
+        open_ids: set[str] = set()
+        for entity_id, roles in self.config.routes.items():
+            threshold = min(REPAIR_THRESHOLD_MINUTES[role] for role in roles)
+            since = self._out_since(entity_id, roles, now)
+            issue_id = f"{self.entry.entry_id}_{entity_id}"
+            if since is None or now - since < timedelta(minutes=threshold):
+                if issue_id in self._issues:
+                    ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+                continue
+            open_ids.add(issue_id)
+            if issue_id not in self._issues:
+                ir.async_create_issue(
+                    self.hass,
+                    DOMAIN,
+                    issue_id,
+                    is_fixable=False,
+                    is_persistent=False,
+                    severity=ir.IssueSeverity.WARNING,
+                    translation_key=f"source_unavailable_{roles[0]}",
+                    translation_placeholders={
+                        "tank": self.entry.title,
+                        "entity": entity_id,
+                        "threshold": _minutes_text(threshold),
+                    },
+                )
+        self._issues = open_ids
 
     def _humidity_reports(self) -> dict[str, datetime]:
         """Return the `last_reported` of each humidity sensor that has a state.

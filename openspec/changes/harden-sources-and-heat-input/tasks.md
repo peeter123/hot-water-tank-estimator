@@ -174,7 +174,7 @@ Applies to every group:
 
 ## 6. Repair issues
 
-- [ ] 6.1 In `estimator.py`, raise and remove the repair issues of design D8: the thresholds in `const.py`, the
+- [x] 6.1 In `estimator.py`, raise and remove the repair issues of design D8: the thresholds in `const.py`, the
   out-since rule, a check on every tick and on every source state change, and the issue id, severity and flags.
   Remove the entry's issues on unload, and on removal in `__init__.py`. Add one translation per role in
   `strings.json` and `translations/en.json` that names the tank and the entity and says what the estimate loses.
@@ -183,10 +183,10 @@ Applies to every group:
     "Silent humidity sensor" and "Entry removed";
   - a test that a reload raises the issue again at once for a source still out since before the reload;
   - `python scripts/lint.py --hassfest`.
-- [ ] 6.2 Add the entry's open repair issues to the diagnostics (design D9). Set the quality-scale rule
+- [x] 6.2 Add the entry's open repair issues to the diagnostics (design D9). Set the quality-scale rule
   `repair-issues` to done, with a comment that names the issues. Verify: the whole integration-setup scenario
   "Silent humidity sensor in the diagnostics", `tests/test_quality_scale.py`, and `python scripts/lint.py`.
-- [ ] 6.3 Update the README: a "Repair issues" section with the thresholds and what each issue means, and the
+- [x] 6.3 Update the README: a "Repair issues" section with the thresholds and what each issue means, and the
   troubleshooting entries that point to it. Update `docs/development.md` ("Quality scale") if it lists the rule as
   todo. Verify: `python scripts/lint.py` (including `tests/test_readme.py`).
 

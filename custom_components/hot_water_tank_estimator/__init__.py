@@ -9,7 +9,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN, STORAGE_VERSION
-from .estimator import TankConfig, TankConfigEntry, TankEstimator
+from .estimator import TankConfig, TankConfigEntry, TankEstimator, async_delete_issues
 from .services import async_setup_services
 
 PLATFORMS = [
@@ -60,5 +60,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: TankConfigEntry) -> boo
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: TankConfigEntry) -> None:
-    """Delete the store (model and calibration) of a removed tank."""
+    """Delete the store (model and calibration) and the repair issues of a removed tank."""
+    async_delete_issues(hass, entry.entry_id)
     await Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}").async_remove()

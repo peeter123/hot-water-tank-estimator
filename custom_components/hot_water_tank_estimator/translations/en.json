@@ -413,6 +413,48 @@
       }
     }
   },
+  "issues": {
+    "source_unavailable_water_meter": {
+      "title": "Water meter out: {tank}",
+      "description": "The water meter {entity} of {tank} has been out for {threshold}. Draws are not counted while it is out, so the estimate does not drop for them."
+    },
+    "source_unavailable_dhw_energy": {
+      "title": "Heat energy counter out: {tank}",
+      "description": "The heat energy counter {entity} of {tank} has been out for {threshold}. Heat is not counted while it is out. If it detects the heating runs, a run ends 10 minutes after the last increase and no new run starts until it reports."
+    },
+    "source_unavailable_dhw_power": {
+      "title": "Heat power sensor out: {tank}",
+      "description": "The heat power sensor {entity} of {tank} has been out for {threshold}. The gap counts as no energy. If it detects the heating runs, the next configured source decides after 15 minutes."
+    },
+    "source_unavailable_dhw_heating": {
+      "title": "Heating active sensor out: {tank}",
+      "description": "The heating active sensor {entity} of {tank} has been out for {threshold}. Heating runs are detected by the next configured heat source, if there is one."
+    },
+    "source_unavailable_tank_temperature": {
+      "title": "Tank temperature sensor out: {tank}",
+      "description": "The tank temperature sensor {entity} of {tank} has been out for {threshold}. The sensor bounds are paused, and the estimate runs on the energy balance only."
+    },
+    "source_unavailable_bathroom_humidity": {
+      "title": "Bathroom humidity sensor out: {tank}",
+      "description": "The bathroom humidity sensor {entity} of {tank} has been unavailable or silent for {threshold}. While no humidity sensor reports, shower detection falls back to the draw length."
+    },
+    "source_unavailable_flow_temperature": {
+      "title": "Flow temperature sensor out: {tank}",
+      "description": "The flow temperature sensor {entity} of {tank} has been out for {threshold}. The charged temperature comes from the tank sensor instead."
+    },
+    "source_unavailable_return_temperature": {
+      "title": "Return temperature sensor out: {tank}",
+      "description": "The return temperature sensor {entity} of {tank} has been out for {threshold}. The charged temperature comes from the tank sensor instead."
+    },
+    "source_unavailable_cold_water_temperature": {
+      "title": "Cold water temperature sensor out: {tank}",
+      "description": "The cold water temperature sensor {entity} of {tank} has been out for {threshold}. The seasonal cold water curve is used instead."
+    },
+    "source_unavailable_ambient_temperature": {
+      "title": "Ambient temperature sensor out: {tank}",
+      "description": "The ambient temperature sensor {entity} of {tank} has been out for {threshold}. The configured ambient temperature is used once the fallback time has passed."
+    }
+  },
   "exceptions": {
     "no_tank_targeted": {
       "message": "The action targets no loaded tank."

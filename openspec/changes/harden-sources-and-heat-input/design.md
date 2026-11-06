@@ -256,6 +256,15 @@ or unknown state's `last_changed` is when it went out. So the repair issues are 
 - After a Home Assistant restart the states are new, so an outage counts again from the restart (proposal, Out of
   scope).
 
+- **Settled in the group 6 review (2026-11-06):**
+  - A missing entity counts from the estimator's start only when it is missing at start; one that disappears later
+    counts from when it disappeared, so a template reload or a rename does not flash an issue.
+  - Deleting the issues on unload stays, so a disabled or removed entry leaves no stale issue. The cost: an issue the
+    user ignored comes back after a reload (an options save) while the source is still out. The README says so.
+  - A silent humidity sensor raises its issue at the later of the silence time and 2 hours, and never for silence
+    while the silence time is 0 (an unavailable state still counts). The README says so.
+  - The thresholds and their reasons (the table above) go to `docs/model.md`, so they outlive the change.
+
 **Alternative:** issues from the model's unavailable seconds. Rejected: those reset at every charge and do not survive
 a restart. They are also not what a repair issue is about.
 

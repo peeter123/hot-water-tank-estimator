@@ -57,7 +57,14 @@ async def test_download_diagnostics(hass: HomeAssistant, freezer) -> None:
     data = await async_get_config_entry_diagnostics(hass, rig.entry)
 
     json.dumps(data)  # the file must be JSON
-    assert set(data) == {"options", "state", "sources", "events", "calibration"}
+    assert set(data) == {
+        "options",
+        "state",
+        "sources",
+        "repair_issues",
+        "events",
+        "calibration",
+    }
     assert data["options"] == dict(rig.entry.options)
     state = data["state"]
     assert state["t_avg"] == rig.entry.runtime_data.model.t_avg
@@ -215,7 +222,7 @@ async def test_excluded_closures_are_listed_with_their_reason(
 async def test_silent_humidity_sensor_in_the_diagnostics(
     hass: HomeAssistant, freezer
 ) -> None:
-    """Integration-setup scenario "Silent humidity sensor in the diagnostics" (without the repair issue)."""
+    """Integration-setup scenario "Silent humidity sensor in the diagnostics"."""
     rig = await Rig.start(hass, freezer)  # the sensor reported at 10:00
     data = await async_get_config_entry_diagnostics(hass, rig.entry)
     assert data["state"]["humidity"] == {
@@ -228,6 +235,7 @@ async def test_silent_humidity_sensor_in_the_diagnostics(
         },
         "fallback": False,
     }
+    assert data["repair_issues"] == []
     await rig.tick(minutes=180)  # 3 hours without a report, silence time 2 hours
     data = await async_get_config_entry_diagnostics(hass, rig.entry)
     json.dumps(data)
@@ -244,3 +252,4 @@ async def test_silent_humidity_sensor_in_the_diagnostics(
     assert data["state"]["model"]["humidity_reports"][HUMIDITY]["last_report"] == (
         "2026-10-15T10:00:00+00:00"
     )
+    assert data["repair_issues"] == [f"{rig.entry.entry_id}_{HUMIDITY}"]

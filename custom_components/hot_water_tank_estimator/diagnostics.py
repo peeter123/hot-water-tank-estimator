@@ -12,7 +12,7 @@ from .estimator import TankConfigEntry
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: TankConfigEntry
 ) -> dict[str, Any]:
-    """Return the options, the model state, the source availability, the recent events and the calibration."""
+    """Return the options, the model state, the source availability, the open repair issues, the recent events and the calibration."""
     estimator = entry.runtime_data
     calibrator = estimator.calibrator
     model = estimator.model
@@ -40,6 +40,7 @@ async def async_get_config_entry_diagnostics(
             "model": model.to_dict(),
         },
         "sources": estimator.source_availability(),
+        "repair_issues": estimator.open_issues,
         "events": estimator.recent_events(),
         "calibration": {
             "parameters": {

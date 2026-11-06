@@ -1,12 +1,17 @@
 """Tests for the runtime: the sources drive the model and the entities show it (tasks 5.3, 5.7)."""
 
 from datetime import timedelta
+import json
+from pathlib import Path
 
 import pytest
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
+from custom_components.hot_water_tank_estimator.const import DOMAIN
+from custom_components.hot_water_tank_estimator.estimator import TankEstimator
 from custom_components.hot_water_tank_estimator.model import EventKind
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 
 from .common import (
@@ -380,3 +385,207 @@ async def test_draw_while_the_humidity_sensor_is_silent(
         expected = "on" if step == 11 else "off"
         assert rig.read("binary_sensor", "shower_detected") == expected
     assert dt_util.utcnow() == dt_util.parse_datetime("2026-10-15T17:59:32+00:00")
+
+
+# ----- repair issues (integration-setup: sources that stay unavailable) -----------------------
+
+
+def _issue(hass: HomeAssistant, rig: Rig, entity: str) -> ir.IssueEntry | None:
+    """Return the repair issue of an entity of the rig's entry, None when there is none."""
+    return ir.async_get(hass).async_get_issue(DOMAIN, f"{rig.entry.entry_id}_{entity}")
+
+
+def _issue_text(key: str) -> str:
+    """Return the description of a repair issue translation."""
+    path = Path(__file__).parent.parent / "custom_components" / DOMAIN / "strings.json"
+    return json.loads(path.read_text("utf-8"))["issues"][key]["description"]
+
+
+async def test_water_meter_out_for_40_minutes(hass: HomeAssistant, freezer) -> None:
+    """Integration-setup scenario "Water meter out for 40 minutes": the issue names the tank and the meter."""
+    rig = await Rig.start(hass, freezer)
+    hass.config_entries.async_update_entry(rig.entry, title="Hot Water Tank")
+    await rig.set(METER, "unavailable")
+    for _ in range(5):  # 25 minutes
+        await rig.tick()
+    assert _issue(hass, rig, METER) is None
+    await rig.tick(minutes=5)
+    assert _issue(hass, rig, METER) is not None  # 30 minutes: the threshold is reached
+    await rig.tick(minutes=10)  # 40 minutes
+    issue = _issue(hass, rig, METER)
+    assert issue is not None
+    assert issue.translation_key == "source_unavailable_water_meter"
+    assert issue.translation_placeholders == {
+        "tank": "Hot Water Tank",
+        "entity": METER,
+        "threshold": "30 minutes",
+    }
+    text = _issue_text("source_unavailable_water_meter")
+    assert "{tank}" in text
+    assert "{entity}" in text
+    assert "Draws are not counted" in text
+    assert issue.is_fixable is False
+    assert issue.is_persistent is False
+    assert issue.severity == ir.IssueSeverity.WARNING
+    assert rig.entry.runtime_data.open_issues == [f"{rig.entry.entry_id}_{METER}"]
+
+
+async def test_short_dropout(
+    hass: HomeAssistant, freezer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Integration-setup scenario "Short dropout": 2 seconds of the tank sensor, 19 minutes of the detector."""
+    rig = await Rig.start(hass, freezer)
+    checks: list[str] = []
+    check = TankEstimator.__dict__["_check_sources"]
+
+    def spy(self, now) -> None:
+        checks.append(now.strftime("%H:%M"))
+        check(self, now)
+
+    monkeypatch.setattr(TankEstimator, "_check_sources", spy)
+    await rig.set(TANK, "unavailable")
+    await rig.set(TANK, "55.0", after=2)
+    await rig.set(HEATING, "unavailable")
+    await rig.tick(minutes=5)
+    await rig.tick(minutes=5)
+    await rig.tick(minutes=5)
+    await rig.set(
+        ENERGY, "10.1", after=4 * 60
+    )  # 19 minutes: a changed state checks the sources
+    assert checks[-1] == "10:19"
+    assert _issue(hass, rig, TANK) is None
+    assert _issue(hass, rig, HEATING) is None
+    assert rig.entry.runtime_data.open_issues == []
+
+
+async def test_source_back(hass: HomeAssistant, freezer) -> None:
+    """Integration-setup scenario "Source back": the issue is removed at once when the counter reports."""
+    rig = await Rig.start(hass, freezer)
+    await rig.set(ENERGY, "unavailable")
+    await rig.tick(minutes=30)
+    assert _issue(hass, rig, ENERGY) is not None
+    await rig.set(ENERGY, "10.1")
+    assert _issue(hass, rig, ENERGY) is None
+    assert rig.entry.runtime_data.open_issues == []
+
+
+async def test_silent_humidity_sensor(hass: HomeAssistant, freezer) -> None:
+    """Integration-setup scenario "Silent humidity sensor": last report 2 hours ago, silence time 2 hours."""
+    rig = await Rig.start(hass, freezer)  # the sensor reported at 10:00
+    await rig.tick(minutes=115)
+    assert _issue(hass, rig, HUMIDITY) is None
+    await rig.tick(minutes=5)  # 12:00
+    issue = _issue(hass, rig, HUMIDITY)
+    assert issue is not None
+    assert issue.translation_key == "source_unavailable_bathroom_humidity"
+    assert issue.translation_placeholders == {
+        "tank": "Hot water",
+        "entity": HUMIDITY,
+        "threshold": "2 hours",
+    }
+    assert "draw length" in _issue_text("source_unavailable_bathroom_humidity")
+    await rig.set(HUMIDITY, "56.0")  # a new report ends the silence at once
+    assert _issue(hass, rig, HUMIDITY) is None
+
+
+async def test_entry_removed(hass: HomeAssistant, freezer) -> None:
+    """Integration-setup scenario "Entry removed": the repair issues go with the tank."""
+    rig = await Rig.start(hass, freezer)
+    await rig.set(METER, "unavailable")
+    await rig.tick(minutes=30)
+    assert _issue(hass, rig, METER) is not None
+    entry_id = rig.entry.entry_id
+    assert await hass.config_entries.async_remove(entry_id)
+    await hass.async_block_till_done()
+    assert not [
+        key
+        for key in ir.async_get(hass).issues
+        if key[0] == DOMAIN and key[1].startswith(entry_id)
+    ]
+
+
+async def test_entry_removed_while_not_loaded(hass: HomeAssistant, freezer) -> None:
+    """The removal hook deletes an issue that is left in the registry of an unloaded entry."""
+    rig = await Rig.start(hass, freezer)
+    entry_id = rig.entry.entry_id
+    assert await hass.config_entries.async_unload(entry_id)
+    await hass.async_block_till_done()
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        f"{entry_id}_{METER}",
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="source_unavailable_water_meter",
+    )
+    assert _issue(hass, rig, METER) is not None
+    assert await hass.config_entries.async_remove(entry_id)
+    await hass.async_block_till_done()
+    assert _issue(hass, rig, METER) is None
+
+
+async def test_unload_removes_the_issues_and_a_reload_raises_them_again(
+    hass: HomeAssistant, freezer
+) -> None:
+    """A source still out since before the reload raises its issue again at once."""
+    rig = await Rig.start(hass, freezer)
+    await rig.set(METER, "unavailable")
+    await rig.tick(minutes=30)
+    assert _issue(hass, rig, METER) is not None
+    assert await hass.config_entries.async_unload(rig.entry.entry_id)
+    await hass.async_block_till_done()
+    assert _issue(hass, rig, METER) is None
+    assert await hass.config_entries.async_setup(rig.entry.entry_id)
+    await hass.async_block_till_done()
+    assert _issue(hass, rig, METER) is not None
+
+
+async def test_a_missing_source_counts_from_the_start(
+    hass: HomeAssistant, freezer
+) -> None:
+    """A missing entity is out from the estimator start, a non-numeric state from its last change."""
+    freezer.move_to("2026-10-15T09:40:00+00:00")
+    set_sources(hass)
+    hass.states.async_set(METER, "abc", ATTRIBUTES[METER])
+    freezer.move_to("2026-10-15T10:00:00+00:00")
+    hass.states.async_remove(ENERGY)
+    entry = await setup_entry(hass)
+    registry = ir.async_get(hass)
+
+    async def fire(minutes: int) -> None:
+        freezer.tick(timedelta(minutes=minutes))
+        async_fire_time_changed(hass)
+        await hass.async_block_till_done()
+
+    def has(entity: str) -> bool:
+        return (
+            registry.async_get_issue(DOMAIN, f"{entry.entry_id}_{entity}") is not None
+        )
+
+    await fire(5)
+    assert not has(METER)
+    await fire(5)  # 10:10: the meter has been non-numeric since 09:40
+    assert has(METER)
+    assert not has(ENERGY)
+    for _ in range(3):
+        await fire(5)
+    assert not has(ENERGY)  # 10:25
+    await fire(5)  # 10:30 is 30 minutes after the start
+    assert has(ENERGY)
+
+
+async def test_a_source_that_disappears_counts_from_then(
+    hass: HomeAssistant, freezer
+) -> None:
+    """A state removed at runtime counts from its removal, not from the start."""
+    rig = await Rig.start(hass, freezer)
+    await rig.tick(minutes=40)
+    hass.states.async_remove(ENERGY)
+    await hass.async_block_till_done()
+    assert _issue(hass, rig, ENERGY) is None
+    await rig.tick(minutes=25)
+    assert _issue(hass, rig, ENERGY) is None
+    await rig.tick(minutes=5)  # 30 minutes after it disappeared
+    assert _issue(hass, rig, ENERGY) is not None
+    await rig.set(ENERGY, "10.0")
+    assert _issue(hass, rig, ENERGY) is None

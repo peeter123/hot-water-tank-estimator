@@ -256,8 +256,37 @@ These sensors have the diagnostic category, so they are hidden from dashboards b
 
 A mean charge error that rises, or errors that keep one sign, point to a wrong sensor height or a changed
 household. Check the sensor height first. Download the diagnostics of the entry to see the options, the state,
-which sources are available, the last 100 model events and every stored closure (heating run) with its status
-and reason.
+which sources are available, the open repair issues, the last 100 model events and every stored closure (heating
+run) with its status and reason.
+
+## Repair issues
+
+A tank raises a repair issue (Settings, Repairs) for a source that has been unavailable, unknown or not a number
+for the time below, or that does not exist. A missing entity counts from the start of the tank when it was missing
+then, and from the moment it disappeared otherwise. A humidity sensor also counts as out while it is silent, counted
+from its last report: its issue comes at the later of the Humidity silence time and 2 h, and never for silence while
+the silence time is 0 (an unavailable sensor still counts). The issue names the tank and the entity, and it goes as
+soon as the source reports again (a humidity sensor, as soon as it reports a changed value, or within 5 minutes
+otherwise). Short dropouts raise nothing. The estimate keeps running on the fallback named below, so an issue is a
+warning, not an error. The times are fixed.
+
+| Source | Out for | What the estimate loses |
+|---|---|---|
+| Water meter | 30 min | Draws are not counted. |
+| Heat energy counter | 30 min | Heat is not counted while it is out. If it detects the runs, a run ends 10 minutes after the last increase and no new run starts until it reports. |
+| Heat power sensor | 30 min | The gap counts as no energy. If it detects the runs, the next configured source decides after 15 minutes. |
+| Heating active binary sensor | 30 min | Runs are detected by the next configured heat source. |
+| Tank sensor | 1 h | The sensor bounds pause and the estimate runs on the energy balance only. |
+| Humidity sensor | 2 h | While no humidity sensor reports, shower detection falls back to the draw length. |
+| Flow and return temperature | 3 h | The charged temperature comes from the tank sensor. |
+| Cold water temperature | 3 h | The seasonal cold water curve is used. |
+| Ambient temperature | 3 h | The configured ambient temperature is used after the fallback time. |
+
+A source that plays several roles has one issue, with the text of its first role and the shortest time. After a
+reload the times count again from the source's last state change, so a source that is still out raises its issue
+at once (a missing one counts again from the reload), and an issue you ignored comes back while the source is still
+out. After a Home Assistant restart they count from the restart. The issues are removed when the tank is
+unloaded or deleted. The diagnostics list the open issues.
 
 ## How the estimate updates
 
@@ -371,7 +400,7 @@ with the fitted ones. The usage, all arguments and what the numbers mean are in
 
 - **No values after setup:** the sensors need a reading of the tank sensor first, and the heating-run based
   estimates need at least one heating run. Check that the sources are available. The diagnostics download shows which
-  are.
+  are, and Repairs lists a source that stays out (see Repair issues).
 - **The setup fit did nothing:** the recorder holds no history for the sources, or they are excluded from it. With no
   history the fit counts as done and does not run again by itself. After you enable recording, run the recalibrate
   action, or set the values in the options.
@@ -384,7 +413,8 @@ with the fitted ones. The usage, all arguments and what the numbers mean are in
 - **A shower was missed while the humidity sensor was quiet:** a humidity sensor that sends no report for the
   Humidity silence time (2 h) counts as silent, and a draw of the New shower draw while humid time (5 min) then
   counts as a shower. Check the sensor's last report in the diagnostics. If it was not silent for that long, lower
-  the silence time; a sensor that reports only on change needs 0 (off) to avoid false silences.
+  the silence time; a sensor that reports only on change needs 0 (off) to avoid false silences. A silent sensor also
+  raises a repair issue at the later of the silence time and 2 h (see Repair issues).
 - **Shower detected stays on after the water stopped:** it turns off 5 minutes after the last litre (the option Shower
   end after no water), not when the bathroom has dried. A shower with a longer pause counts as two.
 - **A second shower right after the first counts as other draws at first:** while the bathroom is still humid, a

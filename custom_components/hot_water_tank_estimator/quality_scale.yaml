@@ -148,8 +148,11 @@ rules:
     status: done
     comment: async_step_reconfigure changes the tank and the sources on one form and reloads the entry.
   repair-issues:
-    status: todo
-    comment: Above Silver and not required for 0.1.0.
+    status: done
+    comment: >-
+      A tank raises one repair issue per source that stays unavailable, unknown, non-numeric, missing
+      or (humidity) silent for its threshold, and removes it when the source is back. The
+      translation keys are source_unavailable_<role>, one per source role.
   stale-devices:
     status: exempt
     comment: One device per entry, created and removed with the entry; no devices appear or disappear at runtime.

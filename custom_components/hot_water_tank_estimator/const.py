@@ -60,6 +60,21 @@ COUNTER_LAG_SECONDS = 600.0
 # A heating run shorter than this does not mix the tank: it adds its heat but does not charge.
 MIN_RUN_MINUTES = 15.0
 
+# Repair issues (design D8): a source that has been out this long, in minutes, raises an issue. The keys
+# are the roles of `setup_fit`. They are not options: the user can only confirm or dismiss an issue.
+REPAIR_THRESHOLD_MINUTES = {
+    "water_meter": 30,
+    "dhw_energy": 30,
+    "dhw_power": 30,
+    "dhw_heating": 30,
+    "tank_temperature": 60,
+    "bathroom_humidity": 120,
+    "flow_temperature": 180,
+    "return_temperature": 180,
+    "cold_water_temperature": 180,
+    "ambient_temperature": 180,
+}
+
 # Config entry keys. Everything the user sets is stored in the entry options. The tuning values
 # use the field names of `ModelOptions`, in the units shown in the options form: the sensor height
 # and the thermocline width are percentages there, and fractions in the model.

@@ -766,3 +766,21 @@ and keeps `k` right in a room that is not at 20 C: a 4 K cooler room moves a qui
 (`0.1375 / 36.45` against `0.1375 / 40.45`).
 
 A rising mean charge error points at a wrong sensor height or a changed household: check the sensor height first.
+
+## Repair issues
+
+A source that stays out raises a repair issue in the runtime (not the model), because only Home Assistant's states know
+how long a source has been out across restarts. Out is an unavailable, unknown or non-numeric state (since its last
+change), a missing entity (since the estimator's start, or since it disappeared) and a silent humidity sensor (since
+its last report). The thresholds are fixed, not options, because the user can only confirm or dismiss an issue:
+
+| Source | Threshold | Why |
+|---|---|---|
+| Water meter | 30 min | Draws are not classified while it is out, and a catch-up above the plausible draw per reading is dropped. |
+| Energy counter, power, heating detector | 30 min | Twice the detector hold (15 min); the longest outage seen (19 min, all heat pump entities at once) stays below. |
+| Tank sensor | 1 h | The sensor bounds pause and the balance runs alone; short outages stay below. |
+| Humidity | 2 h | The silence time default; shower detection falls back to the next shower rule. A silent sensor's issue comes at the later of the silence time and 2 h, and never for silence while the silence time is 0. |
+| Flow, return, cold water, ambient | 3 h | The ambient fallback time; the cold water falls back to the seasonal curve and the charged temperature to the tank sensor. |
+
+An entity with several roles uses its first role's text and the shortest threshold. Issues are removed when the source
+is back, on unload (a reload raises them again) and on entry removal.
