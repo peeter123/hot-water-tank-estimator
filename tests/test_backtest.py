@@ -246,3 +246,17 @@ def test_the_report_lists_every_sample_and_the_litre_totals(
     assert "2026-10-22 17:33 given   199 L  30.5 min  6.52 L/min" in out
     assert "given  options: 373 L drawn" in out
     assert "46 L of them reclassified" in out
+
+
+def test_the_option_to_count_heat_outside_runs_comes_from_the_options_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--options '{"outside_heat": true}'` turns the option on: the charge error of a day of cooling heat goes."""
+    script = load_script()
+    fixture = ROOT / "tests" / "fixtures" / "heat_of_cooling.json"
+    base = {"loss_coefficient": 0.0, "startup_energy": 1.8}
+    for extra, expected in (({}, "1.50 K"), ({"outside_heat": True}, "0.03 K")):
+        argv = [str(fixture), "--options", json.dumps({**base, **extra})]
+        assert script.main(argv) == 0
+        out = capsys.readouterr().out
+        assert f"given  options: 1 closures, mean absolute error {expected}" in out

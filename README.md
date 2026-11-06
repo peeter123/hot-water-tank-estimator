@@ -140,6 +140,7 @@ entry and keeps the model state (the tank average, the charged temperature and t
 | Draws, losses and heat | Session gap | 60 s | Draws closer than this belong to one session. |
 | Draws, losses and heat | Maximum draw per reading | 100 L | A larger rise of the meter in one reading is ignored. |
 | Draws, losses and heat | Power threshold | 100 W | Heat power above this counts as heating. |
+| Draws, losses and heat | Count heat outside heating runs | off | Counts heat that reaches the tank outside the runs of the heating-active binary sensor, for example a heat pump dumping the heat of cooling into it. Turn it on only when the energy counter or power sensor measures nothing but heat into the tank. Off drops that heat, as a counter that also measures space heating needs. |
 | Learning | Locked parameters | none | Parameters that keep their value from these options and are never learned. The shower flow is one of them: it keeps the value set with the Shower flow number, or, when you lock it here or turn on the Shower flow locked switch, the flow in use at that moment. Both are the same lock. |
 | Learning | Days of history for the setup fit | 30 days | History replayed at setup and by the recalibrate action, 1-30. |
 
@@ -183,6 +184,14 @@ reached. The litres show the absolute amount.
 A tank heated by a heater that circulates the whole tank is supported, and so is a coil low in the tank. A coil or
 element high up in the tank, or a second heat source such as an electric element next to the heater, is not
 supported yet: the estimate then does not know that the heat goes into the upper part only.
+
+The energy counter and the heat power sensor measure the heat for heating the tank. If they also count other heat
+(a heat pump's total counter), leave the option "Count heat outside heating runs" off (the default), which drops the
+heat outside the heating-active binary sensor's runs. Heat that reaches the tank outside a domestic hot water run,
+for example a heat pump that dumps the heat of cooling into the tank, is counted when you turn that option on, and
+needs a heating-active binary sensor and an energy counter (or a heat power sensor): with the binary sensor off, the
+counter increases (or the power above the power threshold) raise the tank average without a charge. With
+counter-only or power-only detection that heat counts as a run, and a run of 15 minutes or more charges the tank.
 
 ## Actions
 
@@ -404,6 +413,10 @@ touched. To remove the integration completely, then remove it in HACS (or delete
 - With only an energy counter to detect heating, the length of a run is counted from its first to its last counter
   increase, so it is short by up to one counter step. A counter that reports every 10 minutes needs a real run of
   about 25 minutes to charge the tank.
+- Heat outside domestic hot water runs (for example a heat pump dumping the heat of cooling into the tank) is
+  counted only with the option "Count heat outside heating runs" on (off by default) and a heating-active binary
+  sensor. With counter-only or power-only detection it counts as a run,
+  and a run of 15 minutes or more charges the tank to the flow and return (or tank sensor) temperature.
 - The usable fraction is learned only from the button, not measured.
 - A fast draw mixes more cold inflow into the tank, so a high-flow shower can run cold a little earlier than the
   litres suggest. The model counts litres, not flow, and does not represent that; the minutes of a high-flow

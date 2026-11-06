@@ -185,6 +185,7 @@ async def test_fresh_entry_draw_and_heat_defaults(hass: HomeAssistant) -> None:
     assert options.session_gap == 60
     assert options.max_draw == 100
     assert options.power_threshold == 100
+    assert options.outside_heat is False
 
 
 @pytest.mark.parametrize("missing", [CONF_TANK_SENSOR, CONF_VOLUME, "name"])
@@ -363,6 +364,7 @@ async def test_existing_entry_after_the_update(hass: HomeAssistant) -> None:
     model_options = entry.runtime_data.model.options
     assert model_options.shower_end_minutes == 5
     assert model_options.next_shower_minutes == 5
+    assert model_options.outside_heat is False
     assert model_options.session_gap == 30.0
     assert model_options.long_draw_minutes == 4.0
     assert model_options.humidity_rise == 6

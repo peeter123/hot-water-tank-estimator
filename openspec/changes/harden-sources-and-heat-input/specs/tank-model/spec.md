@@ -24,10 +24,10 @@ sensor's reading.
 ### Requirement: Sensor above the charged temperature raises it
 While heating is not active, if the tank sensor reads more than `T_ch + tolerance`, T_ch SHALL be raised to the
 sensor reading, and T_avg SHALL rise by the same step, less the metered heat that raised T_avg without a charge
-(heat outside a heating run and of short runs) since the last charge or manual reset, as far as an earlier raise has
-not used it. This covers heat the model does not see, such as a backup heater
-without a meter, without counting metered heat twice. Raising T_avg with it keeps `T_ch - T_avg`, so the outputs do
-not fall when heat arrives.
+(heat outside a heating run, of short runs and of runs without a charged temperature) since the last charge or
+manual reset, as far as an earlier raise has not used it. This covers heat the model does not see, such as a
+backup heater without a meter, without counting metered heat twice. Raising T_avg with it keeps `T_ch - T_avg`, so
+the outputs do not fall when heat arrives.
 
 #### Scenario: Unmetered heat
 - **WHEN** heating is off, the tolerance is 1.5 K, T_ch is 50 C, T_avg 45 C and the sensor reads 55 C
@@ -55,18 +55,20 @@ ends SHALL raise T_avg the same way. A short run does not mix the tank, so there
 - **THEN** T_avg and T_ch become 52.0 C
 
 ### Requirement: Heat outside a heating run raises the tank average
-When an energy counter is configured, each increase of dE kWh while no heating run is active, and more than 10
-minutes after the last run ended, SHALL raise T_avg by `dE * 1000 / (1.163 * V)` kelvin, with no start-up energy and
-no charge. T_ch SHALL then be at least T_avg. Without an energy counter, heat power readings above the power threshold
-while no run is active SHALL count the same way, integrated over time.
+While the option "Count heat outside heating runs" is on (default off), each energy counter increase of dE kWh while
+no heating run is active, and more than 10 minutes after the last run ended, SHALL raise T_avg by `dE * 1000 / (1.163
+* V)` kelvin, with no start-up energy and no charge, and T_ch SHALL then be at least T_avg. Without an energy counter,
+heat power above the power threshold SHALL count the same way, integrated over time. While the option is off, such
+heat SHALL be dropped.
 
 #### Scenario: Heat of cooling with the DHW demand off
-- **WHEN** a heating-active binary sensor is off, a 285 L tank holds T_avg 45.0 C and T_ch 55.0 C, and the counter
-  rises by 1.3 kWh
+- **WHEN** the option is on, a heating-active binary sensor is off, a 285 L tank holds T_avg 45.0 C and T_ch 55.0 C,
+  and the counter rises by 1.3 kWh
 - **THEN** T_avg is 45.0 + 1300 / (1.163 * 285) = 48.9 C, T_ch stays 55.0 C, and no charge happens
 
 #### Scenario: Heat outside a run reaches the charged temperature
-- **WHEN** no run is active, T_avg is 54.0 C and T_ch 55.0 C on a 285 L tank, and the counter rises by 1.0 kWh
+- **WHEN** the option is on, no run is active, T_avg is 54.0 C and T_ch 55.0 C on a 285 L tank, and the counter rises
+  by 1.0 kWh
 - **THEN** T_avg and T_ch are both 54.0 + 3.02 = 57.0 C
 
 #### Scenario: Counter lag after a run
@@ -74,6 +76,10 @@ while no run is active SHALL count the same way, integrated over time.
 - **THEN** T_avg does not change, and the 0.2 kWh counts towards that run's closure
 
 #### Scenario: Power below the threshold
-- **WHEN** only a heat power sensor and a heating-active binary sensor are configured, the binary sensor is off, and
-  the power reads 40 W for an hour with a threshold of 100 W
+- **WHEN** the option is on, only a heat power sensor and a heating-active binary sensor are configured, the binary
+  sensor is off, and the power reads 40 W for an hour with a threshold of 100 W
 - **THEN** T_avg does not rise
+
+#### Scenario: Option off
+- **WHEN** the option is off, a heating-active binary sensor is off, and the counter rises by 1.3 kWh
+- **THEN** T_avg and T_ch do not change, as for a counter that also measures space heating

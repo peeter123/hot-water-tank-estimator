@@ -375,6 +375,7 @@ def test_quiet_days() -> None:
         "late_detection",
         "quiet_days",
         "week",
+        "heat_of_cooling",
     ],
 )
 def test_fixture_size(name: str) -> None:

@@ -94,6 +94,13 @@ would get a regressor that is 0 almost always.
 
 ### D3: Heat outside a run raises T_avg and enters the closure as a known heat
 
+**An option, off by default** (decided by the user on 2026-11-06, in the group 3 review). "Count heat outside heating
+runs" (`outside_heat`, a boolean on the draws step, default off). An entry whose counter or power also measures space
+heating (a heat pump's total counter, with a DHW binary sensor) worked in 0.1.0, because increases outside DHW runs
+were dropped; counting them would push the tank estimate up. Off keeps that behaviour for every existing and new entry.
+The development installation's counter measures DHW heat only, so it turns the option on (task 7.2). The rest of this
+decision applies while the option is on; while it is off, heat outside a run is dropped as before.
+
 A counter increase while no run is active and outside the counter lag, with an energy counter configured:
 `rise = dE * 1000 / (1.163 * V)` K. T_avg (and the balance's copy) rise by it, and T_ch becomes at least T_avg. No
 start-up energy is used, because nothing warms up: the circuit already runs, for cooling. No charge and no reset. The
@@ -102,7 +109,13 @@ interval sums gain `heat`, the sum of these rises in K. The event is a `heat` ev
 With a heat power sensor and no energy counter, the power is integrated outside a run as well, but only for readings
 above the power threshold. The threshold already separates heating from standby readings, which would add up over a
 day: 10 W of noise for 20 h is 0.2 kWh, 0.6 K on 285 L. When the power decides the runs, power above the threshold is
-a run, so this applies only with a heating-active binary sensor.
+a run, so this applies only with a heating-active binary sensor. Power above the threshold in the 10 minutes after a
+run end follows the counter lag (settled in the group 3 review, 2026-11-06): after a charged run it counts towards
+that run's `E_run` for the closure only, after a short run it raises T_avg as run heat. A power sensor reports the end
+of a run late, as a counter does, and that tail is the run's heat, not heat of the next interval.
+
+**First-drop state.** A heat event outside a run clears the calibrator's first-drop state, as any run does (D1): the
+heat changes the layers the width estimate assumes (settled in the group 3 review, 2026-11-06).
 
 The closure equation becomes:
 
@@ -130,8 +143,10 @@ When heat outside a run warms the top of a partly drawn tank, the tank sensor ca
 The rule "Sensor above the charged temperature raises it" then raises T_ch to the sensor and T_avg by the same step.
 That step is the same heat the counter has already added. The same holds for the heat of a short run (D1), which
 also raises T_avg without a charge (settled in the group 2 review, 2026-11-06). The model keeps `heat_uncredited` (K):
-the T_avg rise of heat outside runs and of short runs (after their start-up energy) since the last charge or reset
-that a raise has not yet used. A raise by `step = T_s - T_ch` then raises T_avg by
+the T_avg rise of heat outside runs, of short runs and of runs that ended without a charged temperature (after their
+start-up energy) since the last charge or reset that a raise has not yet used. The model adds every run's heat and a
+charge clears it, which is the same, because the raise rule does not apply during a run (the run without a charged
+temperature was settled in the group 3 review, 2026-11-06). A raise by `step = T_s - T_ch` then raises T_avg by
 
 ```text
 rise = step - c,   c = min(step, heat_uncredited),   heat_uncredited -= c
@@ -281,6 +296,9 @@ The outputs go to `private/analysis/` and the summary to `private/installation.m
 - [An unavailable heating detector during a cooling dump: the detector hold keeps the last state, and the next
   detector (power or counter) can then call the heat a run] → Unchanged behaviour of the detector fallback. After 30
   minutes the heating detector's repair issue shows it.
+- [A counter step just before the heating detector turns on counts as heat outside a run, without start-up energy,
+  while the option is on] → None in the evidence of October and November; the `outside_run` heat events in the
+  diagnostics show it. An undo of a press that lowered T_avg clears the credit, as the press's own `set_state` does.
 - [A heating detector that flickers off and on, or a power reading around the threshold, makes a short run: its
   start-up energy counts twice and the next closure is excluded] → No flicker in the 31 runs of the evidence; the
   short-run events in the diagnostics show it if it happens.

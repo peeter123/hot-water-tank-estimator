@@ -102,6 +102,31 @@ The first configured source decides. Sources go unavailable for seconds around r
 source holds the heating state instead of handing over at once, which would end or start a run and charge the tank to
 a wrong temperature. After 15 minutes unavailable, the next configured source decides until it returns.
 
+**Heat outside a run.** The option "Count heat outside heating runs" (`outside_heat`, default off) turns this on.
+Off, heat outside a run is dropped, because a total counter or power sensor that also measures space heating would
+push the estimate up; so with the option on, the counter and the power must measure only the heat for heating the
+tank, and a counter that also counts other heat (a heat pump's total counter) needs it off. With the option on and an
+energy counter, an increase of `dE` kWh while no run is active, and more than 10
+minutes after the last run ended, raises `t_avg` by the same `dE * 1000 / (1.163 * V)` K, and `t_ch` becomes at least
+`t_avg`. There is no start-up energy, because nothing warms up: the circuit already runs, for example when a heat
+pump dumps the heat of cooling into the tank while the demand for hot water is off. There is no charge and no reset,
+so the interval goes on, and the rise is added to the interval's `heat` sum (K). The event is a `heat` event marked
+`outside_run`. Without an energy counter, heat power above the power threshold counts the same way, integrated as
+above and only over the intervals whose reading is above the threshold, because standby readings would add up over a
+day (10 W for 20 hours is 0.2 kWh, 0.6 K on 285 L). The power since its last reading is counted before any other
+input changes the model (a sensor reading, a run start), so a power reading that comes late does not leave heat out
+of the credit below. Power above the threshold in the 10 minutes after a run end follows the counter lag: after a
+charged run it counts towards that run's `E_run` for the closure only, after a short run it raises `t_avg` as run
+heat, because a power sensor reports the end of a run late, as a counter does. A heat event outside a run clears the
+calibrator's first-drop state, as any run does, because the heat changes the layers the width estimate assumes. Only
+a heating-active binary sensor makes this reachable: with
+counter-only detection any increase starts a run, and with power-only detection power above the threshold is a run.
+Then the heat of cooling is a run, and a run of 15 minutes or more charges the tank. The evidence is from June, on the
+development installation: the counter rose 2.57 kWh in three hours on one day and 8.10 kWh between 06:00 and 13:00
+on the next, hourly means of 1.2-1.7 kW, about 24 K on 285 L. Left out, the model would not know that heat. The
+exports from 2026-10-01 to 2026-11-05 hold no counter increase outside a run beyond the counter lag, so the backtests
+do not change.
+
 **Binary sensor only.** Without an energy counter or power sensor, `t_avg` and `t_ch` rise to the tank sensor whenever
 heating is active and the sensor is higher, because a heating tank's sensor eventually rises.
 
@@ -210,7 +235,7 @@ thermocline is `w` wide (default 0.35). While heating is not active, with
 | `t_s >= t_ch - delta` | The cold layer is still below the sensor: `f <= h - w / 2` | Lower bound: `t_avg >= t_ch - (h - w / 2) * (t_ch - t_cold)` |
 | in between | The thermocline is at the sensor | Cap: `t_avg <= t_s_avg + m`, below |
 | `t_s <= t_cold + delta` | The cold layer has passed the sensor: `f >= h + w / 2` | Cap: `t_avg <= t_ch - (h + w / 2) * (t_ch - t_cold)` |
-| `t_s > t_ch + delta` | Heat the model did not see | `t_ch = t_s`, and `t_avg` rises by the same step |
+| `t_s > t_ch + delta` | Heat the model did not see | `t_ch = t_s`, and `t_avg` rises by the same step, less the credit below |
 
 Raising `t_avg` with `t_ch` keeps `t_ch - t_avg`, so the outputs do not fall when heat arrives. The rules after it
 use the new `t_ch`. With `f_lo = h - w / 2` and `f_hi = h + w / 2`, the lower bound is
@@ -226,6 +251,20 @@ t_s_avg = t_ch - f_s * (t_ch - t_cold)
 `f_lo` and `f_hi` are limited to 0-1 before use, so the in-between reading spans the limited range and meets the two
 other rules at its ends. When neither is limited, `f_s = h + w / 2 - s * w`.
 
+- **The credit.** Heat outside a run warms the top of a partly drawn tank, so the sensor can rise above
+  `t_ch + delta` for heat the counter has added to `t_avg` already. The same holds for the heat of a short run. The
+  model keeps `heat_uncredited` (K): the `t_avg` rise of heat outside runs, of short runs and of runs that ended
+  without a charged temperature (after their start-up energy) since the last charge or manual reset that a raise has
+  not used yet. The raise rule does not apply during a run, so adding the heat of every run and clearing it at a
+  charge is the same as crediting only these. A raise by `step = t_s - t_ch` then
+  raises `t_avg` by `step - c`, with `c = min(step, heat_uncredited)`, and `heat_uncredited` falls by `c`. Example:
+  `t_ch` 50 C, `t_avg` 45 C, heat outside a run adds 3 K (`t_avg` 48 C), the sensor reads 55 C: `t_ch` 55 C and
+  `t_avg` 50 C. Unmetered heat with nothing uncredited raises `t_avg` by the whole step. A charge, the set_tank_state
+  action and the "Hot water ran out" press set the credit to 0, and so does the undo of the press, but only when it
+  raises `t_avg` (when the press lowered it). Rejected: no raise while heat outside a
+  run came in recently, which needs an arbitrary window and hides unmetered heat that comes at the same time. When
+  metered and unmetered heat come at once, the raise adds less than the unmetered heat; the sensor bounds correct it
+  at the next draw.
 - **The tolerance is critical.** A reading just below `t_ch - delta` caps `t_avg` near the top of the thermocline
   (about 12.5 K below `t_ch` with the defaults), while one just above it only sets the lower bound. A tank sensor that
   reads more than `delta` below the flow and return charge right after a run, or that cools faster than the tank,
@@ -471,16 +510,22 @@ the run's energy `E_run` (kWh), the start-up energy `S` and the draws and loss d
 
 ```text
 t_true_start = t_charge - (E_run - S) / C + mixed_run + share * other_run + k * loss_run
-t_ch_prev - t_true_start = k * loss + share * other + mixed          (the interval before the run)
+t_ch_prev - t_true_start = k * loss + share * other + mixed - heat   (the interval before the run)
 ```
+
+`heat` is the sum of the `t_avg` rises of heat outside runs in the interval, in K (see "Heat input"). It is measured,
+like `mixed`, so it is a known input and does not bias the fit. It never falls inside a run, where every counter
+increase is `E_run`, so `t_true_start` and the charge error keep their formula. A closure stores `heat`; a closure
+stored without it reads as 0. A counter that overstates the heat during cooling would bias the closures of those
+days; the tank sensor's bounds still cap `t_avg`.
 
 - The charge error is the model's `t_avg` at the run start (with its sensor bounds) minus `t_true_start`. A sensor
   bound that corrected a missed shower shows as a smaller error, so the error measures the whole estimate.
 - The `_run` sums are the same three terms inside the run. Showers and loss do not stop while the heater runs, and a
   run that starts during a shower is common.
 - Together the two lines are linear in `k`, `share` and `S`:
-  `t_ch_prev - t_charge + E_run / C - mixed_total = k * loss_total + share * other_total + S / C`, with the totals
-  over the interval and the run. The fit solves this.
+  `t_ch_prev - t_charge + E_run / C + heat - mixed_total = k * loss_total + share * other_total + S / C`, with the
+  totals over the interval and the run. The fit solves this.
 - **Counter lag.** When a binary sensor or the heat power decides the run, the energy counter can report the last
   step after the run ended. Counter increases up to 10 minutes after the end count towards `E_run`. The model has
   charged by then, so only the closure uses them (after a short run they raise `t_avg`, see above).

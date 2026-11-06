@@ -12,10 +12,12 @@ their symbols are those of `docs/model.md`:
 
 - Between two charges the energy balance without the sensor bounds gives
 
-      t_ch_prev - t_true_start = k * loss + share * other + mixed
+      t_ch_prev - t_true_start = k * loss + share * other + mixed - heat
+
+  where `heat` is the known T_avg rise of heat outside runs, which never falls inside a run.
 
   Both equations together are linear in `k`, `share` and `S`, which the fitter solves over the
-  stored intervals. `loss`, `other` and `mixed` are the sums of the whole period from one charge
+  stored intervals. `loss`, `other`, `mixed` and `heat` are the sums of the whole period from one charge
   to the next (the interval before the run plus the run).
 
 A `Calibrator` watches a `TankModel` through the events its inputs return, builds one `Closure`
@@ -224,6 +226,8 @@ class Closure:
         reason: Why the closure is excluded (or a sensor start is not a closure).
         error: The charge error in K: the model's tank average at the run start minus the true
             one. None when there is no charged temperature.
+        heat: Sum of the T_avg rises of heat outside a heating run over the interval, in K. A
+            stored closure without it reads as 0.
     """
 
     run_start: datetime | None
@@ -246,6 +250,7 @@ class Closure:
     status: str
     reason: str | None = None
     error: float | None = None
+    heat: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
         """Return the closure as a JSON-compatible dict."""
@@ -263,6 +268,8 @@ class Closure:
         start = values["run_start"]
         values["run_start"] = None if start is None else datetime.fromisoformat(start)
         values["run_end"] = datetime.fromisoformat(values["run_end"])
+        # Added with the heat outside a run: a closure stored before lacks it.
+        values.setdefault("heat", 0.0)
         return cls(**{name: values[name] for name in _CLOSURE_FIELDS})
 
 
@@ -327,9 +334,10 @@ def fit_closures(
 
     The equation of each closure is
 
-        t_ch_prev - t_charge + E_run / C - mixed = k * loss + share * other + S / C
+        t_ch_prev - t_charge + E_run / C + heat - mixed = k * loss + share * other + S / C
 
-    with the totals over the interval and the run. It is solved by weighted least squares, the
+    with the totals over the interval and the run, and `heat` the known T_avg rise of heat
+    outside runs. It is solved by weighted least squares, the
     newest closure at weight 1 and each older one `forgetting` times the next. A locked
     parameter stays at its value in `in_use` and leaves the unknowns.
 
@@ -362,6 +370,7 @@ def fit_closures(
             closure.t_ch_prev
             - closure.t_charge
             + closure.energy_kwh / capacity
+            + closure.heat
             - closure.mixed
         )
         for name in locked & set(CLOSURE_PARAMETERS):
@@ -707,6 +716,9 @@ class Calibrator:
                     self._unknown_start = REASON_AFTER_RESET
                 return True
             case EventKind.HEAT:
+                if change.get("outside_run"):
+                    # Heat outside a run changes the layers the width estimate assumes.
+                    self._drop = None
                 lag = change.get("counter_lag_kwh")
                 pending = self._pending
                 if (
@@ -806,6 +818,7 @@ class Calibrator:
             mixed_run=run["mixed"],
             status=status,
             reason=reason,
+            heat=interval.get("heat", 0.0) + run.get("heat", 0.0),
         )
         error = charge_error(
             closure, closure.startup_kwh, closure.share, closure.loss_coefficient

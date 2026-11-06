@@ -38,8 +38,8 @@
           "return_sensor": "Return temperature sensor"
         },
         "data_description": {
-          "energy_counter": "The thermal energy counter of the heater for heating the tank, in kWh.",
-          "power_sensor": "The heat power of the heater for heating the tank, in W.",
+          "energy_counter": "The thermal energy counter of the heater for heating the tank, in kWh. If it also counts other heat, leave Count heat outside heating runs off.",
+          "power_sensor": "The heat power of the heater for heating the tank, in W. If it also counts other heat, leave Count heat outside heating runs off.",
           "heating_active": "A binary sensor that is on while the tank is being heated.",
           "flow_sensor": "The flow temperature of the heater. Give it together with the return temperature.",
           "return_sensor": "The return temperature of the heater. Give it together with the flow temperature."
@@ -89,8 +89,8 @@
           "tank_sensor": "The temperature sensor of the tank.",
           "sensor_height": "Share of the tank's water below the sensor, in % (20-80). See the README for how to work it out from the data sheet.",
           "water_meter": "The total water meter of the house, with a volume unit (L, m3, gal or ft3). It counts the hot and the cold water.",
-          "energy_counter": "The thermal energy counter of the heater for heating the tank, in kWh.",
-          "power_sensor": "The heat power of the heater for heating the tank, in W.",
+          "energy_counter": "The thermal energy counter of the heater for heating the tank, in kWh. If it also counts other heat, leave Count heat outside heating runs off.",
+          "power_sensor": "The heat power of the heater for heating the tank, in W. If it also counts other heat, leave Count heat outside heating runs off.",
           "heating_active": "A binary sensor that is on while the tank is being heated.",
           "flow_sensor": "The flow temperature of the heater. Give it together with the return temperature.",
           "return_sensor": "The return temperature of the heater. Give it together with the flow temperature.",
@@ -179,7 +179,8 @@
           "reclassify_window": "Reclassify window",
           "session_gap": "Session gap",
           "max_draw": "Maximum draw per reading",
-          "power_threshold": "Power threshold"
+          "power_threshold": "Power threshold",
+          "outside_heat": "Count heat outside heating runs"
         },
         "data_description": {
           "loss_coefficient": "The standing loss, as a fraction per hour of the excess of the tank over the ambient temperature. Learned from quiet nights and charges.",
@@ -193,7 +194,8 @@
           "reclassify_window": "The litres drawn this long before a shower is detected count as shower water.",
           "session_gap": "Draws less than this far apart belong to one session.",
           "max_draw": "A rise of the water meter above this in one reading is ignored as a meter catching up.",
-          "power_threshold": "The heat power above which the heater counts as heating the tank."
+          "power_threshold": "The heat power above which the heater counts as heating the tank.",
+          "outside_heat": "Count heat that reaches the tank outside heating runs, for example a heat pump dumping the heat of cooling into it. Needs a heating-active binary sensor, and a counter or power sensor that measures only heat into the tank. Leave off if it also measures space heating."
         }
       },
       "learning": {

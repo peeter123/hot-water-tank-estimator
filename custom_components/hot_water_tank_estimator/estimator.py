@@ -68,6 +68,7 @@ from .const import (
     CONF_HISTORY_DAYS,
     CONF_HUMIDITY_SENSORS,
     CONF_LOCKS,
+    CONF_OUTSIDE_HEAT,
     CONF_POWER_SENSOR,
     CONF_RETURN_SENSOR,
     CONF_SENSOR_HEIGHT,
@@ -110,7 +111,14 @@ type TankConfigEntry = ConfigEntry[TankEstimator]
 _TUNING_FIELDS = tuple(
     name
     for name in ModelOptions.__dataclass_fields__
-    if name not in {"volume", "sensor_height", "thermocline_width", "shower_flow_range"}
+    if name
+    not in {
+        "volume",
+        "sensor_height",
+        "thermocline_width",
+        "shower_flow_range",
+        "outside_heat",
+    }
 )
 # The parameters the user can lock (the learned ones).
 LOCKABLE = tuple(PARAMETER_BOUNDS)
@@ -165,6 +173,8 @@ class TankConfig:
         for name in ("cold_coldest_day",):
             if name in values:
                 values[name] = int(values[name])
+        if CONF_OUTSIDE_HEAT in data:
+            values["outside_heat"] = bool(data[CONF_OUTSIDE_HEAT])
         options = ModelOptions(volume=float(data[CONF_VOLUME]), **values)
 
         humidity = tuple(data.get(CONF_HUMIDITY_SENSORS) or ())

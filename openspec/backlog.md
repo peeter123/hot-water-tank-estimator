@@ -15,7 +15,8 @@ in any later change that touches the loss model, or on its own.
 ## Live check carried over: heat outside a heating run
 
 Carried over from `harden-sources-and-heat-input`, which counts a counter increase outside a heating run as energy
-only (no charge, no start-up energy), with the heat in the closure equation. No such heat occurred from 2026-10-01 to
+only (no charge, no start-up energy), with the heat in the closure equation, while the option "Count heat outside
+heating runs" is on (default off; on for the development installation). No such heat occurred from 2026-10-01 to
 2026-11-06; it is expected in the cooling season.
 - **Evidence.** A heat pump can dump the heat of cooling into the tank with DHW demand off, up to its own setpoint. The
   hourly statistics of the development installation show the DHW energy counter rising during cooling in June 2026,
@@ -26,7 +27,8 @@ only (no charge, no start-up energy), with the heat in the closure equation. No 
   matches the heat that reaches the tank (about 1.3 kW in June 2026), since the model trusts the counter.
 - **Check in the cooling season.** With a separate heating detector, check that heat outside a run raises T_avg by
   `E * 1000 / (1.163 * V)` K (E in kWh, V in litres) and that the closures that contain it stay within the usual
-  charge error. Record the result in `private/installation.md`.
+  charge error. A backtest of that time needs the option on (`scripts/backtest.py --options` with `outside_heat`),
+  as the live entry has it. Record the result in `private/installation.md`.
 
 ## add-second-heat-source
 

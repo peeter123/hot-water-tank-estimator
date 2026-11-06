@@ -39,7 +39,9 @@ waited until `improve-shower-end-detection` was archived (2026-11-06).
 - **Short runs do not charge.** A heating run shorter than 15 minutes adds its heat, after the start-up energy, but
   does not set the tank to the charged temperature. The next closure, whose interval holds that run, is excluded
   from learning.
-- **Heat outside a run counts.** An energy counter increase while no run is active, beyond the counter lag, raises
+- **Heat outside a run counts, when the user turns it on.** A new option, "Count heat outside heating runs" (default
+  off, decided by the user on 2026-11-06, so a counter that also measures space heating keeps working as in 0.1.0).
+  While it is on, an energy counter increase while no run is active, beyond the counter lag, raises
   T_avg by its energy. It adds no charge and uses no start-up energy. With a heat power sensor and a separate
   heating detector, power above the power threshold counts the same way. The closure equation gains this heat as a
   known input, so such intervals still count for learning. With counter-only or power-only heating detection this
@@ -69,7 +71,7 @@ None.
   - "Calibration state persists": the open quiet window and the armed first drop;
   - a new requirement that an interval holding a short run is excluded.
 - `integration-setup`:
-  - "Draw and heat defaults": the humidity silence time;
+  - "Draw and heat defaults": the humidity silence time and the option to count heat outside heating runs;
   - "State survives a restart": the time of each humidity sensor's last report;
   - "Diagnostics": the silent humidity sensors, the open repair issues and the new event kinds;
   - "Shower countdown diagnostic sensors": "Draw counts as shower" during the backup;
@@ -110,6 +112,9 @@ None.
 
     Roll back by deploying the previous commit and restarting. A repair issue the new code raised goes away with the
     restart, because the issues are not persistent;
+  - turn on "Count heat outside heating runs" in the entry's options, because its counter measures DHW heat only.
+    Verify the option is stored, the entry reloads with its state kept, and the system log is clean. Roll back by
+    turning the option off;
   - a live check of the backup and the humidity repair issue at the next humidity silence of at least 2 h, from the
     diagnostics and the Repairs list. Nothing to roll back; a failure is a finding.
 

@@ -330,3 +330,22 @@ def test_a_recalibrate_replaces_the_shower_flow_history() -> None:
     assert locked.options.shower_flow == 12.5
     assert locked.parameters["shower_flow"] == (12.5, "locked")
     assert locked.calibrator.shower_flows == pytest.approx(flows[-10:])
+
+
+def test_a_day_of_heat_of_cooling_keeps_the_closure() -> None:
+    """The counter rises 8.11 kWh in 7 hours with the heating sensor off, then a run: error 0."""
+    history, _ = load("heat_of_cooling")
+    options = ModelOptions(
+        volume=285.0,
+        sensor_height=0.5,
+        loss_coefficient=0.0,
+        startup_energy=1.8,
+        outside_heat=True,
+    )
+    fit = setup_fit(history, options)
+    first, closure = fit.closures
+    assert first.status == SENSOR_START
+    assert closure.status == CLOSURE
+    assert closure.reason is None
+    assert closure.heat == pytest.approx(8.11 * 1000 / (1.163 * 285), abs=0.01)
+    assert closure.error == pytest.approx(0.0, abs=0.1)

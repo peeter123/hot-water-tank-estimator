@@ -47,6 +47,7 @@ from .const import (
     CONF_HISTORY_DAYS,
     CONF_HUMIDITY_SENSORS,
     CONF_LOCKS,
+    CONF_OUTSIDE_HEAT,
     CONF_POWER_SENSOR,
     CONF_RETURN_SENSOR,
     CONF_SENSOR_HEIGHT,
@@ -69,6 +70,7 @@ from .const import (
     DEFAULT_MIX_TEMPERATURE,
     DEFAULT_NEXT_SHOWER_MINUTES,
     DEFAULT_OTHER_HOT_SHARE,
+    DEFAULT_OUTSIDE_HEAT,
     DEFAULT_POWER_THRESHOLD,
     DEFAULT_RECLASSIFY_WINDOW,
     DEFAULT_SENSOR_HEIGHT,
@@ -599,7 +601,12 @@ class HotWaterTankEstimatorOptionsFlow(OptionsFlowWithReload):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """The draw, loss and heat values."""
-        fields = _tuning_fields(DRAW_TUNING)
+        fields = {
+            **_tuning_fields(DRAW_TUNING),
+            probatio.Required(
+                CONF_OUTSIDE_HEAT, default=DEFAULT_OUTSIDE_HEAT
+            ): selector.BooleanSelector(),
+        }
         errors: dict[str, str] = {}
         if user_input is not None:
             errors = validate_shower_end(user_input)

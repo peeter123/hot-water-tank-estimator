@@ -33,6 +33,7 @@ DEFAULT_NEXT_SHOWER_MINUTES = 5.0  # minutes
 DEFAULT_SESSION_GAP = 60.0  # seconds
 DEFAULT_MAX_DRAW = 100.0  # litres per reading
 DEFAULT_POWER_THRESHOLD = 100.0  # W
+DEFAULT_OUTSIDE_HEAT = False  # heat outside heating runs is not counted
 
 # Shower flow (design D6): a detected shower with at least this many minutes of flow is a sample
 # of the shower flow history, which keeps the last `SHOWER_HISTORY` samples. The rolling flow of
@@ -76,6 +77,7 @@ CONF_AMBIENT_SENSOR = "ambient_sensor"
 CONF_THERMOCLINE_WIDTH = "thermocline_width"  # percent
 CONF_LOCKS = "locks"
 CONF_HISTORY_DAYS = "history_days"
+CONF_OUTSIDE_HEAT = "outside_heat"
 
 # The sensor entities the model reads, as keys of the entry options (humidity is a list).
 SOURCE_KEYS = (

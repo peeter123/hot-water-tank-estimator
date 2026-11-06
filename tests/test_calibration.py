@@ -3,7 +3,10 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 import json
+from pathlib import Path
 import random
+import sys
+from types import ModuleType
 
 import pytest
 
@@ -1620,3 +1623,139 @@ def test_a_store_without_the_shower_flow_history_loads() -> None:
     calibrator.restore(state)
     assert calibrator.shower_flows == []
     assert calibrator.options.shower_flow == 7.5
+
+
+# ----- heat outside a run ---------------------------------------------------------------------
+
+
+def heat_rig(**overrides: float) -> tuple[Rig, datetime]:
+    """A 285 L rig with one charge at 40 C (a sensor start), no standing loss, and the day after."""
+    values: dict[str, float] = {
+        "volume": 285.0,
+        "startup_energy": 1.8,
+        "loss_coefficient": 0.0,
+        "outside_heat": True,
+    }
+    values.update(overrides)
+    rig = Rig(**values)
+    end = rig.run(T0 + HOUR, 60, 5.0, 40.0)
+    return rig, end
+
+
+def final_run(rig: Rig, start: datetime) -> Closure:
+    """Run 60 minutes of 2.0 kWh that charges to what the model's balance gives, return the closure."""
+    # 1.8 kWh of the run is start-up energy, so 0.2 kWh heats the tank.
+    charge = rig.model.t_avg + 0.2 / heat_capacity(285.0)
+    rig.run(start, 60, 2.0, charge)
+    rig.cal.flush()
+    return rig.cal.closures[-1]
+
+
+def test_interval_with_heat_outside_a_run() -> None:
+    """3.0 kWh on 285 L is a heat of 9.05 K; the closure is a sample and the fit is as without it."""
+    rig, end = heat_rig()
+    rig.call(end + 3 * HOUR, "on_energy", rig.kwh + 3.0)
+    rig.kwh += 3.0
+    samples = rig.cal.sample_count
+    closure = final_run(rig, end + 6 * HOUR)
+    assert closure.heat == pytest.approx(3000 / (1.163 * 285))
+    assert closure.heat == pytest.approx(9.05, abs=0.005)
+    assert closure.status == CLOSURE
+    assert closure.error == pytest.approx(0.0, abs=0.02)
+    assert rig.cal.sample_count == samples + 1
+    # A closure with the heat and a charged temperature 9.05 K higher fits as the one without.
+    plain = synthetic_closures(8, k=0.004, share=0.2, startup=1.8)
+    heated = list(plain)
+    heated[-1] = replace(plain[-1], heat=9.05, t_charge=plain[-1].t_charge + 9.05)
+    in_use = {"loss_coefficient": 0.004, "other_hot_share": 0.2, "startup_energy": 1.8}
+    assert fit_closures(heated, in_use) == pytest.approx(fit_closures(plain, in_use))
+
+
+def test_a_closure_without_heat_loads() -> None:
+    """A closure stored before the heat outside a run existed reads a heat of 0."""
+    data = make_closure().as_dict()
+    del data["heat"]
+    closure = Closure.from_dict(data)
+    assert closure.heat == 0.0
+    assert Closure.from_dict(make_closure(heat=3.0).as_dict()).heat == 3.0
+
+
+def test_a_day_of_heat_of_cooling_keeps_the_closure() -> None:
+    """Counter steps 06:00-13:00 with the binary sensor off, then a run: the closure is kept, error 0."""
+    rig, end = heat_rig()
+    # The hourly counter increases of a day of cooling, in kWh, in steps of a quarter hour.
+    hourly = (0.35, 1.67, 1.15, 1.28, 1.42, 1.57, 0.67)
+    day = T0 + 18 * HOUR  # 06:00 on the day after the first charge
+    assert day > end + 2 * HOUR
+    for index, kwh in enumerate(hourly):
+        for step in range(1, 5):
+            rig.kwh += kwh / 4
+            rig.call(day + index * HOUR + step * 15 * MINUTE, "on_energy", rig.kwh)
+    heat = sum(hourly) * 1000 / (1.163 * 285)
+    assert heat == pytest.approx(24.4, abs=0.1)
+    assert not rig.model.heating
+    assert rig.model.interval_sums.heat == pytest.approx(heat)
+    start_avg = rig.model.t_avg
+    assert start_avg == pytest.approx(40.0 + heat)
+    samples = rig.cal.sample_count
+    closure = final_run(rig, day + 8 * HOUR)
+    assert closure.status == CLOSURE
+    assert closure.reason is None
+    assert closure.heat == pytest.approx(heat)
+    assert closure.error == pytest.approx(0.0, abs=0.1)
+    assert rig.cal.sample_count == samples + 1
+    # The closure equation holds with the heat as a known input.
+    capacity = heat_capacity(285.0)
+    left = (
+        closure.t_ch_prev
+        - closure.t_charge
+        + closure.energy_kwh / capacity
+        + closure.heat
+        - closure.mixed
+    )
+    assert left == pytest.approx(closure.startup_kwh / capacity, abs=0.1)
+    # Without the heat term the closure would be off by the whole heat.
+    assert abs(left - closure.heat - closure.startup_kwh / capacity) > 20.0
+
+
+def test_heat_outside_a_run_clears_the_first_drop_state() -> None:
+    """A charge arms the first-drop estimate; heat outside a run changes the layers and clears it."""
+    rig, end = heat_rig()
+    assert rig.cal._drop == "armed"  # noqa: SLF001
+    rig.call(end + 3 * HOUR, "on_energy", rig.kwh + 1.0)
+    assert rig.cal._drop is None  # noqa: SLF001
+
+
+def _previous_release_calibration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> type[Calibrator]:
+    """Load the previous release's `calibration.py` (commit e74907f, kept as a fixture) as a module."""
+    name = "custom_components.hot_water_tank_estimator.previous_release_calibration"
+    source = (
+        Path(__file__).parent / "fixtures" / "previous_release_calibration.txt"
+    ).read_text(encoding="utf-8")
+    module = ModuleType(name)
+    module.__package__ = "custom_components.hot_water_tank_estimator"
+    monkeypatch.setitem(sys.modules, name, module)
+    exec(compile(source, name, "exec"), module.__dict__)  # noqa: S102
+    return module.Calibrator
+
+
+def test_a_calibration_saved_now_loads_in_the_previous_release(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rollback: the previous release's own `Calibrator.restore` loads a closure with `heat`."""
+    previous = _previous_release_calibration(monkeypatch)
+    rig, end = heat_rig()
+    rig.call(end + 3 * HOUR, "on_energy", rig.kwh + 3.0)
+    rig.kwh += 3.0
+    closure = final_run(rig, end + 6 * HOUR)
+    assert closure.heat > 9.0
+    data = json.loads(json.dumps(rig.cal.to_dict()))
+    assert data["closures"][-1]["heat"] == pytest.approx(closure.heat)
+    old = previous(rig.cal.base)
+    old.restore(data)
+    assert len(old.closures) == len(rig.cal.closures)
+    assert old.closures[-1].t_charge == pytest.approx(closure.t_charge)
+    assert old.closures[-1].status == CLOSURE
+    assert old.sample_count == rig.cal.sample_count

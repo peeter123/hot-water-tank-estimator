@@ -72,7 +72,7 @@ Applies to every group:
 
 ## 3. Heat outside a run
 
-- [ ] 3.1 In `model.py`, apply heat outside a run (design D3):
+- [x] 3.1 In `model.py`, apply heat outside a run (design D3):
   - a counter increase with no run active and outside the counter lag raises T_avg and the balance, and T_ch becomes
     at least T_avg, with no start-up energy and no charge;
   - without an energy counter, heat power above the power threshold counts the same way, while no run is active;
@@ -84,11 +84,11 @@ Applies to every group:
   - a test that a counter-only entry still starts a run on an increase;
   - the store tests of D10 for the new key;
   - `python scripts/lint.py`.
-- [ ] 3.2 Credit the heat outside runs and the heat of short runs in the raise rule (design D4), with
+- [x] 3.2 Credit the heat outside runs and the heat of short runs in the raise rule (design D4), with
   `heat_uncredited` reset at a charge and at `set_tank_state`, and saved with a default of 0. Verify: tests for the
   tank-model scenarios "Unmetered heat" and "Sensor sees heat outside a run", a test that a short run's heat is
   credited the same way, a test that a charge clears the credit, and `python scripts/lint.py`.
-- [ ] 3.3 In `calibration.py`, store `heat` in each closure (0 for a stored closure without it) and add it to the
+- [x] 3.3 In `calibration.py`, store `heat` in each closure (0 for a stored closure without it) and add it to the
   closure fit as a known input (design D3). Verify:
   - a test for the calibration scenario "Interval with heat outside a run";
   - a test that a closure without `heat` loads;
@@ -97,13 +97,28 @@ Applies to every group:
     sensor is off, then a run. Through the model and the calibrator the closure is kept, and its error is 0 within
     0.1 K when the charged temperature matches the heat;
   - `python scripts/lint.py`.
-- [ ] 3.4 Run the backtest on the October export and the export of 1.1. Verify: the outputs equal the baseline of
+- [x] 3.4 Run the backtest on the October export and the export of 1.1. Verify: the outputs equal the baseline of
   1.2, apart from timestamps, because neither export has a short run or heat outside a run. Report any difference to
   the orchestrator instead of changing a test.
-- [ ] 3.5 Update `docs/model.md` ("Heat input", "The tank sensor as a measurement", "The charge closure") with the
+- [x] 3.5 Update `docs/model.md` ("Heat input", "The tank sensor as a measurement", "The charge closure") with the
   heat outside a run, the credit and the closure equation, with the June evidence of design D3 (without entity IDs).
   Update the README's "Supported heat sources" and "Limitations": heat outside DHW runs needs a heating-active binary
   sensor, and counter-only or power-only detection counts it as a run. Verify: `python scripts/lint.py`.
+
+- [x] 3.6 Add the option "Count heat outside heating runs" (`outside_heat`, boolean, default off) to `const.py`,
+  `ModelOptions` and the draws step of the options flow, with strings and translations, and apply 3.1 only while it
+  is on (design D3, decided by the user on 2026-11-06). Settle the other points of the group 3 review in the code:
+  power above the threshold in the 10 minutes after a run end follows the counter lag, and a heat event outside a
+  run clears the calibrator's first-drop state (design D3); the credit covers a run that ended without a charged
+  temperature (design D4). Verify:
+  - a test for the tank-model scenario "Option off", and the scenarios of 3.1 with the option on;
+  - the integration-setup scenarios "Fresh entry, draws and heat" and "Existing entry after the update" for the new
+    option;
+  - tests for the power lag after a charged run and after a short run, for the first-drop state, and for the credit
+    after a run without a charged temperature;
+  - the README's options table, "Supported heat sources" and the counter's and power's field texts say that the
+    counter and the power must measure only heat into the tank, and that the option is for heat outside DHW runs;
+  - `python scripts/lint.py --hassfest`.
 
 ## 4. Calibrator windows
 
@@ -183,7 +198,12 @@ Applies to every group:
   - the system log has no entries for the integration.
 
   Record the result in `private/installation.md`. Roll back by deploying the previous commit and restarting.
-- [ ] 7.2 **Requires the user's authorization** (reading the history, the diagnostics and the Repairs list only, no
+- [ ] 7.2 **Requires the user's authorization.** Turn on "Count heat outside heating runs" in the options of the
+  development installation's entry (its counter measures DHW heat only, design D3), through the home-assistant MCP
+  server's options flow. Verify: the option is stored, the entry reloads with T_avg, T_ch and the calibration kept,
+  and the system log has no entries for the integration. Record it in `private/installation.md`. Roll back by turning
+  the option off.
+- [ ] 7.3 **Requires the user's authorization** (reading the history, the diagnostics and the Repairs list only, no
   change). Live check at the next humidity silence of at least 2 h:
   - the humidity repair issue appears 2 h after the last report and goes at the next report;
   - the diagnostics show the sensor silent and the fallback on;

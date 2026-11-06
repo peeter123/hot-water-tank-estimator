@@ -1017,7 +1017,10 @@ def test_counter_timeout_run_sums_end_at_the_last_increase() -> None:
 def test_counter_increase_soon_after_a_run_end_is_reported() -> None:
     """With a binary sensor deciding, a counter step within 10 minutes after the end is a lag event."""
     model = make_model(
-        Sources(heating_binary=True, energy_counter=True), t_avg=40.0, t_ch=40.0
+        Sources(heating_binary=True, energy_counter=True),
+        t_avg=40.0,
+        t_ch=40.0,
+        outside_heat=True,
     )
     model.on_heating(T0, True)
     model.on_energy(T0, 100.0)
@@ -1029,7 +1032,10 @@ def test_counter_increase_soon_after_a_run_end_is_reported() -> None:
     assert late.kind == EventKind.HEAT
     assert late.change == {"counter_lag_kwh": 0.5, "run_end": end.isoformat()}
     assert model.t_avg == t_avg
-    assert model.on_energy(end + 11 * MINUTE, 104.0) == []
+    # Past the lag it is no lag event any more: it is heat outside a run (it raises T_avg).
+    (outside,) = model.on_energy(end + 11 * MINUTE, 104.0)
+    assert outside.change["outside_run"] is True
+    assert model.t_avg > t_avg
 
 
 def test_unavailable_time_per_source() -> None:
@@ -1497,7 +1503,7 @@ def test_a_state_saved_now_loads_in_the_previous_release(
 ) -> None:
     """A rollback: the previous release's own `TankModel.from_dict` restores a state saved now."""
     previous = _previous_release_model(monkeypatch)
-    model = _short_run_model()
+    model = _short_run_model(outside_heat=True)
     model.on_tank_sensor(T0, 50.0)
     model.on_energy(T0, 100.0)
     model.on_heating(T0, True)
@@ -1505,14 +1511,389 @@ def test_a_state_saved_now_loads_in_the_previous_release(
     model.on_water_meter(T0 + 3 * MINUTE, 1000.0, "L")
     model.on_water_meter(T0 + 4 * MINUTE, 1020.0, "L")
     model.on_heating(T0 + 5 * MINUTE, False)  # a short run: the new keys are set
+    model.on_heating(T0 + 20 * MINUTE, False)
+    model.on_energy(
+        T0 + 25 * MINUTE, 101.0
+    )  # heat outside a run: `heat` and the credit
     model.on_heating(T0 + 30 * MINUTE, True)
     model.on_water_meter(
         T0 + 31 * MINUTE, 1030.0, "L"
     )  # mid run, with a draw in the log
     state = json.loads(json.dumps(model.to_dict()))
     assert state["short_runs"] == 1
+    assert state["sums"]["heat"] > 0
+    assert state["heat_uncredited"] > 0
     old = previous.from_dict(model.options, model.sources, state)
     assert old.t_avg == pytest.approx(model.t_avg)
     assert old.t_ch == pytest.approx(model.t_ch)
     assert old.heating
-    assert old.interval_sums.as_dict() == model.interval_sums.as_dict()
+    # The previous release has no `heat` key in its sums; every key it has is equal.
+    current = model.interval_sums.as_dict()
+    previous_sums = old.interval_sums.as_dict()
+    assert "heat" not in previous_sums
+    assert previous_sums == {key: current[key] for key in previous_sums}
+
+
+# ----- heat outside a run ---------------------------------------------------------------------
+
+KWH_PER_K = 1.163 * 285 / 1000  # kWh that raise the 285 L tank by 1 K
+
+
+def _outside_model(
+    t_avg: float = 45.0, t_ch: float = 55.0, **overrides: float
+) -> TankModel:
+    """A 285 L tank with a binary sensor (off) and a counter at 100 kWh."""
+    model = make_model(
+        Sources(heating_binary=True, energy_counter=True),
+        t_avg=t_avg,
+        t_ch=t_ch,
+        **{"volume": 285.0, "outside_heat": True, **overrides},
+    )
+    model.on_heating(T0, False)
+    model.on_energy(T0, 100.0)
+    return model
+
+
+def test_heat_of_cooling_with_the_dhw_demand_off() -> None:
+    """1.3 kWh with the binary sensor off: T_avg 45.0 + 1300 / (1.163 * 285) = 48.9 C, T_ch 55.0 C."""
+    model = _outside_model()
+    (event,) = model.on_energy(T0 + 5 * MINUTE, 101.3)
+    assert model.t_avg == pytest.approx(45.0 + 1300 / (1.163 * 285))
+    assert model.t_avg == pytest.approx(48.9, abs=0.05)
+    assert model.t_ch == 55.0
+    assert not model.heating
+    assert model.last_reset is None
+    assert event.kind == EventKind.HEAT
+    assert event.change["outside_run"] is True
+    assert event.change["t_avg_rise"] == pytest.approx(1300 / (1.163 * 285))
+    # No charge, no start-up energy, and the interval goes on with the heat in its sums.
+    assert model.interval_sums.heat == pytest.approx(1300 / (1.163 * 285))
+
+
+def test_start_up_energy_is_not_used_outside_a_run() -> None:
+    """Heat outside a run warms nothing up first: the whole step raises T_avg."""
+    model = _outside_model(startup_energy=1.8)
+    model.on_energy(T0 + 5 * MINUTE, 101.0)
+    assert model.t_avg == pytest.approx(45.0 + 1000 / (1.163 * 285))
+
+
+def test_heat_outside_a_run_reaches_the_charged_temperature() -> None:
+    """T_avg 54.0 C, T_ch 55.0 C and 1.0 kWh on 285 L: both 54.0 + 3.02 = 57.0 C."""
+    model = _outside_model(t_avg=54.0, t_ch=55.0)
+    model.on_energy(T0 + 5 * MINUTE, 101.0)
+    assert model.t_avg == pytest.approx(54.0 + 3.02, abs=0.01)
+    assert model.t_avg == pytest.approx(57.0, abs=0.02)
+    assert model.t_ch == pytest.approx(model.t_avg)
+
+
+def test_counter_lag_after_a_run() -> None:
+    """A run ended 4 minutes ago and the counter rises by 0.2 kWh: T_avg stays, the closure gets it."""
+    model = _outside_model()
+    model.on_tank_sensor(T0, 55.0)
+    model.on_heating(T0 + MINUTE, True)
+    end = T0 + 31 * MINUTE
+    model.on_heating(end, False)
+    t_avg = model.t_avg
+    (late,) = model.on_energy(end + 4 * MINUTE, 100.2)
+    assert late.change == {
+        "counter_lag_kwh": pytest.approx(0.2),
+        "run_end": end.isoformat(),
+    }
+    assert model.t_avg == t_avg
+    assert model.interval_sums.heat == 0.0
+
+
+def test_power_below_the_threshold() -> None:
+    """A heat power of 40 W for an hour with the binary sensor off and a threshold of 100 W: no rise."""
+    model = make_model(
+        Sources(power=True, heating_binary=True),
+        t_avg=45.0,
+        t_ch=55.0,
+        volume=285.0,
+        outside_heat=True,
+    )
+    model.on_heating(T0, False)
+    model.on_power(T0, 40.0)
+    model.on_power(T0 + HOUR, 40.0)
+    assert model.t_avg == 45.0
+    assert model.interval_sums.heat == 0.0
+
+
+def test_power_above_the_threshold_outside_a_run_raises_t_avg() -> None:
+    """500 W for an hour while the binary sensor is off: 500 Wh / (1.163 * 285) = 1.51 K."""
+    model = make_model(
+        Sources(power=True, heating_binary=True),
+        t_avg=45.0,
+        t_ch=55.0,
+        volume=285.0,
+        outside_heat=True,
+    )
+    model.on_heating(T0, False)
+    model.on_power(T0, 500.0)
+    events = model.on_power(T0 + HOUR, 0.0)
+    assert model.t_avg == pytest.approx(45.0 + 500 / (1.163 * 285))
+    assert model.interval_sums.heat == pytest.approx(500 / (1.163 * 285))
+    heat = [e for e in events if e.kind == EventKind.HEAT]
+    assert [e.change["outside_run"] for e in heat] == [True]
+    # A power gap adds nothing, and the reading at 0 W before it does not either.
+    model.on_power(T0 + 2 * HOUR, None)
+    model.on_power(T0 + 3 * HOUR, 500.0)
+    assert model.interval_sums.heat == pytest.approx(500 / (1.163 * 285))
+
+
+def test_a_counter_only_entry_still_starts_a_run_on_an_increase() -> None:
+    """With only a counter, an increase is a run, not heat outside one."""
+    model = make_model(t_avg=40.0, t_ch=40.0, startup_energy=0.5)
+    model.on_energy(T0, 100.0)
+    (event,) = model.on_energy(T0 + MINUTE, 101.0)
+    assert model.heating
+    assert "outside_run" not in event.change
+    assert event.change["startup_used_kwh"] == pytest.approx(0.5)
+    assert model.interval_sums.heat == 0.0
+
+
+def test_heat_outside_a_run_is_clamped() -> None:
+    """The rise is limited by the maximum temperature like any heat."""
+    model = _outside_model(max_temperature=60.0)
+    model.on_energy(T0 + 5 * MINUTE, 120.0)
+    assert (model.t_avg, model.t_ch) == (60.0, 60.0)
+
+
+def test_a_state_saved_before_the_heat_keys_loads() -> None:
+    """A stored state without `heat` in its sums and without the credit loads with 0."""
+    model = _outside_model()
+    model.on_energy(T0 + 5 * MINUTE, 101.0)
+    state = json.loads(json.dumps(model.to_dict()))
+    assert state["sums"]["heat"] > 0
+    restored = TankModel.from_dict(model.options, model.sources, state)
+    assert restored.to_dict() == model.to_dict()
+    for key in ("sums", "run_snapshot", "increase_sums"):
+        del state[key]["heat"]
+    del state["heat_uncredited"]
+    old = TankModel.from_dict(model.options, model.sources, state)
+    assert old.interval_sums.heat == 0.0
+    assert old.to_dict()["heat_uncredited"] == 0.0
+
+
+def test_the_heat_sums_reach_the_charge_change() -> None:
+    """The interval and run sums in a charge change carry `heat`: the interval's, not the run's."""
+    model = _outside_model()
+    model.on_tank_sensor(T0, 55.0)
+    model.on_energy(T0 + 20 * MINUTE, 101.0)
+    model.on_heating(T0 + HOUR, True)
+    charge = model.on_heating(T0 + 2 * HOUR, False)[-1]
+    assert charge.change["interval"]["heat"] == pytest.approx(1000 / (1.163 * 285))
+    assert charge.change["run"]["heat"] == 0.0
+
+
+# ----- the credit of the raise rule ---------------------------------------------------------
+
+
+def test_sensor_sees_heat_outside_a_run() -> None:
+    """T_ch 50 C, T_avg 45 C, heat adds 3 K (48 C), the sensor reads 55 C: T_ch 55 C and T_avg 50 C."""
+    model = _outside_model(t_avg=45.0, t_ch=50.0)
+    model.on_energy(T0 + 5 * MINUTE, 100.0 + 3.0 * KWH_PER_K)
+    assert model.t_avg == pytest.approx(48.0)
+    model.on_tank_sensor(T0 + 6 * MINUTE, 55.0)
+    assert model.t_ch == 55.0
+    assert model.t_avg == pytest.approx(50.0)
+
+
+def test_the_credit_is_used_once() -> None:
+    """A second raise adds its whole step again."""
+    model = _outside_model(t_avg=45.0, t_ch=50.0)
+    model.on_energy(T0 + 5 * MINUTE, 100.0 + 3.0 * KWH_PER_K)
+    model.on_tank_sensor(T0 + 6 * MINUTE, 55.0)
+    model.on_tank_sensor(T0 + 7 * MINUTE, 60.0)
+    assert model.t_ch == 60.0
+    assert model.t_avg == pytest.approx(55.0)
+
+
+def test_a_credit_larger_than_the_step_is_kept_for_the_rest() -> None:
+    """A step of 2 K with 3 K credited raises T_avg by 0 and leaves 1 K of credit."""
+    model = _outside_model(t_avg=45.0, t_ch=50.0)
+    model.on_energy(T0 + 5 * MINUTE, 100.0 + 3.0 * KWH_PER_K)
+    model.on_tank_sensor(T0 + 6 * MINUTE, 52.0)
+    assert model.t_ch == 52.0
+    assert model.t_avg == pytest.approx(48.0)
+    model.on_tank_sensor(T0 + 7 * MINUTE, 57.0)
+    assert model.t_avg == pytest.approx(48.0 + 5.0 - 1.0)
+
+
+def test_a_short_runs_heat_is_credited_the_same_way() -> None:
+    """A short run adds 3 K after its start-up energy, the counter lag 1.5 K; a 6 K raise adds 1.5 K."""
+    model = _short_run_model()
+    model.on_energy(T0, 100.0)
+    model.on_heating(T0, True)
+    model.on_energy(T0 + 3 * MINUTE, 100.5 + 3.0 * KWH_PER_K)
+    model.on_heating(T0 + 6 * MINUTE, False)
+    assert model.t_avg == pytest.approx(43.0)
+    model.on_energy(T0 + 8 * MINUTE, 100.5 + 4.5 * KWH_PER_K)
+    assert model.t_avg == pytest.approx(44.5)
+    model.on_tank_sensor(T0 + 20 * MINUTE, 61.0)
+    assert model.t_ch == 61.0
+    # T_ch was 55 C: a step of 6 K, of which 4.5 K were counted already.
+    assert model.t_avg == pytest.approx(44.5 + 1.5)
+
+
+def test_a_charge_clears_the_credit() -> None:
+    """After a charge a sensor raise adds its whole step, whatever heat came before it."""
+    model = _outside_model()
+    model.on_tank_sensor(T0, 55.0)
+    model.on_energy(T0 + 5 * MINUTE, 100.0 + 3.0 * KWH_PER_K)
+    model.on_heating(T0 + 10 * MINUTE, True)
+    model.on_heating(T0 + 40 * MINUTE, False)
+    assert model.to_dict()["heat_uncredited"] == 0.0
+    t_ch = model.t_ch
+    model.on_tank_sensor(T0 + 50 * MINUTE, t_ch + 5.0)
+    assert model.t_avg == pytest.approx(t_ch + 5.0)
+
+
+def test_set_state_clears_the_credit() -> None:
+    """The set_tank_state action starts again: no credit is left."""
+    model = _outside_model(t_avg=45.0, t_ch=50.0)
+    model.on_energy(T0 + 5 * MINUTE, 100.0 + 3.0 * KWH_PER_K)
+    assert model.to_dict()["heat_uncredited"] == pytest.approx(3.0)
+    model.set_state(T0 + 6 * MINUTE, t_avg=45.0, t_ch=50.0)
+    assert model.to_dict()["heat_uncredited"] == 0.0
+    model.on_tank_sensor(T0 + 7 * MINUTE, 55.0)
+    assert model.t_avg == pytest.approx(50.0)
+
+
+def test_option_off() -> None:
+    """With the option off, 1.3 kWh with the binary sensor off changes nothing."""
+    model = _outside_model(outside_heat=False)
+    assert model.on_energy(T0 + 5 * MINUTE, 101.3) == []
+    assert (model.t_avg, model.t_ch) == (45.0, 55.0)
+    assert model.interval_sums.heat == 0.0
+    assert model.to_dict()["heat_uncredited"] == 0.0
+    # Power outside a run is dropped the same way.
+    powered = make_model(
+        Sources(power=True, heating_binary=True), t_avg=45.0, t_ch=55.0, volume=285.0
+    )
+    powered.on_heating(T0, False)
+    powered.on_power(T0, 1500.0)
+    powered.on_power(T0 + HOUR, 1500.0)
+    assert powered.t_avg == 45.0
+
+
+def _power_model(
+    t_avg: float = 45.0, t_ch: float = 55.0, **overrides: float
+) -> TankModel:
+    """A 285 L tank with a power sensor and a binary sensor (off), T_avg 45.0 C and T_ch 55.0 C."""
+    model = make_model(
+        Sources(power=True, heating_binary=True),
+        t_avg=t_avg,
+        t_ch=t_ch,
+        **{"volume": 285.0, "outside_heat": True, **overrides},
+    )
+    model.on_heating(T0, False)
+    return model
+
+
+def test_power_before_a_run_start_is_heat_outside_a_run() -> None:
+    """1500 W reported at 06:00 and nothing more, the binary sensor on at 07:00: T_avg rises 4.53 K."""
+    model = _power_model()
+    model.on_power(T0, 1500.0)
+    model.on_heating(T0 + HOUR, True)
+    assert model.t_avg == pytest.approx(45.0 + 1500 / (1.163 * 285))
+    assert model.t_avg == pytest.approx(49.53, abs=0.01)
+    assert model.interval_sums.heat == pytest.approx(4.53, abs=0.01)
+
+
+def test_power_heat_outside_a_run_is_credited_before_the_sensor_raise() -> None:
+    """The tank sensor raises T_avg without counting the power heat that came already."""
+    model = _power_model(t_avg=45.0, t_ch=50.0)
+    model.on_power(T0, 1500.0)
+    model.on_tank_sensor(T0 + 40 * MINUTE, 53.0)
+    # 40 minutes of 1500 W are 1000 Wh, 3.02 K: the whole 3 K step was counted already.
+    assert model.t_ch == 53.0
+    assert model.t_avg == pytest.approx(45.0 + 1000 / (1.163 * 285))
+    model.on_power(T0 + HOUR, 1500.0)
+    assert model.t_avg == pytest.approx(45.0 + 1500 / (1.163 * 285))
+
+
+def _power_run(model: TankModel, minutes: int) -> datetime:
+    """Run the binary sensor for `minutes` at 3000 W and return the run end."""
+    start = T0 + MINUTE
+    model.on_power(start, 3000.0)
+    model.on_heating(start, True)
+    end = start + minutes * MINUTE
+    model.on_power(end, 3000.0)
+    model.on_heating(end, False)
+    return end
+
+
+def test_power_lag_after_a_charged_run() -> None:
+    """3000 W reported 5 minutes after a charged run is the run's tail: the closure only."""
+    model = _power_model()
+    model.on_tank_sensor(T0, 55.0)
+    end = _power_run(model, 20)
+    t_avg = model.t_avg
+    events = model.on_power(end + 5 * MINUTE, 3000.0)
+    (late,) = [e for e in events if e.kind == EventKind.HEAT]
+    assert late.change == {
+        "counter_lag_kwh": pytest.approx(0.25),
+        "run_end": end.isoformat(),
+    }
+    assert model.t_avg == t_avg
+    assert model.interval_sums.heat == 0.0
+
+
+def test_power_lag_after_a_short_run() -> None:
+    """After a short run the tail raises T_avg as run heat: 250 Wh is 0.75 K."""
+    model = _power_model()
+    end = _power_run(model, 5)
+    t_avg = model.t_avg
+    model.on_power(end + 5 * MINUTE, 3000.0)
+    assert model.t_avg - t_avg == pytest.approx(250 / (1.163 * 285))
+    assert model.interval_sums.heat == 0.0
+    assert model.to_dict()["heat_uncredited"] == pytest.approx(
+        model.t_avg - 45.0 - 0.0, abs=1e-6
+    )
+
+
+def test_power_past_the_lag_is_heat_outside_a_run() -> None:
+    """A report 15 minutes after a charged run: 10 minutes of lag, 5 minutes of heat outside it."""
+    model = _power_model()
+    model.on_tank_sensor(T0, 55.0)
+    end = _power_run(model, 20)
+    t_avg = model.t_avg
+    events = model.on_power(end + 15 * MINUTE, 3000.0)
+    lag, outside = [e for e in events if e.kind == EventKind.HEAT]
+    assert lag.change["counter_lag_kwh"] == pytest.approx(0.5)
+    assert outside.change["energy_kwh"] == pytest.approx(0.25)
+    assert model.t_avg - t_avg == pytest.approx(250 / (1.163 * 285))
+
+
+def test_the_credit_covers_a_run_without_a_charged_temperature() -> None:
+    """A run with no charged temperature keeps its heat in T_avg; the sensor raise does not add it again."""
+    model = _outside_model(t_avg=45.0, t_ch=50.0)
+    model.on_heating(T0 + MINUTE, True)
+    model.on_energy(T0 + 10 * MINUTE, 100.0 + 3.0 * KWH_PER_K)
+    events = model.on_heating(T0 + 31 * MINUTE, False)
+    assert events[-1].kind == EventKind.CHARGE
+    assert events[-1].change["charge_temperature"] is None
+    assert model.t_avg == pytest.approx(48.0)
+    assert model.to_dict()["heat_uncredited"] == pytest.approx(3.0)
+    model.on_tank_sensor(T0 + 40 * MINUTE, 55.0)
+    assert model.t_avg == pytest.approx(50.0)
+
+
+def test_consecutive_heat_events_outside_a_run_merge() -> None:
+    """Power outside a run logs one event for a stretch of inputs, so draws stay in the log."""
+    model = _power_model()
+    model.on_power(T0, 1500.0)
+    for minute in range(1, 61):
+        model.on_flow_return(T0 + minute * MINUTE, 45.0, 40.0)
+    heat = [e for e in model.events if e.kind == EventKind.HEAT]
+    assert len(heat) == 1
+    assert heat[0].change["energy_kwh"] == pytest.approx(1.5)
+    assert heat[0].change["t_avg_rise"] == pytest.approx(1500 / (1.163 * 285))
+    assert heat[0].t_avg_before == 45.0
+    assert heat[0].t_avg_after == pytest.approx(model.t_avg)
+    # A draw in between keeps the next heat event apart.
+    model.on_water_meter(T0 + 61 * MINUTE, 1000.0, "L")
+    model.on_water_meter(T0 + 62 * MINUTE, 1010.0, "L")
+    model.on_flow_return(T0 + 63 * MINUTE, 45.0, 40.0)
+    assert len([e for e in model.events if e.kind == EventKind.HEAT]) == 2

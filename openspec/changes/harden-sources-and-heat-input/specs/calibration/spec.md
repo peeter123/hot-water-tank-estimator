@@ -25,8 +25,8 @@ does not count as a calibration sample, and it is not used for learning.
 - **THEN** the true start average is 49.9 - 8.84 * 1000 / 326.8 = 22.9 C, and the charge error is +2.1 K
 
 #### Scenario: Interval with heat outside a run
-- **WHEN** the interval before a run holds 3.0 kWh of heat outside runs on a 285 L tank, and its charged temperature
-  is 9.05 K higher than that of an interval without it, all other terms the same
+- **WHEN** heat outside heating runs is counted, the interval before a run holds 3.0 kWh of it on a 285 L tank, and
+  its charged temperature is 9.05 K higher than that of an interval without it, all other terms the same
 - **THEN** the closure is stored with a heat of 3000 / (1.163 * 285) = 9.05 K, it counts as a calibration sample,
   and the fit gives the same parameters as for the interval without it
 

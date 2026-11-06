@@ -40,6 +40,7 @@ from .const import (
     DEFAULT_MIX_TEMPERATURE,
     DEFAULT_NEXT_SHOWER_MINUTES,
     DEFAULT_OTHER_HOT_SHARE,
+    DEFAULT_OUTSIDE_HEAT,
     DEFAULT_POWER_THRESHOLD,
     DEFAULT_RECLASSIFY_WINDOW,
     DEFAULT_SENSOR_HEIGHT,
@@ -198,6 +199,9 @@ class ModelOptions:
     shower_end_minutes: float = DEFAULT_SHOWER_END_MINUTES  # minutes
     next_shower_minutes: float = DEFAULT_NEXT_SHOWER_MINUTES  # minutes
     power_threshold: float = DEFAULT_POWER_THRESHOLD  # W
+    # Whether heat outside a heating run (counter increases or power above the threshold
+    # while no run is active) raises the tank average. Off drops it.
+    outside_heat: bool = DEFAULT_OUTSIDE_HEAT
 
     def classifier_options(
         self, humidity_configured: bool = False
@@ -249,12 +253,14 @@ class IntervalSums:
         loss: Sum of `(t_avg - t_ambient) * dt` in K*h.
         other: Sum of `dV * (t_ch - t_cold) / V` over other draws in K, for a share of 1.
         mixed: Sum of the mixed-draw drops in K.
+        heat: Sum of the T_avg rises of heat outside a heating run in K.
     """
 
     hours: float = 0.0
     loss: float = 0.0
     other: float = 0.0
     mixed: float = 0.0
+    heat: float = 0.0
 
     def as_dict(self) -> dict[str, float]:
         """Return the sums as a JSON-compatible dict."""
@@ -263,6 +269,7 @@ class IntervalSums:
             "loss": self.loss,
             "other": self.other,
             "mixed": self.mixed,
+            "heat": self.heat,
         }
 
     @classmethod
@@ -273,6 +280,8 @@ class IntervalSums:
             loss=float(data["loss"]),
             other=float(data["other"]),
             mixed=float(data["mixed"]),
+            # Added with the heat outside a run: older saved sums lack it.
+            heat=float(data.get("heat", 0.0)),
         )
 
 
@@ -432,6 +441,9 @@ class TankModel:
         self._short_runs = 0
         # Whether the run that just ended was short: its counter lag then raises T_avg.
         self._last_run_short = False
+        # K of T_avg rise from heat outside runs and short runs since the last charge or reset
+        # that a raise by the tank sensor has not credited yet.
+        self._heat_uncredited = 0.0
         # Seconds each source was unavailable in this calibration interval, and since when the
         # sources that are unavailable now have been.
         self._unavailable: dict[str, float] = {}
@@ -504,6 +516,11 @@ class TankModel:
         elif self._counter_lag(now) and self._last_run_short:
             # A short run charged nothing, so its counter lag raises T_avg like any run heat.
             events += self._apply_heat(now, delta)
+        elif not self._counter_lag(now) and not self._heating:
+            # Heat while no run is active, such as the heat of cooling: raises T_avg only.
+            # With the option off it is dropped, for a counter that also measures space heating.
+            if self.sources.energy_counter and self.options.outside_heat:
+                events += self._apply_outside_heat(now, delta)
         elif self._counter_lag(now):
             # The counter reports the last step of a run after the run ended. The model has
             # charged already, so only the closure uses it.
@@ -653,6 +670,7 @@ class TankModel:
         self._clamp()
         self._bal_avg, self._bal_ch = self.t_avg, self.t_ch
         self._reset_interval(now)
+        self._heat_uncredited = 0.0
         self._last_reset = now
         self._classifier.clear_pending()
         events.append(self._record(now, EventKind.CHARGE, {"manual": True}, before))
@@ -1013,6 +1031,26 @@ class TankModel:
                 t_avg_after=event.t_avg_after,
                 t_ch_after=event.t_ch_after,
             )
+        elif (
+            kind == EventKind.HEAT
+            and change.get("outside_run")
+            and last is not None
+            and last.kind == EventKind.HEAT
+            and last.change.get("outside_run")
+        ):
+            # Power outside a run logs a step per input: merge them, as loss events are.
+            merged = {
+                **change,
+                "energy_kwh": last.change["energy_kwh"] + change["energy_kwh"],
+                "t_avg_rise": last.change["t_avg_rise"] + change["t_avg_rise"],
+            }
+            self._events[-1] = replace(
+                last,
+                time=now,
+                change=merged,
+                t_avg_after=event.t_avg_after,
+                t_ch_after=event.t_ch_after,
+            )
         else:
             self._events.append(event)
         return event
@@ -1025,6 +1063,10 @@ class TankModel:
         """
         now = max(now, self._now)
         events = self._step_loss(now)
+        if not self._heating:
+            # Power since its last reading counts before anything else changes, so a sensor
+            # raise or a run start sees the heat.
+            events += self._integrate_power(now)
         events += self._refresh_cold(now)
         events += self._evaluate_heating(now)
         return now, events
@@ -1118,33 +1160,78 @@ class TankModel:
         skipped = min(de, max(0.0, self.options.startup_energy - self._startup_used))
         self._startup_used += skipped
         rise = (de - skipped) * 1000 / (WATER_HEAT_CAPACITY_WH * self.options.volume)
+        self._raise_average(rise)
+        # A raise by the tank sensor does not count this heat twice. A charge clears it.
+        self._heat_uncredited += rise
+        change = {"energy_kwh": de, "startup_used_kwh": skipped, "t_avg_rise": rise}
+        return [self._record(now, EventKind.HEAT, change, before)]
+
+    def _apply_outside_heat(self, now: datetime, de: float) -> list[ModelEvent]:
+        """Raise t_avg by de * 1000 / (1.163 * V) K for heat while no run is active.
+
+        No start-up energy, no charge and no reset: the circuit already runs, for cooling.
+        """
+        before = self._temps()
+        de = max(0.0, de)
+        rise = de * 1000 / (WATER_HEAT_CAPACITY_WH * self.options.volume)
+        self._raise_average(rise)
+        self._sums.heat += rise
+        self._heat_uncredited += rise
+        change = {"energy_kwh": de, "t_avg_rise": rise, "outside_run": True}
+        return [self._record(now, EventKind.HEAT, change, before)]
+
+    def _raise_average(self, rise: float) -> None:
+        """Raise t_avg and the balance by `rise` K, with t_ch at least t_avg, and clamp."""
         self.t_avg += rise
         self.t_ch = max(self.t_ch, self.t_avg)
         self._bal_avg += rise
         self._bal_ch = max(self._bal_ch, self._bal_avg)
         self._clamp()
-        change = {"energy_kwh": de, "startup_used_kwh": skipped, "t_avg_rise": rise}
-        return [self._record(now, EventKind.HEAT, change, before)]
 
     def _integrate_power(self, now: datetime) -> list[ModelEvent]:
         """Apply the energy of the heat power since its last reading (left Riemann sum).
 
-        Only while a run is active and power is the energy source: de = P * dt, P in W, dt in h.
+        Only while power is the energy source: de = P * dt, P in W, dt in h. Outside a run it
+        counts only with the option on and only a reading above the power threshold, so
+        standby readings do not add up. The part within the counter lag after a run end is
+        the run's tail: for the closure only after a charge, T_avg after a short run.
         """
         src = self.sources
         if (
-            not self._heating
-            or not src.power
+            not src.power
             or src.energy_counter
             or self._power is None
             or self._power_time is None
         ):
             return []
-        hours = max(0.0, (now - self._power_time).total_seconds()) / 3600
-        self._power_time = now
-        if hours <= 0:
+        outside = not self._heating
+        if outside and (
+            not self.options.outside_heat or self._power <= self.options.power_threshold
+        ):
             return []
-        return self._apply_heat(now, self._power * hours / 1000)
+        start = self._power_time
+        total = max(0.0, (now - start).total_seconds()) / 3600
+        self._power_time = now
+        if total <= 0:
+            return []
+        if not outside:
+            return self._apply_heat(now, self._power * total / 1000)
+        lag = 0.0
+        end = self._last_run_end
+        if end is not None:
+            lag_end = end + timedelta(seconds=COUNTER_LAG_SECONDS)
+            lag = max(0.0, (min(now, lag_end) - max(start, end)).total_seconds() / 3600)
+        events: list[ModelEvent] = []
+        if lag > 0:
+            de = self._power * lag / 1000
+            if self._last_run_short:
+                events += self._apply_heat(now, de)
+            else:
+                change = {"counter_lag_kwh": de, "run_end": _iso(end)}
+                events.append(self._record(now, EventKind.HEAT, change, self._temps()))
+        if total - lag > 0:
+            events += self._apply_outside_heat(now, self._power * (total - lag) / 1000)
+        return events
 
     def _follow_sensor(self, now: datetime) -> list[ModelEvent]:
         """Without a heat input, rise to the tank sensor while heating is active."""
@@ -1175,9 +1262,12 @@ class TankModel:
         rules: list[str] = []
         if t_s > self.t_ch + delta:
             # Heat the model did not see: t_ch to the sensor, t_avg by the same step.
+            # Heat already counted outside a run or in a short run is not added again.
             step = t_s - self.t_ch
+            credit = min(step, self._heat_uncredited)
+            self._heat_uncredited -= credit
             self.t_ch = t_s
-            self.t_avg += step
+            self.t_avg += step - credit
             rules.append("raise_t_ch")
         self._clamp()
         span = self.t_ch - self.t_cold
@@ -1273,7 +1363,8 @@ class TankModel:
         self._draw_log.clear()
         self._last_run_short = False
         if self._power is not None:
-            # Power before the run start is not part of the run.
+            # Power before the run start is not part of the run (`_begin` has counted it as
+            # heat outside a run already).
             self._power_time = now
 
     def _charge_temperature(self, t_end: datetime) -> tuple[float | None, str]:
@@ -1340,6 +1431,7 @@ class TankModel:
         self._clamp()
         self._last_reset = now
         self._reset_interval(now)
+        self._heat_uncredited = 0.0
         self._classifier.clear_pending(until=t_end)
         self._last_charge_temp = self.t_ch
         events.append(self._record(now, EventKind.CHARGE, change, before))
@@ -1383,6 +1475,7 @@ class TankModel:
             loss=end.loss - start.loss,
             other=end.other - start.other,
             mixed=end.mixed - start.mixed,
+            heat=end.heat - start.heat,
         )
 
     def _replay_late_draws(
@@ -1470,6 +1563,7 @@ class TankModel:
             "last_run_end": _iso(self._last_run_end),
             "short_runs": self._short_runs,
             "last_run_short": self._last_run_short,
+            "heat_uncredited": self._heat_uncredited,
             "unavailable": self._unavailable,
             "down_since": {s: t.isoformat() for s, t in self._down_since.items()},
             "classifier": self._classifier.to_dict(),
@@ -1558,6 +1652,7 @@ class TankModel:
             model._last_run_end = _from_iso(data.get("last_run_end"))
             model._short_runs = int(data.get("short_runs", 0))
             model._last_run_short = bool(data.get("last_run_short", False))
+            model._heat_uncredited = float(data.get("heat_uncredited", 0.0))
             model._unavailable = {
                 s: float(v) for s, v in data.get("unavailable", {}).items()
             }
