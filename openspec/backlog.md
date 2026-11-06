@@ -4,48 +4,63 @@ Follow-up changes that are agreed but not yet proposed. Each one becomes an Open
 when it is taken up. Installation-specific evidence stays in `private/installation.md`; the items here only point
 to it.
 
-## add-source-health-repairs
+## harden-sources-and-heat-input
 
-Added 2026-11-03 at the user's request. The trigger is a battery-powered humidity sensor: on the development
-installation its battery was at 30 % on 2026-10-31.
+Agreed 2026-11-05 in an exploration with the user. It replaces three earlier items: `add-source-health-repairs`
+(2026-11-03), "Short heating runs charge the model" and "Persist the calibrator's open windows" (both 2026-11-04),
+and adds heat put into the tank outside a heating run. Propose it after `improve-shower-end-detection` is archived:
+it changes the shower start rules in `draw-classification`, so its delta must be written against the synced spec.
 
-**Problem.** A source that goes unavailable is handled quietly, and nothing tells the user.
-- **Humidity sensor.** Its readings are dropped, so humidity detection never starts. "Shower detected" stays off
-  instead of showing that detection is not working. Every shower then counts as an other draw at the other-draws hot
-  share instead of as a mixed draw.
-  - The 70 L shower of 2026-11-03 would then have cost 70 * 0.16 * 43.5 / 285 = 1.7 K instead of 6.0 K.
-  - The tank average is then about 4.3 K too high, or about 4.3 * 285 / 43.5 = 28 L of tank water, until the next
-    charge or a sensor bound corrects it.
-  - The shower flow history also stops filling.
-- **The other sources.** The tank sensor, the meter, the heat inputs, flow and return, cold water and ambient each
-  have their own fallback:
-  - a closure is excluded when a source was unavailable for more than 10 % of the interval;
-  - the ambient sensor falls back after 3 hours;
-  - an unavailable heating detector holds its state for 15 minutes.
+**Problem.**
+- **A source that fails is handled quietly.** Only the diagnostics show whether a source is available. On the
+  development installation the humidity sensor never went unavailable from 2026-10-01 to 2026-11-05: it went silent.
+  The shower of 2026-10-10 (a 10.2-minute draw) ran during a 3.7-hour silence and was counted as an other draw.
+  Since `improve-shower-end-detection` the long-draw rule applies only without a humidity sensor, so a silent or
+  unavailable sensor has no backup.
+- **Every heating run charges the model, however short.** A DHW run cut off after a few minutes, for example when a
+  cooling demand with a higher priority takes the heat pump, resets T_avg = T_ch to the charged temperature although
+  the run did not mix the tank. Calibration already excludes such a closure (`short_run`), but the next interval
+  starts from that charge and its closure counts. None occurred in the 31 runs from 2026-10-01 to 2026-11-05 (the
+  shortest ran 43.5 minutes); they are expected in the cooling season.
+- **Heat outside a heating run is dropped.** A heat pump can dump the heat of cooling into the tank (high temperature
+  recovery) with DHW demand off, up to its own setpoint. The model only applies heat while a run is active. In the
+  hourly statistics of the development installation the DHW energy counter rose at about 1.2-1.7 kW during cooling:
+  2.6 kWh on 2026-06-23 and about 8 kWh over 6 hours on 2026-06-24, about 24 K of T_avg on 285 L.
+- **A reload loses the calibrator's open windows.** The open quiet window (loss) and the armed first drop
+  (thermocline width) are not stored, so every options save or restart during a quiet night or before the first
+  sensor drop loses that estimate.
 
-  Only the diagnostics show whether each source is available.
-
-**What to build.**
-- A repair issue per source that has been unavailable for longer than a threshold. It names the entity and what the
-  estimate loses without it. It is removed on its own when the source is back.
-- A threshold per kind of source. For example, a short one for the water meter and the tank sensor, and hours for a
-  battery-powered humidity or ambient sensor. Short dropouts must not raise an issue: the tank sensor goes
-  unavailable for 1-2 s now and then.
-- "Shower detected" unavailable while no detection method works, that is, every humidity sensor is unavailable and
-  the long-draw rule is off. Today it is unavailable only when no method is configured.
-- A long-draw backup while the humidity sensor is unavailable. `improve-shower-end-detection` makes the long-draw
-  duration apply only without a humidity sensor, so a configured sensor that is unavailable has no backup. In
-  October the shower of 2026-10-10 (a 10.2-minute draw) ran during an hour without humidity readings and was counted
-  as an other draw. Option: while every humidity sensor is unavailable, start a shower on a session of the long-draw
-  duration, as without a sensor, and drop the backup when a reading returns.
-- To decide: also a warning for a sensor that stays available but stops changing, for a device that keeps its last
-  value. And whether to watch the device's battery entity, if there is one.
+**Decisions (2026-11-05).**
+- **Repair issues per source**, created when the source has been unavailable for longer than its threshold, naming
+  the entity and what the estimate loses, and removed when it returns: water meter, energy counter, power and heating
+  detector 30 min; humidity 2 h; tank sensor 1 h; flow and return, cold water and ambient 3 h. The heat inputs'
+  dropouts of under 10 s and the one of 19 minutes (2026-10-09) stay below their threshold.
+- **Humidity silence counts as unavailable.** New option "humidity silence time", default 2 h, 0 turns it off (for
+  a sensor that reports only on change). The runtime reads `State.last_reported`, which Home Assistant updates on
+  every report, also an unchanged one; the replays use the gaps between recorded changes. A 2-hour threshold gave 3
+  silences from 2026-10-01 to 2026-11-05, among them 2026-10-10.
+- **Detection backup.** While every humidity sensor is unavailable or silent, a draw session of the next shower time
+  starts a shower, as in the humid tail. "Shower detected" stays available; the repair issue says that detection is
+  degraded.
+- **Short runs.** A run shorter than 15 minutes (as for closures) does not charge: its heat counts as energy, after
+  the start-up energy. A closure whose interval contains such a run is excluded with a new reason.
+- **Heat outside a run.** A counter increase while no run is active (beyond the counter lag) counts as energy only:
+  no charge and no start-up energy. The interval sums gain a heat term, a known input to the closure equation, so
+  such closures are kept. Counter-only heating detection cannot tell this heat from a run; the README says that it
+  needs a separate heating detector.
+- **Calibrator windows.** The open quiet window and the armed first drop are stored with the calibration state; a
+  store without them still loads.
 - The quality-scale rule `repair-issues` (todo since 0.1.0) then becomes done.
 
-**Evidence needed.**
-- Recorder history of real outages per source, to set the thresholds.
-- A backtest of an estimate with the humidity sensor removed for a few days, to measure the error that the repair
-  warns about.
+**Evidence and checks.**
+- A backtest of the October export with the humidity silence of 2026-10-10: the 10.2-minute shower counts as mixed.
+- Synthetic fixtures for a short run and for a day of heat outside runs shaped like 2026-06-24; a reload test for
+  the calibrator windows.
+- The hourly statistics of 2026-06-23 and 2026-06-24 go into `private/installation.md` when the change is proposed.
+- A live check of the heat outside runs in the next cooling season.
+- Outside this project: the heat pump's firmware on the development installation now derives the DHW heat power
+  during cooling from the full condensing power. Check before the cooling season that its counter matches the heat
+  that reaches the tank (about 1.3 kW in June 2026), since the model trusts the counter.
 
 ## Live check carried over: heat loss follows the ambient sensor
 
@@ -64,23 +79,12 @@ From `add-tank-insights-and-controls` (proposal, Out of scope).
 
 ## Small follow-ups from the whole-change review of add-hot-water-estimator
 
-Added 2026-11-04, from the review before that change was archived. Neither is blocking; they are kept here so they
-are not lost.
+Added 2026-11-04, from the review before that change was archived. It is not blocking; it is kept here so it is not
+lost. The other two items of that review moved to `harden-sources-and-heat-input`.
 
-- **Persist the calibrator's open windows.** The armed first-drop state (thermocline width) and the open quiet
-  window (loss) are not stored. A reload, including every options save, between a charge and the first sensor drop
-  loses that width estimate, and a reload during a quiet night loses that loss estimate. Store both with the
-  calibration state, and test that a reload keeps them.
 - **Guard the fixtures against real entity IDs.** The packaging scenarios "Fixture from real history" and
   "Markdown with CRLF" were verified once by hand (tasks 3.2 and 1.3). Add tests: one that every entity ID in
   `tests/fixtures/` is one of the made-up IDs, and one that the Markdown check rejects a CRLF file.
-- **Short heating runs charge the model.** Every heating run ends with T_avg = T_ch = the charged temperature,
-  however short. Calibration already ignores runs under 15 minutes, because a short run does not mix the tank. A
-  2-minute demand blip on a 40 %-drawn tank resets the estimate to full, and while the sensor still reads the hot
-  layer nothing corrects it until the cold layer reaches the sensor or a real run ends. Option: no charge for runs
-  shorter than a minimum (15 minutes, as for closures), with the heat counted as energy only. Evidence needed: how
-  often short runs occur in the recorder history, and a backtest. Decided as a backlog item by the user on
-  2026-11-04.
 
 ## Manifest categories, after the next Home Assistant release
 
