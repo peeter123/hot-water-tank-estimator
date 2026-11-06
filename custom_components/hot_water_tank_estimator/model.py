@@ -1301,9 +1301,10 @@ class TankModel:
         """Apply the energy of the heat power since its last reading (left Riemann sum).
 
         Only while power is the energy source: de = P * dt, P in W, dt in h. Outside a run it
-        counts only with the option on and only a reading above the power threshold, so
-        standby readings do not add up. The part within the counter lag after a run end is
-        the run's tail: for the closure only after a charge, T_avg after a short run.
+        counts only a reading above the power threshold, so standby readings do not add up.
+        The part within the counter lag after a run end is the run's tail, whatever the
+        option: for the closure only after a charge, T_avg after a short run. Only the part
+        beyond the lag is heat outside a run, and it counts only with the option on.
         """
         src = self.sources
         if (
@@ -1314,9 +1315,7 @@ class TankModel:
         ):
             return []
         outside = not self._heating
-        if outside and (
-            not self.options.outside_heat or self._power <= self.options.power_threshold
-        ):
+        if outside and self._power <= self.options.power_threshold:
             return []
         start = self._power_time
         total = max(0.0, (now - start).total_seconds()) / 3600
@@ -1338,7 +1337,7 @@ class TankModel:
             else:
                 change = {"counter_lag_kwh": de, "run_end": _iso(end)}
                 events.append(self._record(now, EventKind.HEAT, change, self._temps()))
-        if total - lag > 0:
+        if self.options.outside_heat and total - lag > 0:
             events += self._apply_outside_heat(now, self._power * (total - lag) / 1000)
         return events
 

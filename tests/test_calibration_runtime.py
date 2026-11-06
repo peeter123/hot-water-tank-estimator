@@ -1076,17 +1076,18 @@ async def test_options_saved_during_a_quiet_night(hass: HomeAssistant, freezer) 
     assert window["start"] == "2026-10-15T23:00:00+00:00"
     await rig.tick(minutes=3 * 60)  # 02:00
     # The options are saved (the value is harmless: the save and the reload are what matter) and
-    # the entry is down for an hour, with the sensor still at 57.0 C.
+    # the entry is down for 5 minutes (within the 10 that keep the window), with the sensor at 57.0 C.
     entry: MockConfigEntry = rig.entry
     hass.config_entries.async_update_entry(
         entry, options={**entry.options, "sensor_tolerance": 1.4}
     )
     assert await hass.config_entries.async_unload(entry.entry_id)
-    freezer.tick(timedelta(hours=1))  # 03:00
+    freezer.tick(timedelta(minutes=5))  # 02:05
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     calibrator = rig.entry.runtime_data.calibrator
     assert calibrator.to_dict()["quiet_window"] is not None
+    await rig.tick(minutes=55)  # 03:00
     await rig.set(TANK, "55.9")  # 03:00
     await rig.tick(minutes=4 * 60)  # 07:00
     assert calibrator.quiet_estimates == []

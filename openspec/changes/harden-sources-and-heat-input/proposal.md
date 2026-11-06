@@ -23,7 +23,7 @@ waited until `improve-shower-end-detection` was archived (2026-11-06).
 ## What Changes
 
 - **Repair issues for sources that stay unavailable.** One repair issue per source entity that has been unavailable
-  or non-numeric for longer than its threshold. The issue names the entity, the tank and what the estimate loses
+  non-numeric or missing for longer than its threshold. The issue names the entity, the tank and what the estimate loses
   without it. It is removed on its own when the source is back. Thresholds:
   - water meter, energy counter, power and heating detector: 30 min;
   - tank sensor: 1 h;
@@ -62,13 +62,19 @@ None.
 
 - `tank-model`:
   - "A tank is charged at the end of a heating run": only a run of at least 15 minutes;
-  - "Sensor above the charged temperature raises it": it does not count heat outside a run twice;
+  - "Sensor above the charged temperature raises it": it does not count metered heat twice that raised T_avg without
+    a charge (heat outside a run, of short runs and of runs without a charged temperature);
   - new requirements for a short run's heat and for heat outside a run.
-- `draw-classification`: new requirements for a silent humidity sensor and for the detection backup.
+- `draw-classification`:
+  - "Shower detection is exposed": a shower started by the backup;
+  - new requirements for a silent humidity sensor and for the detection backup.
 - `calibration`:
-  - "Charge closure measures the error since the previous charge": the heat outside runs is stored with the sums
-    and enters the closure;
-  - "Calibration state persists": the open quiet window and the armed first drop;
+  - "Charge closure measures the error since the previous charge": only a run that charges; the heat outside runs
+    is stored with the sums and enters the closure;
+  - "Calibration state persists": the open quiet window and the armed first drop, closed at their last update after
+    a long downtime;
+  - "Loss learning from quiet windows": the settle time after heat outside a run;
+  - "Thermocline width from the first sensor drop": a run or heat outside a run before the drop cancels it;
   - a new requirement that an interval holding a short run is excluded.
 - `integration-setup`:
   - "Draw and heat defaults": the humidity silence time and the option to count heat outside heating runs;
@@ -101,7 +107,7 @@ None.
     cooling statistics;
   - a backtest of the October export: the 10.2-minute shower of 2026-10-10 counts as mixed, and the other results
     stay the same or are explained.
-- **Docs:** `README.md`, `docs/model.md`, `private/installation.md` and `openspec/backlog.md`.
+- **Docs:** `README.md`, `docs/model.md`, `docs/development.md`, `private/installation.md` and `openspec/backlog.md`.
 - **Live Home Assistant (the development installation), each step only with the user's authorization:**
   - deploy and restart. Verify:
     - the entry loads and the state is kept;

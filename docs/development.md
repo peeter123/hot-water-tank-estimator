@@ -118,6 +118,8 @@ core integrations:
   draw can still become a shower), rescheduled in `_finish` after every input and
   tick and cancelled in `async_stop`), the model and the calibrator. Entities
   read from it through a dispatcher signal. There is no coordinator, because nothing is polled.
+  - The repair issues and the feed of each humidity sensor's `last_reported` on the tick live in the runtime only;
+    the pure modules see just the times and values passed in.
   - A source state goes to the model with the state's `last_updated` as its time: the moment the reading was
     produced. `last_changed` only moves with the value.
   - After every input and tick, `Calibrator.observe` sees the model's events and learns. Changed options go back to
@@ -193,11 +195,12 @@ device per entry, so only the rules about devices appearing or disappearing at r
   stay under 500 kB (a test checks it): identical consecutive states are merged, 32-bit float noise is shortened,
   times are rounded to the millisecond, and `--thin` can thin a counter (the `week` fixture uses 20 s on the energy
   counter, keeping the rows around every heating change so each increase stays in its run).
-- `tests/fixtures/previous_release_model.txt` and `tests/fixtures/previous_release_calibration.txt` are copies of the
-  previous release's `model.py` and `calibration.py` (now at e74907f). A test loads each as a module and restores a
-  store saved now with its own `TankModel.from_dict` and `Calibrator.restore`, so a rollback is checked by running
-  the old code. Refresh them after a release, before the next change that adds store keys, and adapt it if
-  it stops importing against the current package.
+- `tests/fixtures/previous_release_model.txt` and `tests/fixtures/previous_release_calibration.txt` are copies of
+  `model.py` and `calibration.py` as deployed before the change `harden-sources-and-heat-input` (commit e74907f,
+  after the release v0.1.0 at be615fc). A test loads each as a module and restores a store saved now with its own
+  `TankModel.from_dict` and `Calibrator.restore`, so a rollback is checked by running the old code. A store saved now
+  also loads in v0.1.0. Refresh them after a release, before the next change that adds store keys, and adapt it if it
+  stops importing against the current package.
 - Home Assistant tests share `tests/common.py`: made-up source entity IDs, entry options, and a `Rig` that changes
   the sources and feeds the same inputs to a reference `TankModel` to compare the entities with. `TID251` (banned
   `tests` import) is ignored under `tests/` for these relative imports. A test with the recorder asks for

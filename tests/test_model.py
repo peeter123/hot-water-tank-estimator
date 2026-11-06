@@ -1587,7 +1587,7 @@ def test_heat_outside_a_run_reaches_the_charged_temperature() -> None:
 
 
 def test_counter_lag_after_a_run() -> None:
-    """A run ended 4 minutes ago and the counter rises by 0.2 kWh: T_avg stays, the closure gets it."""
+    """A run of 30 minutes (at least 15) ended 4 minutes ago and the counter rises by 0.2 kWh: T_avg stays, the closure gets it."""
     model = _outside_model()
     model.on_tank_sensor(T0, 55.0)
     model.on_heating(T0 + MINUTE, True)
@@ -1778,7 +1778,7 @@ def test_option_off() -> None:
 
 
 def _power_model(
-    t_avg: float = 45.0, t_ch: float = 55.0, **overrides: float
+    t_avg: float = 45.0, t_ch: float = 55.0, **overrides: float | bool
 ) -> TankModel:
     """A 285 L tank with a power sensor and a binary sensor (off), T_avg 45.0 C and T_ch 55.0 C."""
     model = make_model(
@@ -1864,6 +1864,29 @@ def test_power_past_the_lag_is_heat_outside_a_run() -> None:
     assert lag.change["counter_lag_kwh"] == pytest.approx(0.5)
     assert outside.change["energy_kwh"] == pytest.approx(0.25)
     assert model.t_avg - t_avg == pytest.approx(250 / (1.163 * 285))
+
+
+def test_power_lag_counts_with_the_option_off() -> None:
+    """The lag split does not depend on the option; only the part beyond the lag does."""
+    # A short run: the tail raises T_avg as run heat (250 Wh is 0.75 K).
+    short = _power_model(outside_heat=False)
+    end = _power_run(short, 5)
+    t_avg = short.t_avg
+    short.on_power(end + 5 * MINUTE, 3000.0)
+    assert short.t_avg - t_avg == pytest.approx(250 / (1.163 * 285))
+    # A charged run: the tail reaches the closure only.
+    charged = _power_model(outside_heat=False)
+    charged.on_tank_sensor(T0, 55.0)
+    end = _power_run(charged, 20)
+    t_avg = charged.t_avg
+    events = charged.on_power(end + 15 * MINUTE, 3000.0)
+    (lag,) = [e for e in events if e.kind == EventKind.HEAT]
+    assert lag.change["counter_lag_kwh"] == pytest.approx(0.5)
+    assert charged.t_avg == t_avg
+    # Power beyond the lag is still dropped.
+    assert charged.interval_sums.heat == 0.0
+    charged.on_power(end + HOUR, 3000.0)
+    assert charged.t_avg == t_avg
 
 
 def test_the_credit_covers_a_run_without_a_charged_temperature() -> None:

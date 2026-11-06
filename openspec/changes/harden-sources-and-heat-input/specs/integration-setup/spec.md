@@ -19,9 +19,9 @@ parameter, not a tuning value: its default applies until the first shower is lea
   - power threshold 100 W, and heat outside heating runs not counted.
 
 #### Scenario: Existing entry after the update
-- **WHEN** an entry created before the humidity silence time and the option to count heat outside heating runs existed
-  is loaded
-- **THEN** it uses their defaults, 2 h and off, and its other tuning values are unchanged
+- **WHEN** an entry created before the shower end time, the next shower time, the humidity silence time and the
+  option to count heat outside heating runs existed is loaded
+- **THEN** it uses their defaults, 5 min, 5 min, 2 h and off, and its other tuning values are unchanged
 
 ### Requirement: State survives a restart
 After a Home Assistant restart or an entry reload, each tank SHALL restore:
@@ -134,6 +134,14 @@ ambient. The issue SHALL name the tank and the entity and say what the estimate 
 #### Scenario: Silent humidity sensor
 - **WHEN** the only humidity sensor last reported 2 hours ago and the silence time is 2 hours
 - **THEN** a repair issue names the sensor and says that shower detection is on the fallback by draw length
+
+#### Scenario: Silence time above 2 hours
+- **WHEN** the humidity silence time is 3 hours and the only humidity sensor last reported 2.5 hours ago
+- **THEN** no repair issue is raised for it; one is raised once it has been silent for 3 hours
+
+#### Scenario: Silence check off
+- **WHEN** the humidity silence time is 0 and the humidity sensor has not reported for 5 hours, but stays available
+- **THEN** no repair issue is raised for it
 
 #### Scenario: Entry removed
 - **WHEN** a tank with an open repair issue is removed

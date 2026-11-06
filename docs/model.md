@@ -103,7 +103,8 @@ source holds the heating state instead of handing over at once, which would end 
 a wrong temperature. After 15 minutes unavailable, the next configured source decides until it returns.
 
 **Heat outside a run.** The option "Count heat outside heating runs" (`outside_heat`, default off) turns this on.
-Off, heat outside a run is dropped, because a total counter or power sensor that also measures space heating would
+Off, heat outside a run is dropped (power in the 10 minutes after a run end is the run's tail and counts whatever the
+option), because a total counter or power sensor that also measures space heating would
 push the estimate up; so with the option on, the counter and the power must measure only the heat for heating the
 tank, and a counter that also counts other heat (a heat pump's total counter) needs it off. With the option on and an
 energy counter, an increase of `dE` kWh while no run is active, and more than 10
@@ -115,11 +116,12 @@ so the interval goes on, and the rise is added to the interval's `heat` sum (K).
 above and only over the intervals whose reading is above the threshold, because standby readings would add up over a
 day (10 W for 20 hours is 0.2 kWh, 0.6 K on 285 L). The power since its last reading is counted before any other
 input changes the model (a sensor reading, a run start), so a power reading that comes late does not leave heat out
-of the credit below. Power above the threshold in the 10 minutes after a run end follows the counter lag: after a
-charged run it counts towards that run's `E_run` for the closure only, after a short run it raises `t_avg` as run
-heat, because a power sensor reports the end of a run late, as a counter does. A heat event outside a run clears the
-calibrator's first-drop state, as any run does, because the heat changes the layers the width estimate assumes. Only
-a heating-active binary sensor makes this reachable: with
+of the credit below. Power above the threshold in the 10 minutes after a run end follows the counter lag, whether or
+not the option is on: after a charged run it counts towards that run's `E_run` for the closure only, after a short run
+it raises `t_avg` as run heat, because a power sensor reports the end of a run late, as a counter does. Only the power
+beyond that lag is heat outside a run, and counts only with the option on. A heat event outside a run clears the
+calibrator's first-drop state, as any run does, because the heat changes the layers the width estimate assumes, and it
+sets the quiet-window settle time like a run end does. Only a heating-active binary sensor makes this reachable: with
 counter-only detection any increase starts a run, and with power-only detection power above the threshold is a run.
 Then the heat of cooling is a run, and a run of 15 minutes or more charges the tank. The evidence is from June, on the
 development installation: the counter rose 2.57 kWh in three hours on one day and 8.10 kWh between 06:00 and 13:00
@@ -352,7 +354,9 @@ mixed draw while a shower or bath is in progress, and an other draw otherwise.
   rise. A sensor that never reached the rise does not hold it. Shower rises are 13-40 points while other draws stay
   within 2. Being humid starts a shower (see "Shower lifecycle"); it does not keep one going.
 - **Shower lifecycle.** A shower is in progress from its start until the water stops, whatever started it. The
-  "Shower detected" binary sensor, the rolling flow and the shower report all follow that one state, not the humidity.
+  "Shower detected" binary sensor, the rolling flow and the shower report all follow that one state, not the
+  humidity. The binary sensor is on from any of the four start triggers below, the fallback while no humidity sensor
+  reports included.
 
   ```
                       bathroom becomes humid (rise edge)
@@ -595,7 +599,8 @@ sensor there are no closures, and `k` comes from quiet windows only.
   that wanders needs several updates to get anywhere. The button is an exception: it is the user's observation. The
   shower flow is the other: it is the median of recent showers, and one odd shower cannot move a median of ten.
 - **Loss from quiet windows.** A window is a stretch of at least 5 hours with no draw and no heating, in which the
-  tank sensor reads within `delta` of `t_ch`. A window opens no earlier than 1 hour after a run end, because the
+  tank sensor reads within `delta` of `t_ch`. A window opens no earlier than 1 hour after a run end (or after heat
+  outside a run), because the
   sensor still settles then (windows opened at the run end gave estimates about half of the others). Then
   `k = rate / (t_mean - t_ambient)`, with the sensor's fall in K/h, its time-weighted mean reading, and the
   time-weighted mean of the ambient temperature in use over the window. The last 10
@@ -605,15 +610,21 @@ sensor there are no closures, and `k` comes from quiet windows only.
 - **Width from the first drop.** When the sensor first falls below `t_ch - delta` after a charge, with heating off,
   the balance's cold fraction `f_e` is the cold fraction at the top of the thermocline, `h - w / 2`. So
   `w = 2 * (h - f_e)`. Each estimate is limited to the bounds, the width is the mean of the last 10, and it is
-  applied after 3.
+  applied after 3. A heating run (also a short one) or heat outside a run before that drop cancels the estimate until
+  the next charge.
 - **What survives a reload.** The store keeps the open quiet window (its start, first reading, reading in force and
   its time, the two integrals and the ambient in use) and the first-drop state (armed, seen hot, or done). So saving
   the options in the middle of a night does not lose the window: the first update after the reload integrates the
   held reading over the downtime, and the window still closes on the first draw or heating, which show up as events
-  when the sources report again. After a Home Assistant restart the tank sensor is often unavailable until its
-  integration has loaded, which closes the window at once, so the saved window mostly helps reloads. A fresh model
-  (the stored one was rejected) or a replaced tank sensor discards both, because the window's first reading and the
-  drop's state belong to the old charge and sensor. A store without these keys restores no window and no awaited drop.
+  when the sources report again. The long-downtime rule: when the first update after the restore comes more than 10
+  minutes after the calibrator's last update (saved as `observed`; a store without it skips the rule), the held
+  reading is not integrated over the downtime (a probe gave a loss estimate 17 % low after 1 hour and 38 % low after
+  3 hours): the window closes at its last update, still gives its estimate if it lasted 5 hours, and the awaited
+  first drop is cleared, with or without a window. After a Home Assistant restart the tank sensor is often
+  unavailable until its integration has loaded, so the saved window mostly helps reloads. A setup fit or a
+  recalibrate replaces the window and the drop. A fresh model (the stored one was rejected) or a replaced tank sensor
+  discards both, because the window's first reading and the drop's state belong to the old charge and sensor. A store
+  without these keys restores no window and no awaited drop.
 - **Usable fraction.** Only a person can tell that hot water ran out. The button "Hot water ran out" applies to the
   end of the last draw, not to the moment of the press, because the user leaves the shower or the tap first and a
   press up to 20 minutes later still means that draw. A draw session that is still running counts as ending now. The

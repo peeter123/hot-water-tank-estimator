@@ -436,7 +436,7 @@
     },
     "source_unavailable_bathroom_humidity": {
       "title": "Bathroom humidity sensor out: {tank}",
-      "description": "The bathroom humidity sensor {entity} of {tank} has been unavailable or silent for {threshold}. While no humidity sensor reports, shower detection falls back to the draw length."
+      "description": "The bathroom humidity sensor {entity} of {tank} has been unavailable for {threshold}, or has not reported for the humidity silence time. While no humidity sensor reports, shower detection falls back to the draw length."
     },
     "source_unavailable_flow_temperature": {
       "title": "Flow temperature sensor out: {tank}",

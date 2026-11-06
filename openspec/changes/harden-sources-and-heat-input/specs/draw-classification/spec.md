@@ -1,5 +1,21 @@
 # Spec Delta
 
+## MODIFIED Requirements
+
+### Requirement: Shower detection is exposed
+The integration SHALL expose a binary sensor that is on while a shower or bath is in progress: from its start, by
+humidity, by a draw in a still humid bathroom, by a draw while no humidity sensor reports, or by the long-draw rule,
+until it ends. It SHALL be off while the bathroom only still counts as humid. It SHALL be unavailable when neither
+humidity sensors nor the long-draw rule is configured.
+
+#### Scenario: Binary sensor follows detection
+- **WHEN** a shower is detected by humidity
+- **THEN** the shower detected binary sensor is on
+
+#### Scenario: Off after the water stops
+- **WHEN** the water of a detected shower stopped 5 minutes ago and the humidity still reads 80 %
+- **THEN** the shower detected binary sensor is off
+
 ## ADDED Requirements
 
 ### Requirement: A silent humidity sensor counts as unavailable

@@ -3,7 +3,8 @@
 ## MODIFIED Requirements
 
 ### Requirement: Charge closure measures the error since the previous charge
-When a heating run ends and an energy counter or power sensor is configured, the integration SHALL compute the
+When a heating run that charges the tank (at least 15 minutes, see tank-model) ends and an energy counter or power
+sensor is configured, the integration SHALL compute the
 true tank average at the start of the run as `T_charge - (E_run - S) * 1000 / (1.163 * V)`, plus the run's own
 mixed-draw drop, other-draw term (at the share in use) and loss term (at the loss coefficient in use), all in K. Here
 E_run is the run's energy in kWh and S the start-up energy in use. The charge error SHALL be the model's T_avg at the
@@ -35,7 +36,9 @@ The learned values, the stored intervals, the width estimates, the shower flow h
 "Hot water ran out" press, the calibration history, the open quiet window and whether a first sensor drop is
 awaited after a charge SHALL be saved per entry and restored after a restart or reload. The `recalibrate` action
 SHALL replace them with the new fit, except the usable fraction learned from the "Hot water ran out" button and its
-undo record, which a replay cannot learn.
+undo record, which a replay cannot learn. An open quiet window or an awaited first drop whose last update is more
+than 10 minutes before the first update after the restore SHALL be closed at that last update, without the time
+between.
 
 #### Scenario: Restart keeps the learned share
 - **WHEN** Home Assistant restarts after learning a share of 0.22
@@ -54,9 +57,53 @@ undo record, which a replay cannot learn.
 - **WHEN** the entry reloads after a charge and before the sensor first falls below `T_ch - tolerance`
 - **THEN** the first drop after the reload still adds a width estimate
 
+#### Scenario: Restart after a long downtime
+- **WHEN** a quiet window opened at 23:00 with the sensor at 57.0 C, its last update before a restart was at 04:00 with
+  the sensor at 56.3 C, and Home Assistant is back at 07:00 with the tank sensor unavailable
+- **THEN** the window closes at 04:00 and gives one estimate over its 5 hours, and the 3 hours of downtime are not in
+  it
+
 #### Scenario: Store from before the change
 - **WHEN** a store saved without the open quiet window and the first-drop state is loaded
 - **THEN** it loads with no open window and no awaited first drop, and the rest of the calibration is kept
+
+### Requirement: Loss learning from quiet windows
+After every window of at least 5 hours without a draw or heating, the integration SHALL estimate the loss
+coefficient from the tank sensor's fall, while the sensor still reads within the tolerance of T_ch. A window SHALL
+open no earlier than 1 hour after a run end or after heat outside a heating run (see tank-model), because the sensor
+still settles then. The estimate is
+`k = rate / (T_mean - T_ambient)`, where rate is the fall in K/h, T_mean the window's mean sensor reading and
+T_ambient the window's mean ambient temperature in use (see tank-model). From 3 estimates on, their mean SHALL be the
+loss coefficient in use and the one the closure fit holds. With fewer, the mean of the estimates so far SHALL be the
+loss coefficient in use while fewer than 5 intervals are stored, or always when no energy counter or power sensor is
+configured; otherwise the closure fit SHALL fit k as well.
+
+#### Scenario: Quiet night
+- **WHEN** the sensor falls from 57.0 to 55.9 C over 8 hours with no draw and no heating, with T_ambient 20 C
+- **THEN** the window's estimate is 0.1375 / 36.45 = 0.0038 per hour
+
+#### Scenario: Quiet night with an ambient sensor
+- **WHEN** the same window has an ambient sensor whose readings average 16.0 C over it
+- **THEN** the window's estimate is 0.1375 / 40.45 = 0.0034 per hour
+
+#### Scenario: Settle after heat outside a run
+- **WHEN** heat outside a heating run last raised T_avg at 13:00, and the tank is quiet from then on
+- **THEN** no quiet window opens before 14:00
+
+### Requirement: Thermocline width from the first sensor drop
+When the tank sensor first falls below `T_ch - tolerance` after a charge, while heating is not active, the
+integration SHALL estimate the width as `2 * (h - f_e)`. Here f_e is the cold fraction of the energy balance at that
+moment. A heating run (also a short one) or heat outside a heating run between the charge and that drop SHALL cancel
+the estimate until the next charge, because its heat changes the layers the estimate assumes. The learned width SHALL
+be the mean of the last 10 estimates, applied after at least 3.
+
+#### Scenario: Sensor starts to fall
+- **WHEN** h is 0.5 and the energy balance's cold fraction is 0.33 when the sensor first drops after a charge
+- **THEN** the estimate is 2 * (0.5 - 0.33) = 0.34
+
+#### Scenario: Short run before the first drop
+- **WHEN** a short heating run comes between a charge and the sensor's first drop
+- **THEN** that drop adds no width estimate
 
 ## ADDED Requirements
 

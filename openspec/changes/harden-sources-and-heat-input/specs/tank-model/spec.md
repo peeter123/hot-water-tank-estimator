@@ -42,8 +42,9 @@ the outputs do not fall when heat arrives.
 
 ### Requirement: A short heating run adds its heat without a charge
 A heating run shorter than 15 minutes SHALL NOT charge the tank: T_avg and T_ch SHALL keep their modelled values. Its
-heat SHALL raise T_avg as for any run, after the start-up energy, and counter increases in the 10 minutes after it
-ends SHALL raise T_avg the same way. A short run does not mix the tank, so there is no charged temperature to set.
+heat SHALL raise T_avg as for any run, after the start-up energy, and counter increases and heat power above the
+threshold in the 10 minutes after it ends SHALL raise T_avg the same way, whether or not heat outside heating runs is
+counted. A short run does not mix the tank, so there is no charged temperature to set.
 
 #### Scenario: Run cut off by a cooling demand
 - **WHEN** a 285 L tank holds T_avg 40.0 C and T_ch 55.0 C, a run of 6 minutes adds 1.5 kWh, and the start-up energy
@@ -72,7 +73,7 @@ heat SHALL be dropped.
 - **THEN** T_avg and T_ch are both 54.0 + 3.02 = 57.0 C
 
 #### Scenario: Counter lag after a run
-- **WHEN** a run ended 4 minutes ago and the counter rises by 0.2 kWh
+- **WHEN** a run of at least 15 minutes ended 4 minutes ago and the counter rises by 0.2 kWh
 - **THEN** T_avg does not change, and the 0.2 kWh counts towards that run's closure
 
 #### Scenario: Power below the threshold

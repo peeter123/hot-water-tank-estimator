@@ -72,6 +72,9 @@ MAX_UNAVAILABLE_FRACTION = 0.1  # of an interval, for any one source
 QUIET_WINDOW_HOURS = 5.0  # shortest window for a loss estimate
 QUIET_KEEP = 10  # loss estimates from quiet windows that are averaged
 QUIET_MIN_ESTIMATES = 3  # estimates whose mean is held as k by the closure fit
+RESTORE_GAP = timedelta(
+    minutes=10
+)  # a restored window older than this at the first observe closes
 QUIET_SETTLE_HOURS = (
     1.0  # a quiet window opens this long after a run end at the earliest
 )
@@ -541,6 +544,11 @@ class Calibrator:
     _last_run_end: datetime | None = field(default=None, repr=False)
     _window: _QuietWindow | None = field(default=None, repr=False)
     _drop: str | None = field(default=None, repr=False)
+    # Set by `restore`: the next `observe` checks the open window for a long downtime.
+    _restored: bool = field(default=False, repr=False)
+    _observed: datetime | None = field(
+        default=None, repr=False
+    )  # time of the last observe
 
     # ----- parameters ---------------------------------------------------------------------
 
@@ -708,6 +716,16 @@ class Calibrator:
             Whether `options` changed, so the caller applies them with `set_options`.
         """
         before = self.options
+        if self._restored:
+            self._restored = False
+            if self._observed is not None and now - self._observed > RESTORE_GAP:
+                # Down for longer than two ticks: the held reading says nothing about the
+                # downtime, so the window ends where it was last updated, and the awaited
+                # first drop (which belongs to the layers before the downtime) is cleared.
+                if self._window is not None:
+                    self._close_window(self._window)
+                    self._window = None
+                self._drop = None
         broke = False
         for event in events:
             broke = self._on_event(event) or broke
@@ -715,6 +733,7 @@ class Calibrator:
         self._track_quiet(model, now, broke=broke)
         self._track_drop(model)
         self._refresh_undo(model, now)
+        self._observed = now
         return self.options != before
 
     def flush(self) -> bool:
@@ -742,8 +761,10 @@ class Calibrator:
                 return True
             case EventKind.HEAT:
                 if change.get("outside_run"):
-                    # Heat outside a run changes the layers the width estimate assumes.
+                    # Heat outside a run changes the layers the width estimate assumes, and it
+                    # sets the quiet-window settle time as a run end does.
                     self._drop = None
+                    self._last_run_end = event.time
                 lag = change.get("counter_lag_kwh")
                 pending = self._pending
                 if (
@@ -1161,6 +1182,7 @@ class Calibrator:
             "undo": None if self.undo_record is None else self.undo_record.as_dict(),
             "quiet_window": None if self._window is None else self._window.as_dict(),
             "drop": self._drop,
+            "observed": None if self._observed is None else self._observed.isoformat(),
         }
 
     def restore(self, data: Mapping[str, Any]) -> None:
@@ -1197,6 +1219,14 @@ class Calibrator:
                 self._window = None
             drop = data.get("drop")
             self._drop = drop if drop in ("armed", "hot", "done") else None
+            observed = data.get("observed")
+            try:
+                self._observed = (
+                    None if observed is None else datetime.fromisoformat(observed)
+                )
+            except TypeError, ValueError:
+                self._observed = None
+            self._restored = True
         except (KeyError, TypeError, AttributeError) as err:
             raise ValueError(f"Invalid calibration state: {err}") from err
 

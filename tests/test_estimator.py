@@ -18,6 +18,7 @@ from .common import (
     ATTRIBUTES,
     ENERGY,
     FLOW,
+    FULL_OPTIONS,
     HEATING,
     HUMIDITY,
     METER,
@@ -485,6 +486,26 @@ async def test_silent_humidity_sensor(hass: HomeAssistant, freezer) -> None:
     }
     assert "draw length" in _issue_text("source_unavailable_bathroom_humidity")
     await rig.set(HUMIDITY, "56.0")  # a new report ends the silence at once
+    assert _issue(hass, rig, HUMIDITY) is None
+
+
+async def test_silence_time_above_two_hours(hass: HomeAssistant, freezer) -> None:
+    """Integration-setup scenario "Silence time above 2 hours": the issue comes at 3 hours, not 2.5."""
+    rig = await Rig.start(
+        hass, freezer, options={**FULL_OPTIONS, "humidity_silence": 3.0}
+    )
+    await rig.tick(minutes=150)  # last report 2.5 hours ago
+    assert _issue(hass, rig, HUMIDITY) is None
+    await rig.tick(minutes=30)  # 3 hours
+    assert _issue(hass, rig, HUMIDITY) is not None
+
+
+async def test_silence_check_off(hass: HomeAssistant, freezer) -> None:
+    """Integration-setup scenario "Silence check off": silence time 0, no report for 5 hours, no issue."""
+    rig = await Rig.start(
+        hass, freezer, options={**FULL_OPTIONS, "humidity_silence": 0.0}
+    )
+    await rig.tick(minutes=300)
     assert _issue(hass, rig, HUMIDITY) is None
 
 

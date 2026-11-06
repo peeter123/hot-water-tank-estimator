@@ -833,6 +833,104 @@ def test_sensor_starts_to_fall() -> None:
     assert rig.cal.values == {}
 
 
+def _long_window(hours: int = 5) -> tuple[Rig, datetime]:
+    """A window open since T0 (sensor 57.0 C) with its last update `hours` later (sensor 56.3 C)."""
+    rig = quiet_rig()
+    for hour in range(1, hours + 1):
+        rig.call(T0 + hour * HOUR, "on_tank_sensor", 57.0 - 0.7 * hour / hours)
+    return rig, T0 + hours * HOUR
+
+
+def test_restart_after_a_long_downtime() -> None:
+    """A window of 5 hours, down for 3 hours with the sensor unavailable: it closes at its last update."""
+    rig, saved_at = _long_window()
+    data = json.loads(json.dumps(rig.cal.to_dict()))
+    data["drop"] = "armed"
+    restored = Calibrator(rig.cal.base)
+    restored.restore(data)
+    assert data["observed"] == saved_at.isoformat()
+    rig.model.on_tank_sensor(saved_at + 3 * HOUR, None)
+    restored.observe(rig.model, [], saved_at + 3 * HOUR)
+    (estimate,) = restored.quiet_estimates
+    # Over the 5 hours alone: 0.14 K/h / (56.65 - 20) K = 0.0038 per hour.
+    assert estimate == pytest.approx(0.0038, abs=0.0001)
+    assert restored._window is None  # noqa: SLF001
+    assert restored._drop is None  # noqa: SLF001
+
+
+def test_a_short_gap_after_a_restore_still_integrates() -> None:
+    """A gap of 1 minute keeps the window and the drop, and the held reading counts over it."""
+    rig, saved_at = _long_window()
+    data = json.loads(json.dumps(rig.cal.to_dict()))
+    data["drop"] = "armed"
+    restored = Calibrator(rig.cal.base)
+    restored.restore(data)
+    restored.observe(rig.model, [], saved_at + MINUTE)
+    assert restored.quiet_estimates == []
+    assert restored._window is not None  # noqa: SLF001
+    assert restored._window.since == saved_at + MINUTE  # noqa: SLF001
+    assert restored._window.start == T0  # noqa: SLF001
+    assert restored._drop in ("armed", "hot")  # noqa: SLF001
+
+
+def test_an_armed_drop_without_a_window_follows_the_same_gap_rule() -> None:
+    """A drop awaited in the settle hour after a charge is cleared after 3 hours and kept after 1 minute."""
+    rig = Rig()
+    end = rig.run(T0 + HOUR, 60, 3.0, 57.0)
+    assert rig.cal._window is None  # noqa: SLF001
+    assert rig.cal._drop == "armed"  # noqa: SLF001
+    data = json.loads(json.dumps(rig.cal.to_dict()))
+    assert data["observed"] is not None
+    for gap, kept in ((MINUTE, True), (3 * HOUR, False)):
+        restored = Calibrator(rig.cal.base)
+        restored.restore(data)
+        restored.observe(rig.model, [], end + gap)
+        assert (restored._drop == "armed") is kept  # noqa: SLF001
+    # A store without the key never applies the rule.
+    del data["observed"]
+    restored = Calibrator(rig.cal.base)
+    restored.restore(data)
+    restored.observe(rig.model, [], end + 3 * HOUR)
+    assert restored._drop == "armed"  # noqa: SLF001
+
+
+def test_only_the_first_observe_after_a_restore_checks_the_gap() -> None:
+    """Later quiet gaps are ordinary ticks: they do not close the window."""
+    rig, saved_at = _long_window()
+    restored = Calibrator(rig.cal.base)
+    restored.restore(json.loads(json.dumps(rig.cal.to_dict())))
+    restored.observe(rig.model, [], saved_at + MINUTE)
+    restored.observe(rig.model, [], saved_at + HOUR)
+    assert restored._window is not None  # noqa: SLF001
+
+
+def test_a_quiet_window_does_not_open_within_an_hour_after_heat_outside_a_run() -> None:
+    """Heat outside a run at 13:00 sets the settle time: no window opens before 14:00."""
+    rig = Rig(sensor_tolerance=1.5, outside_heat=True)
+    rig.call(T0, "on_tank_sensor", 57.0)
+    rig.kwh += 0.05
+    rig.call(T0 + HOUR, "on_energy", rig.kwh)
+    assert any(e.change.get("outside_run") for e in rig.model.events)
+    rig.call(T0 + HOUR + 30 * MINUTE, "on_tank_sensor", 57.0)
+    assert rig.cal._window is None  # noqa: SLF001
+    rig.call(T0 + 2 * HOUR, "on_tank_sensor", 57.0)
+    assert rig.cal._window is not None  # noqa: SLF001
+    assert rig.cal._window.start == T0 + 2 * HOUR  # noqa: SLF001
+
+
+def test_a_short_run_before_the_first_drop_adds_no_width_estimate() -> None:
+    """A short run between the charge and the first sensor drop cancels the estimate."""
+    rig = Rig(loss_coefficient=0.0, cold_mean=10.0)
+    rig.call(T0, "on_tank_sensor", 57.0)
+    end = rig.run(T0 + HOUR, 60, 3.0, 57.0)
+    rig.call(end + MINUTE, "on_tank_sensor", 57.0)
+    assert rig.cal._drop in ("armed", "hot")  # noqa: SLF001
+    rig.run(end + 10 * MINUTE, 6, 0.1, 57.0)
+    assert rig.cal._drop is None  # noqa: SLF001
+    rig.call(end + 2 * HOUR, "on_tank_sensor", 54.0)
+    assert rig.cal.width_estimates == []
+
+
 def test_width_is_applied_after_three_estimates_within_bounds() -> None:
     """Three estimates give their mean, within the bounds and one step at most."""
     cal = Calibrator(make_options())
@@ -1765,7 +1863,7 @@ def test_a_calibration_saved_now_loads_in_the_previous_release(
 def test_a_calibration_with_an_open_window_and_an_armed_drop_loads_in_the_previous_release(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A rollback: the previous release's restore ignores `quiet_window` and `drop`."""
+    """A rollback: the previous release's restore ignores `quiet_window`, `drop` and `observed`."""
     previous = _previous_release_calibration(monkeypatch)
     rig, _end = heat_rig()
     assert rig.cal._drop == "armed"  # noqa: SLF001
@@ -1774,6 +1872,7 @@ def test_a_calibration_with_an_open_window_and_an_armed_drop_loads_in_the_previo
     data = json.loads(json.dumps(rig.cal.to_dict()))
     assert data["quiet_window"]["first"] == 57.0
     assert data["drop"] == "armed"
+    assert data["observed"] is not None
     old = previous(rig.cal.base)
     old.restore(data)
     assert len(old.closures) == len(rig.cal.closures)

@@ -45,8 +45,8 @@ See proposal.md, Why. The parts this change touches work as follows today.
   means them to: the shower of 2026-10-10.
 
 **Non-Goals:**
-- No change to the detector order, the detector hold, the counter lag, the 10 % unavailable exclusion or the ambient
-  fallback.
+- No change to the detector order, the detector hold, the counter lag of a charged run, the 10 % unavailable
+  exclusion or the ambient fallback.
 - No new entity. The backup and the silence show in the diagnostics and the repair issues.
 
 ## Decisions
@@ -111,11 +111,15 @@ above the power threshold. The threshold already separates heating from standby 
 day: 10 W of noise for 20 h is 0.2 kWh, 0.6 K on 285 L. When the power decides the runs, power above the threshold is
 a run, so this applies only with a heating-active binary sensor. Power above the threshold in the 10 minutes after a
 run end follows the counter lag (settled in the group 3 review, 2026-11-06): after a charged run it counts towards
-that run's `E_run` for the closure only, after a short run it raises T_avg as run heat. A power sensor reports the end
+that run's `E_run` for the closure only, after a short run it raises T_avg as run heat. The power lag applies whether
+or not the option is on, as the counter lag does (settled in the whole-change review, 2026-11-06): it is the run's
+heat, not heat outside a run. A power sensor reports the end
 of a run late, as a counter does, and that tail is the run's heat, not heat of the next interval.
 
 **First-drop state.** A heat event outside a run clears the calibrator's first-drop state, as any run does (D1): the
-heat changes the layers the width estimate assumes (settled in the group 3 review, 2026-11-06).
+heat changes the layers the width estimate assumes (settled in the group 3 review, 2026-11-06). It also sets the
+quiet-window settle time of 1 hour, as a run end does, because the tank settles after it as after a run (settled in
+the whole-change review, 2026-11-06).
 
 The closure equation becomes:
 
@@ -176,6 +180,14 @@ Settled in the group 4 review (2026-11-06):
   restored window at once (with an estimate if it lasted 5 hours). So the saved window mostly helps reloads, such as an
   options save; `docs/model.md` says so.
 - A setup fit or `recalibrate` replaces both with the replay's, as the spec says for the calibration state.
+- Settled in the whole-change review (2026-11-06): a restored window or awaited first drop whose last update is more
+  than 10 minutes (two ticks) before the first `observe` after the restore is closed at its saved time, without the
+  downtime. The tank sensor is usually unavailable at a restart, so integrating the held reading over a long downtime
+  would put hours without the fall into the window: a probe gave a loss estimate 17 % low after 1 hour and 38 % low
+  after 3 hours. A closed window still gives its estimate if it lasted 5 hours before the downtime; the drop is
+  cleared. A reload (an options save) takes seconds and keeps both. The calibrator saves the time of its last
+  `observe` (`observed`, a new store key, default none: then the rule does not apply), because an awaited drop can be
+  open without a window, in the settle hour after a charge.
 
 `restore` reads both with `.get`, so a store without them restores no window and no armed drop, as today. After a
 restart the first `observe` integrates the held value over the downtime. Draws or heating during the downtime show up
@@ -284,7 +296,9 @@ Added:
   applies the lag to T_avg);
 - `heat` in the interval sums, the run snapshot and the increase sums;
 - `heat_uncredited`;
-- the humidity reports.
+- the humidity reports;
+- `tank_temperature` in the store's `entities` (D5);
+- `observed` in the calibration state (D5).
 
 The new calibrator keys are `quiet_window`, `drop` and `heat` in each closure. All are read with defaults (0, None,
 empty). The previous release reads the keys it knows and ignores the rest: `IntervalSums.from_dict`,
@@ -331,7 +345,8 @@ The outputs go to `private/analysis/` and the summary to `private/installation.m
 
 ## Migration Plan
 
-- No option migration. The humidity silence time takes its default for existing entries.
+- No option migration. The humidity silence time (2 h) and "Count heat outside heating runs" (off) take their
+  defaults for existing entries.
 - Deploy and restart on the development installation once the code groups have passed review, with the user's
   authorization. Rollback: deploy the previous commit and restart. The stores load in both directions (D10), and
   the repair issues are not persistent, so they go with the restart.
