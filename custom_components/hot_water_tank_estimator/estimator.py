@@ -305,6 +305,7 @@ class TankEstimator:
         if not self.model_restored:
             # A fresh model (T_avg from the sensor) cannot take back a drop D of the old one.
             self.calibrator.undo_record = None
+            self.calibrator.forget_windows()
         else:
             # A replaced counter or meter entity starts a new baseline.
             current = self._baseline_entities()
@@ -313,6 +314,10 @@ class TankEstimator:
                     role
                 ):
                     self.model.forget_reading(source)
+        # The window's first reading and the drop's hot state came from the stored tank sensor.
+        stored_tank = stored_entities.get(TANK_TEMPERATURE)
+        if stored_tank is not None and stored_tank != self._tank_entity():
+            self.calibrator.forget_windows()
 
     # ----- start and stop -----------------------------------------------------------------
 
@@ -353,6 +358,13 @@ class TankEstimator:
             for role in roles
             if role in _BASELINES
         }
+
+    def _tank_entity(self) -> str | None:
+        """Return the configured tank sensor entity, None when there is none."""
+        return next(
+            (e for e, roles in self.config.routes.items() if TANK_TEMPERATURE in roles),
+            None,
+        )
 
     def _ambient_entity(self) -> str | None:
         """Return the configured ambient sensor entity, None when there is none."""
@@ -533,7 +545,14 @@ class TankEstimator:
         """Return what the store keeps: the model, the calibration, the locks and the fit flag."""
         return {
             "model": self.model.to_dict(),
-            "entities": self._baseline_entities(),
+            "entities": {
+                **self._baseline_entities(),
+                **(
+                    {TANK_TEMPERATURE: tank}
+                    if (tank := self._tank_entity()) is not None
+                    else {}
+                ),
+            },
             "calibrator": self.calibrator.to_dict(),
             "locks": sorted(self.calibrator.locks),
             "fit_done": self._fit_done,

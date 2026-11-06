@@ -36,6 +36,7 @@ from custom_components.hot_water_tank_estimator.estimator import TankConfig, _To
 from custom_components.hot_water_tank_estimator.history import async_read_history
 from custom_components.hot_water_tank_estimator.model import EventKind
 from custom_components.hot_water_tank_estimator.setup_fit import (
+    TANK_TEMPERATURE,
     History,
     history_from_fixture,
     setup_fit,
@@ -49,6 +50,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 
 from .common import (
+    ATTRIBUTES,
     ENERGY,
     FULL_OPTIONS,
     HEATING,
@@ -1060,3 +1062,140 @@ async def test_a_discarded_model_drops_the_undo_record(
     assert not rig.entry.runtime_data.model_restored
     assert rig.entry.runtime_data.calibrator.undo_record is None
     assert undo_state(rig) == "unavailable"
+
+
+async def test_options_saved_during_a_quiet_night(hass: HomeAssistant, freezer) -> None:
+    """A window opened at 23:00 at 57.0 C survives a save at 02:00 and closes at 07:00 at 55.9 C."""
+    rig = await Rig.start(hass, freezer, states={TANK: "57.0"})
+    await rig.tick(minutes=13 * 60)  # 23:00
+    # The rig's window opened at the start (10:00). A 1 L draw closes it and opens the scenario's
+    # window at 23:00.
+    await rig.set(METER, "100.001")
+    window = rig.entry.runtime_data.calibrator.to_dict()["quiet_window"]
+    assert window is not None
+    assert window["start"] == "2026-10-15T23:00:00+00:00"
+    await rig.tick(minutes=3 * 60)  # 02:00
+    # The options are saved (the value is harmless: the save and the reload are what matter) and
+    # the entry is down for an hour, with the sensor still at 57.0 C.
+    entry: MockConfigEntry = rig.entry
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, "sensor_tolerance": 1.4}
+    )
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    freezer.tick(timedelta(hours=1))  # 03:00
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    calibrator = rig.entry.runtime_data.calibrator
+    assert calibrator.to_dict()["quiet_window"] is not None
+    await rig.set(TANK, "55.9")  # 03:00
+    await rig.tick(minutes=4 * 60)  # 07:00
+    assert calibrator.quiet_estimates == []
+    await rig.set(METER, "100.002")  # a draw ends the window
+    assert len(calibrator.quiet_estimates) == 1
+    assert calibrator.quiet_estimates[0] == pytest.approx(0.1375 / 36.45, rel=1e-3)
+
+
+async def test_reload_before_the_first_sensor_drop(
+    hass: HomeAssistant, freezer
+) -> None:
+    """A reload after a charge and before the sensor falls keeps the awaited first drop."""
+    rig = await Rig.start(hass, freezer)
+    kwh = await run_heating(rig, 10.0)
+    await rig.tick(11)
+    await run_heating(rig, kwh)
+    await rig.tick(11)
+    assert rig.entry.runtime_data.calibrator.to_dict()["drop"] in ("armed", "hot")
+    assert rig.entry.runtime_data.calibrator.width_estimates == []
+    assert await hass.config_entries.async_reload(rig.entry.entry_id)
+    await hass.async_block_till_done()
+    calibrator = rig.entry.runtime_data.calibrator
+    assert calibrator.to_dict()["drop"] in ("armed", "hot")
+    await rig.set(TANK, "50.0", after=60)
+    assert len(calibrator.width_estimates) == 1
+
+
+async def two_runs_then_unload(hass: HomeAssistant, rig: Rig, hass_storage) -> dict:
+    """Charge twice so the first drop is awaited, unload the entry and return its store data."""
+    kwh = await run_heating(rig, 10.0)
+    await rig.tick(11)
+    await run_heating(rig, kwh)
+    await rig.tick(11)
+    await rig.tick(65)  # past the hour after a run end in which no quiet window opens
+    calibrator = rig.entry.runtime_data.calibrator
+    assert calibrator.to_dict()["drop"] in ("armed", "hot")
+    assert calibrator.to_dict()["quiet_window"] is not None
+    assert await hass.config_entries.async_unload(rig.entry.entry_id)
+    saved = hass_storage[f"{DOMAIN}.{rig.entry.entry_id}"]["data"]
+    assert saved["calibrator"]["quiet_window"] is not None
+    return saved
+
+
+async def test_a_store_from_before_the_change_has_no_window_and_no_drop(
+    hass: HomeAssistant, freezer, hass_storage
+) -> None:
+    """A store without the two keys loads with no open window and no awaited drop; the rest is kept."""
+    rig = await Rig.start(hass, freezer)
+    rig.entry.runtime_data.calibrator.values["other_hot_share"] = 0.22
+    rig.entry.runtime_data.calibrator.sources["other_hot_share"] = "learned"
+    saved = (await two_runs_then_unload(hass, rig, hass_storage))["calibrator"]
+    del saved["quiet_window"]
+    del saved["drop"]
+    freezer.tick(timedelta(hours=1))
+    setup_time = dt_util.utcnow()
+    assert await hass.config_entries.async_setup(rig.entry.entry_id)
+    await hass.async_block_till_done()
+    restored = rig.entry.runtime_data.calibrator
+    assert restored.values["other_hot_share"] == 0.22
+    assert restored._drop is None  # noqa: SLF001
+    # The window open now is the one the setup opened, not a restored one.
+    assert restored._window is not None  # noqa: SLF001
+    assert restored._window.start == setup_time  # noqa: SLF001
+
+
+async def test_a_discarded_model_drops_the_windows(
+    hass: HomeAssistant, freezer, hass_storage
+) -> None:
+    """When the stored model is unusable, the restored window and awaited drop go with it."""
+    rig = await Rig.start(hass, freezer)
+    saved = await two_runs_then_unload(hass, rig, hass_storage)
+    saved["model"] = {"broken": True}
+    freezer.tick(timedelta(hours=1))
+    setup_time = dt_util.utcnow()
+    assert await hass.config_entries.async_setup(rig.entry.entry_id)
+    await hass.async_block_till_done()
+    restored = rig.entry.runtime_data
+    assert not restored.model_restored
+    assert restored.calibrator._drop is None  # noqa: SLF001
+    assert restored.calibrator._window.start == setup_time  # noqa: SLF001
+
+
+async def test_a_replaced_tank_sensor_drops_the_windows(
+    hass: HomeAssistant, freezer, hass_storage
+) -> None:
+    """A window and a drop from the old tank sensor are not carried over to the new one."""
+    rig = await Rig.start(hass, freezer)
+    saved = await two_runs_then_unload(hass, rig, hass_storage)
+    assert saved["entities"][TANK_TEMPERATURE] == TANK
+    hass.states.async_set("sensor.cellar_tank", "57.0", ATTRIBUTES[TANK])
+    hass.config_entries.async_update_entry(
+        rig.entry, options={**rig.entry.options, CONF_TANK_SENSOR: "sensor.cellar_tank"}
+    )
+    freezer.tick(timedelta(hours=1))
+    setup_time = dt_util.utcnow()
+    assert await hass.config_entries.async_setup(rig.entry.entry_id)
+    await hass.async_block_till_done()
+    calibrator = rig.entry.runtime_data.calibrator
+    assert calibrator._drop is None  # noqa: SLF001
+    assert calibrator._window.start == setup_time  # noqa: SLF001
+
+
+async def test_a_store_without_the_tank_sensor_entity_keeps_the_drop(
+    hass: HomeAssistant, freezer, hass_storage
+) -> None:
+    """A store from before the change has no tank sensor entity: the drop is kept."""
+    rig = await Rig.start(hass, freezer)
+    saved = await two_runs_then_unload(hass, rig, hass_storage)
+    del saved["entities"][TANK_TEMPERATURE]
+    assert await hass.config_entries.async_setup(rig.entry.entry_id)
+    await hass.async_block_till_done()
+    assert rig.entry.runtime_data.calibrator.to_dict()["drop"] in ("armed", "hot")

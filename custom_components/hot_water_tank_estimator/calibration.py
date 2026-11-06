@@ -475,6 +475,31 @@ class _QuietWindow:
     ambient: float = 0.0  # ambient temperature in use in C, since `since`
     ambient_integral: float = 0.0  # C*s of the ambient in use before `since`
 
+    def as_dict(self) -> dict[str, Any]:
+        """Return the window as a JSON-compatible dict."""
+        return {
+            "start": self.start.isoformat(),
+            "first": self.first,
+            "value": self.value,
+            "since": self.since.isoformat(),
+            "integral": self.integral,
+            "ambient": self.ambient,
+            "ambient_integral": self.ambient_integral,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> _QuietWindow:
+        """Return the window saved by `as_dict`."""
+        return cls(
+            start=datetime.fromisoformat(data["start"]),
+            first=float(data["first"]),
+            value=float(data["value"]),
+            since=datetime.fromisoformat(data["since"]),
+            integral=float(data["integral"]),
+            ambient=float(data["ambient"]),
+            ambient_integral=float(data["ambient_integral"]),
+        )
+
 
 @dataclass
 class Calibrator:
@@ -1114,6 +1139,11 @@ class Calibrator:
 
     # ----- persistence --------------------------------------------------------------------
 
+    def forget_windows(self) -> None:
+        """Discard the open quiet window and the awaited first drop (their baselines are gone)."""
+        self._window = None
+        self._drop = None
+
     def to_dict(self) -> dict[str, Any]:
         """Return the learned values and stored intervals as a JSON-compatible dict."""
         return {
@@ -1129,6 +1159,8 @@ class Calibrator:
                 None if self._last_run_end is None else self._last_run_end.isoformat()
             ),
             "undo": None if self.undo_record is None else self.undo_record.as_dict(),
+            "quiet_window": None if self._window is None else self._window.as_dict(),
+            "drop": self._drop,
         }
 
     def restore(self, data: Mapping[str, Any]) -> None:
@@ -1155,6 +1187,16 @@ class Calibrator:
             )
             undo = data.get("undo")
             self.undo_record = None if undo is None else UndoRecord.from_dict(undo)
+            try:
+                window = data.get("quiet_window")
+                self._window = (
+                    None if window is None else _QuietWindow.from_dict(window)
+                )
+            except KeyError, TypeError, ValueError:
+                # A damaged window costs only the window, not the calibration.
+                self._window = None
+            drop = data.get("drop")
+            self._drop = drop if drop in ("armed", "hot", "done") else None
         except (KeyError, TypeError, AttributeError) as err:
             raise ValueError(f"Invalid calibration state: {err}") from err
 

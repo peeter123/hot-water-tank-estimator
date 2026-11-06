@@ -18,6 +18,7 @@ from custom_components.hot_water_tank_estimator.calibration import (
     Closure,
     PressResult,
     UndoResult,
+    _QuietWindow,
     bounded_step,
     charge_error,
     fit_closures,
@@ -1759,3 +1760,41 @@ def test_a_calibration_saved_now_loads_in_the_previous_release(
     assert old.closures[-1].t_charge == pytest.approx(closure.t_charge)
     assert old.closures[-1].status == CLOSURE
     assert old.sample_count == rig.cal.sample_count
+
+
+def test_a_calibration_with_an_open_window_and_an_armed_drop_loads_in_the_previous_release(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rollback: the previous release's restore ignores `quiet_window` and `drop`."""
+    previous = _previous_release_calibration(monkeypatch)
+    rig, _end = heat_rig()
+    assert rig.cal._drop == "armed"  # noqa: SLF001
+    start = datetime(2026, 10, 15, 23, 0, tzinfo=UTC)
+    rig.cal._window = _QuietWindow(start, 57.0, 57.0, start)  # noqa: SLF001
+    data = json.loads(json.dumps(rig.cal.to_dict()))
+    assert data["quiet_window"]["first"] == 57.0
+    assert data["drop"] == "armed"
+    old = previous(rig.cal.base)
+    old.restore(data)
+    assert len(old.closures) == len(rig.cal.closures)
+    assert old.sample_count == rig.cal.sample_count
+    # And the other direction: the current restore reads it back.
+    new = Calibrator(rig.cal.base)
+    new.restore(data)
+    assert new._window == rig.cal._window  # noqa: SLF001
+    assert new._drop == "armed"  # noqa: SLF001
+
+
+def test_a_malformed_quiet_window_is_ignored_and_the_rest_is_kept() -> None:
+    """A damaged window restores as no window; the calibration is not discarded."""
+    cal = Calibrator(ModelOptions(volume=285.0))
+    cal.values["other_hot_share"] = 0.22
+    cal.sources["other_hot_share"] = "learned"
+    data = cal.to_dict()
+    data["quiet_window"] = {"start": "not a date", "first": 57.0}
+    data["drop"] = "armed"
+    restored = Calibrator(ModelOptions(volume=285.0))
+    restored.restore(data)
+    assert restored._window is None  # noqa: SLF001
+    assert restored._drop == "armed"  # noqa: SLF001
+    assert restored.values["other_hot_share"] == 0.22

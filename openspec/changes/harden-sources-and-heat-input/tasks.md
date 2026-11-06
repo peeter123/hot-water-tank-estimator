@@ -122,13 +122,13 @@ Applies to every group:
 
 ## 4. Calibrator windows
 
-- [ ] 4.1 Save the open quiet window and the first-drop state with the calibration state, and restore them with
+- [x] 4.1 Save the open quiet window and the first-drop state with the calibration state, and restore them with
   defaults (design D5). Verify:
   - tests for the calibration scenarios "Options saved during a quiet night", "Reload before the first sensor drop"
     and "Store from before the change", through a reload of the entry in the runtime;
   - a test that a calibration saved by this change loads in a copy of the previous release's `Calibrator.restore`;
   - `python scripts/lint.py`.
-- [ ] 4.2 Update `docs/model.md` ("Learning") on what survives a reload. Remove the item "Persist the calibrator's
+- [x] 4.2 Update `docs/model.md` ("Learning") on what survives a reload. Remove the item "Persist the calibrator's
   open windows" wherever the docs still name it as open. Verify: `python scripts/lint.py`.
 
 ## 5. Humidity silence and the detection backup

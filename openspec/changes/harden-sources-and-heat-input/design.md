@@ -166,6 +166,17 @@ would hide unmetered heat that comes at the same time.
   ambient in use; None without one;
 - `drop`: the first-drop state, None, `armed`, `hot` or `done`.
 
+Settled in the group 4 review (2026-11-06):
+- A fresh model (the stored model was rejected) discards the restored window and drop, as it discards the undo
+  record: both belong to the old model's charge and baselines.
+- A changed tank sensor entity (Reconfigure) discards both, because the window's first reading and the drop's hot
+  state came from the other sensor. The store's `entities` keeps the tank sensor's entity for this (a store without it
+  keeps both).
+- On a Home Assistant restart the tank sensor is often unavailable until its integration has loaded, which closes the
+  restored window at once (with an estimate if it lasted 5 hours). So the saved window mostly helps reloads, such as an
+  options save; `docs/model.md` says so.
+- A setup fit or `recalibrate` replaces both with the replay's, as the spec says for the calibration state.
+
 `restore` reads both with `.get`, so a store without them restores no window and no armed drop, as today. After a
 restart the first `observe` integrates the held value over the downtime. Draws or heating during the downtime show up
 as events when the sources report again, and they close the window. The estimate then still needs 5 hours of window.

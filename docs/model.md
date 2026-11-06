@@ -576,6 +576,14 @@ sensor there are no closures, and `k` comes from quiet windows only.
   the balance's cold fraction `f_e` is the cold fraction at the top of the thermocline, `h - w / 2`. So
   `w = 2 * (h - f_e)`. Each estimate is limited to the bounds, the width is the mean of the last 10, and it is
   applied after 3.
+- **What survives a reload.** The store keeps the open quiet window (its start, first reading, reading in force and
+  its time, the two integrals and the ambient in use) and the first-drop state (armed, seen hot, or done). So saving
+  the options in the middle of a night does not lose the window: the first update after the reload integrates the
+  held reading over the downtime, and the window still closes on the first draw or heating, which show up as events
+  when the sources report again. After a Home Assistant restart the tank sensor is often unavailable until its
+  integration has loaded, which closes the window at once, so the saved window mostly helps reloads. A fresh model
+  (the stored one was rejected) or a replaced tank sensor discards both, because the window's first reading and the
+  drop's state belong to the old charge and sensor. A store without these keys restores no window and no awaited drop.
 - **Usable fraction.** Only a person can tell that hot water ran out. The button "Hot water ran out" applies to the
   end of the last draw, not to the moment of the press, because the user leaves the shower or the tap first and a
   press up to 20 minutes later still means that draw. A draw session that is still running counts as ending now. The
