@@ -24,19 +24,19 @@ Applies to every group:
 
 ## 1. Baseline and backlog
 
-- [ ] 1.1 Export the November history of the development installation from 2026-11-01 to the day of the export,
+- [x] 1.1 Export the November history of the development installation from 2026-11-01 to the day of the export,
   with every role of `private/history/2026-11-01_2026-11-05/`, into `private/history/2026-11-01_<to>/` using
   `scripts/history.py`. This reads the recorder only. Run `private/analysis/harden_sources_evidence.py` and
   `private/analysis/silence_gaps.py` on it. Record in `private/installation.md` the runs, the counter increases
   outside runs, the humidity gaps of at least 2 h (settle whether the exploration's third silence exists) and the
   outages. Verify: the export has one file per role covering the window, and the summary is in
   `private/installation.md` with the date.
-- [ ] 1.2 Run `scripts/backtest.py` at this group's commit (before any code change of this change) on the October
+- [x] 1.2 Run `scripts/backtest.py` at this group's commit (before any code change of this change) on the October
   export and on the export of 1.1. Save both outputs in `private/analysis/` as the baseline. Record in
   `private/installation.md` the shower of 2026-10-10 17:54-18:05 UTC (counted as other draws), the charge error of
   the closure after it, and the mean and worst charge errors. Verify: both output files exist, and the summary is in
   `private/installation.md` with the date.
-- [ ] 1.3 Update `openspec/backlog.md`:
+- [x] 1.3 Update `openspec/backlog.md`:
   - remove the item `harden-sources-and-heat-input` (it is this change);
   - add a carried-over live check: heat outside a run in the cooling season, and the check before that season that
     the heat pump's DHW counter during cooling matches the heat that reaches the tank (proposal, Out of scope).

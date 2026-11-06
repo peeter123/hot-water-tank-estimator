@@ -160,7 +160,7 @@ as events when the sources report again, and they close the window. The estimate
   silent. The model exposes it, together with each sensor's last report.
 
 **Why 2 hours.** Gaps between recorded humidity states in October: 6 of 0.5-1 h, 4 of 1-1.5 h, 2 of 1.5-2 h, 1 of 2-3
-h and 1 of 3.7 h; in November up to the 5th, one of 0.5-1 h. At 2 h a silence counts from 2 h after the last report.
+h and 1 of 3.7 h; in November up to the 6th, one of 0.5-1 h. At 2 h a silence counts from 2 h after the last report.
 That window holds the shower of 2026-10-10 (17:54-18:05 UTC; silent from 17:44). The other window, 2026-10-05
 19:12-20:10 UTC, holds no draw of 5 minutes (the longest is 4.4 min). At 1.5 h two more silences count, with no shower
 in them. The sensor was never unavailable in either export: it goes silent instead. Data in
