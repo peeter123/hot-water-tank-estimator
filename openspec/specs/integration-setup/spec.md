@@ -53,7 +53,8 @@ The options flow SHALL let the user change:
 - the history days for the setup fit (1-30, default 30).
 
 Saving SHALL keep the current tank average, the charged temperature and the calibration state. Adding, removing or
-replacing the ambient temperature sensor SHALL start a recalibration, because the loss coefficient depends on it.
+replacing the ambient temperature sensor SHALL start a recalibration, because the loss coefficient depends on it. A
+shower end time that is not longer than the session gap SHALL be rejected with an error on that field.
 
 #### Scenario: Change sensor height
 - **WHEN** T_avg is 44 C and the user changes the sensor height from 50 % to 65 %
@@ -62,6 +63,10 @@ replacing the ambient temperature sensor SHALL start a recalibration, because th
 #### Scenario: Add an ambient sensor
 - **WHEN** T_avg is 52 C and the user adds an ambient temperature sensor in the options
 - **THEN** T_avg stays 52 C, and a recalibration over the history days runs with that sensor's history
+
+#### Scenario: Shower end time not after the session gap
+- **WHEN** the user saves the draws options with the shower end time at 2 min and the session gap at 120 s
+- **THEN** the form shows an error on the shower end time and nothing is saved
 
 ### Requirement: Reconfigure changes the tank and its sources
 A reconfigure step SHALL let the user change everything the config flow asked for, with the config flow's
@@ -110,9 +115,14 @@ parameter, not a tuning value: its default applies until the first shower is lea
   - other-draws hot share 0.2 and start-up energy 0 kWh;
   - shower flow 7.5 L/min;
   - humidity rise 6 points and humidity window 60 min;
+  - shower end time 5 min and next shower time 5 min;
   - long-draw duration 0 (off) and reclassify window 10 min;
   - session gap 60 s and maximum draw per reading 100 L;
   - power threshold 100 W.
+
+#### Scenario: Existing entry after the update
+- **WHEN** an entry created before the shower end time and the next shower time existed is loaded
+- **THEN** it uses their defaults, 5 min each, and its other tuning values are unchanged
 
 ### Requirement: Entities and units
 Each tank SHALL provide sensors (state class measurement) for:
@@ -125,7 +135,8 @@ Each tank SHALL provide sensors (state class measurement) for:
 
 It SHALL also provide a shower detected binary sensor, a "Hot water ran out" button, an "Undo hot water ran out"
 button, a "Shower flow" number (L/min), a "Shower flow locked" switch, a "Tank sensor temperature" diagnostic
-sensor and the calibration diagnostic sensors.
+sensor, the two shower timing and the two shower countdown diagnostic sensors, and the calibration diagnostic
+sensors.
 Names SHALL be translated, without emoji. The user-facing names differ from the model's vocabulary where the
 model's terms read wrongly: "tank water" alone does not say that it is hot, and "percent charged" at 100 % beside
 fewer litres than the tank holds reads as an error, while "charge level" compares with the last charge.
@@ -133,7 +144,8 @@ fewer litres than the tank holds reads as an error, while "charge level" compare
 #### Scenario: Units shown
 - **WHEN** the entities are listed
 - **THEN** both remaining sensors are in litres, the charge level in %, the minutes sensor in min, the heat loss in
-  W, the shower flow in L/min, and the three temperatures and the tank sensor temperature in degrees Celsius
+  W, the shower flow in L/min, the two shower timing sensors in min, and the three temperatures and the tank sensor
+  temperature in degrees Celsius
 
 #### Scenario: Names shown
 - **WHEN** a new entry titled "Hot Water Tank" is added
@@ -171,9 +183,9 @@ After a Home Assistant restart or an entry reload, each tank SHALL restore:
 - the last water meter reading and the last energy counter reading;
 - the heating-run state, including the start-up energy used;
 - the current draw session;
-- the humidity window history;
+- the humidity window history, and whether the bathroom still counts as humid after a shower that has ended;
 - the end of the last draw and the time T_avg was last reset (see draw-classification and calibration);
-- the shower in progress, with its flow so far;
+- the shower in progress, with its flow so far, its start and the time of its last meter increase;
 - the last ambient reading and when it was last good, for a sensor that is still configured.
 
 On the first start, with nothing restored, the tank SHALL start charged at the tank sensor's reading. If that is
@@ -186,6 +198,15 @@ unavailable, it SHALL start at 50 C.
 #### Scenario: First start
 - **WHEN** a new entry starts and the tank sensor reads 56 C
 - **THEN** T_avg and T_ch are 56 C
+
+#### Scenario: Restart in the humid bathroom after a shower
+- **WHEN** Home Assistant restarts 10 minutes after a shower ended, while the bathroom still counts as humid
+- **THEN** no new shower starts from the humidity after the restart, and a draw needs the next shower time to start
+  one
+
+#### Scenario: Restart during a shower
+- **WHEN** Home Assistant restarts during a detected shower and is back 2 minutes after the water stopped
+- **THEN** the shower is still detected, and it ends 5 minutes after its last meter increase
 
 ### Requirement: Unavailable sources pause their part of the model
 When a source entity is unavailable or non-numeric, the integration SHALL skip the updates that depend on it and
@@ -293,3 +314,40 @@ tank-model), rounded to whole watts. It SHALL read 0 W when T_avg is at or below
 #### Scenario: Standing loss of a charged tank
 - **WHEN** V is 285 L, k 0.0039 per hour, T_avg 58 C and T_ambient 19.5 C
 - **THEN** the heat loss is 0.0039 * 0.331 * 38.5 * 1000 = 50 W
+
+### Requirement: Shower timing diagnostic sensors
+Each tank SHALL provide two diagnostic sensors (min, device class duration, no state class) with the shower timing
+options in use, named as the options: "Shower end after no water" (the shower end time) and "New shower draw while
+humid" (the next shower time). The second SHALL be unavailable while no humidity sensor is configured.
+
+#### Scenario: Defaults shown
+- **WHEN** an entry with a humidity sensor uses the default shower timing
+- **THEN** "Shower end after no water" is 5 min and "New shower draw while humid" is 5 min
+
+#### Scenario: Option saved
+- **WHEN** the user saves the options with the shower end time at 7.5 min
+- **THEN** after the reload "Shower end after no water" is 7.5 min
+
+#### Scenario: No humidity sensor
+- **WHEN** an entry has no humidity sensor and a long-draw duration of 8 min
+- **THEN** "Shower end after no water" is 5 min and "New shower draw while humid" is unavailable
+
+### Requirement: Shower countdown diagnostic sensors
+Each tank SHALL provide two diagnostic timestamp sensors, unknown when there is nothing to count down: "Shower
+ends", the shower end of the shower in progress; and "Draw counts as shower", while no shower is in progress, the
+start of the draw session in progress plus the next shower time (bathroom still humid) or plus the long-draw duration
+(no humidity sensor). Both SHALL be unavailable while no detection method is configured.
+
+#### Scenario: Shower ends counts down
+- **WHEN** a detected shower's last meter increase is at 20:25:21 and the shower end time is 5 min
+- **THEN** "Shower ends" is 20:30:21, and after the shower has ended it is unknown
+
+#### Scenario: Draw in the humid bathroom
+- **WHEN** a shower has ended, the bathroom still counts as humid, the next shower time is 5 min and a draw session
+  starts at 20:40:00
+- **THEN** "Draw counts as shower" is 20:45:00, and it is unknown again from just after 20:42:00, when the session
+  ends (its last increase at 20:41:00 and a session gap of 60 s), with no further reading
+
+#### Scenario: Long draw without humidity sensor
+- **WHEN** an entry has no humidity sensor, the long-draw duration is 8 min and a draw session starts at 07:00:00
+- **THEN** "Draw counts as shower" is 07:08:00
