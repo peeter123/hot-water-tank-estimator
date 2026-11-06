@@ -192,7 +192,7 @@ Applies to every group:
 
 ## 7. Rollout
 
-- [ ] 7.1 **Requires the user's authorization.** Deploy and restart from master after group 6 is committed. Verify
+- [x] 7.1 **Requires the user's authorization.** Deploy and restart from master after group 6 is committed. Verify
   through the home-assistant MCP server:
   - the entry loads, and the state is kept (T_avg, T_ch, the shower flow, the calibration samples);
   - the draws step of an aborted options flow shows the humidity silence time at 2 h;
@@ -201,11 +201,17 @@ Applies to every group:
   - the system log has no entries for the integration.
 
   Record the result in `private/installation.md`. Roll back by deploying the previous commit and restarting.
-- [ ] 7.2 **Requires the user's authorization.** Turn on "Count heat outside heating runs" in the options of the
+  - Done 2026-11-06 at about 14:53 from `71cc7b2`: 11 files deployed, Home Assistant restarted; the entry loaded with
+    its state and calibration kept (T_avg 44.0 C, T_ch 54.41 C, 6.66 L/min, 29 samples), no repair issue, the
+    humidity sensor's last report in the diagnostics with the fallback off, and a clean system log. The silence time
+    shows its default of 2 h (stored as 2 by the save of 7.2).
+- [x] 7.2 **Requires the user's authorization.** Turn on "Count heat outside heating runs" in the options of the
   development installation's entry (its counter measures DHW heat only, design D3), through the home-assistant MCP
   server's options flow. Verify: the option is stored, the entry reloads with T_avg, T_ch and the calibration kept,
   and the system log has no entries for the integration. Record it in `private/installation.md`. Roll back by turning
   the option off.
+  - Done 2026-11-06 at 14:55: the option is stored on, the entry reloaded with T_avg, T_ch, the shower flow and the
+    calibration kept, and the system log is clean.
 - [ ] 7.3 **Requires the user's authorization** (reading the history, the diagnostics and the Repairs list only, no
   change). Live check at the next humidity silence of at least 2 h:
   - the humidity repair issue appears 2 h after the last report and goes at the next report;
