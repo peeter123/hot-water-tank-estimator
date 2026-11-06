@@ -3,6 +3,9 @@
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 import json
+from pathlib import Path
+import sys
+from types import ModuleType
 
 import pytest
 
@@ -511,7 +514,7 @@ def test_charge_event_carries_calibration_figures() -> None:
     model.on_heating(T0 + MINUTE, True)
     model.on_energy(T0 + MINUTE, 100.0)
     model.on_energy(T0 + 11 * MINUTE, 105.0)
-    events = model.on_heating(T0 + 12 * MINUTE, False)
+    events = model.on_heating(T0 + 17 * MINUTE, False)
     charge = events[-1]
     assert charge.kind == EventKind.CHARGE
     assert charge.change["run_energy_kwh"] == pytest.approx(5.0)
@@ -540,10 +543,12 @@ def test_counter_only_run_ends_after_ten_minutes() -> None:
     model.on_tank_sensor(T0, 55.0)
     model.on_energy(T0, 100.0)
     model.on_energy(T0 + MINUTE, 101.0)
+    model.on_energy(T0 + 9 * MINUTE, 102.0)
+    model.on_energy(T0 + 17 * MINUTE, 103.0)
     assert model.heating
-    model.tick(T0 + 10 * MINUTE)
+    model.tick(T0 + 26 * MINUTE)
     assert model.heating
-    events = model.tick(T0 + 11 * MINUTE + timedelta(seconds=1))
+    events = model.tick(T0 + 27 * MINUTE + timedelta(seconds=1))
     assert not model.heating
     assert any(e.kind == EventKind.CHARGE for e in events)
     assert (model.t_avg, model.t_ch) == (55.0, 55.0)
@@ -604,11 +609,13 @@ def test_round_trip_mid_shower_mid_run() -> None:
         out += m.on_humidity(t + 3 * MINUTE, "bath", 62.0)
         out += m.on_tank_sensor(t + 4 * MINUTE, 47.0)
         out += m.tick(t + 5 * MINUTE)
-        out += m.on_heating(t + 6 * MINUTE, False)
-        out += m.tick(t + 20 * MINUTE)
+        out += m.on_heating(t + 14 * MINUTE, False)
+        out += m.tick(t + 30 * MINUTE)
         return [e.as_dict() for e in out]
 
-    assert drive(restored) == drive(model)
+    events = drive(restored)
+    assert any(e["kind"] == "charge" for e in events)
+    assert events == drive(model)
     assert restored.to_dict() == model.to_dict()
     assert restored.outputs == model.outputs
 
@@ -679,6 +686,8 @@ def test_counter_timeout() -> None:
     model.on_tank_sensor(T0, 50.0)
     model.on_energy(T0, 100.0)
     model.on_energy(T0 + 10 * MINUTE, 101.0)
+    model.on_energy(T0 + 19 * MINUTE, 101.5)
+    model.on_energy(T0 + 25 * MINUTE, 102.0)
     model.on_energy(T0 + 30 * MINUTE, 103.0)
     model.on_flow_return(T0 + 25 * MINUTE, 52.0, 48.0)
     model.on_flow_return(T0 + 29 * MINUTE, 53.0, 49.0)
@@ -716,10 +725,10 @@ def test_power_before_a_binary_run_start_is_not_counted() -> None:
     model.on_tank_sensor(T0, 50.0)
     model.on_power(T0, 6000.0)
     model.on_heating(T0 + 10 * MINUTE, True)
-    events = model.on_heating(T0 + 20 * MINUTE, False)
+    events = model.on_heating(T0 + 30 * MINUTE, False)
     charge = events[-1]
     assert charge.kind == EventKind.CHARGE
-    assert charge.change["run_energy_kwh"] == pytest.approx(1.0)
+    assert charge.change["run_energy_kwh"] == pytest.approx(2.0)
 
 
 def test_negative_energy_steps_count_as_zero() -> None:
@@ -752,9 +761,9 @@ def test_litres_before_a_charge_are_not_reclassified() -> None:
     model.on_heating(T0 + 30 * SECOND, True)
     model.on_water_meter(T0 + MINUTE, 1006.0, "L")
     model.on_tank_sensor(T0 + MINUTE, 55.0)
-    model.on_heating(T0 + 2 * MINUTE, False)
+    model.on_heating(T0 + 16 * MINUTE, False)
     assert model.t_avg == 55.0
-    events = model.on_humidity(T0 + 150 * SECOND, "bath", 70.0)
+    events = model.on_humidity(T0 + 16 * MINUTE + 30 * SECOND, "bath", 70.0)
     assert model.shower_detected
     assert not any(e.change.get("reclassified_litres") for e in events)
     assert model.t_avg == 55.0
@@ -825,6 +834,8 @@ def timeout_shower_model(**overrides: float) -> TankModel:
     model.on_humidity(T0 - 10 * MINUTE, "bath", 50.0)
     model.on_energy(T0, 100.0)
     model.on_energy(T0 + 10 * MINUTE, 101.0)
+    model.on_energy(T0 + 19 * MINUTE, 101.5)
+    model.on_energy(T0 + 25 * MINUTE, 102.0)
     model.on_energy(T0 + 30 * MINUTE, 103.0)
     model.on_humidity(T0 + 31 * MINUTE, "bath", 70.0)
     model.on_water_meter(T0 + 31 * MINUTE, 1000.0, "L")
@@ -886,6 +897,8 @@ def test_detection_after_the_end_is_found_reclassifies_late_litres() -> None:
     model.on_humidity(T0 - 10 * MINUTE, "bath", 50.0)
     model.on_energy(T0, 100.0)
     model.on_energy(T0 + 10 * MINUTE, 101.0)
+    model.on_energy(T0 + 19 * MINUTE, 101.5)
+    model.on_energy(T0 + 25 * MINUTE, 102.0)
     model.on_energy(T0 + 30 * MINUTE, 103.0)
     model.on_water_meter(T0 + 35 * MINUTE, 1000.0, "L")
     for i, seconds in enumerate((0, 50, 100), start=1):
@@ -908,7 +921,9 @@ def test_detection_before_the_end_is_found_does_not_correct_the_charge() -> None
     model.on_humidity(T0 - 10 * MINUTE, "bath", 50.0)
     model.on_energy(T0, 100.0)
     model.on_energy(T0 + 10 * MINUTE, 101.0)
+    model.on_energy(T0 + 19 * MINUTE, 101.5)
     model.on_water_meter(T0 + 20 * MINUTE, 1000.0, "L")
+    model.on_energy(T0 + 25 * MINUTE, 102.0)
     model.on_water_meter(T0 + 29 * MINUTE + 30 * SECOND, 1010.0, "L")
     model.on_energy(T0 + 30 * MINUTE, 103.0)
     model.on_humidity(T0 + 30 * MINUTE + 30 * SECOND, "bath", 70.0)
@@ -932,9 +947,9 @@ def test_counter_takes_over_after_the_hold_without_ending_before_the_run_start()
     model.on_power(T0 + 11 * MINUTE, None)
     events = model.tick(T0 + 27 * MINUTE)
     assert not model.heating
-    charge = next(e for e in events if e.kind == EventKind.CHARGE)
-    assert charge.change["run_end"] == charge.change["run_start"]
-    assert charge.change["run_end"] == (T0 + 10 * MINUTE).isoformat()
+    run = next(e for e in events if e.kind == EventKind.SHORT_RUN)
+    assert run.change["run_end"] == run.change["run_start"]
+    assert run.change["run_end"] == (T0 + 10 * MINUTE).isoformat()
 
 
 def test_draws_before_the_counter_timeout_survive_a_restart() -> None:
@@ -945,13 +960,15 @@ def test_draws_before_the_counter_timeout_survive_a_restart() -> None:
     model.on_tank_sensor(T0, 54.0)
     model.on_energy(T0, 100.0)
     model.on_energy(T0 + MINUTE, 101.0)
-    model.on_water_meter(T0 + 2 * MINUTE, 1000.0, "L")
-    model.on_water_meter(T0 + 3 * MINUTE, 1050.0, "L")
+    model.on_energy(T0 + 9 * MINUTE, 102.0)
+    model.on_energy(T0 + 17 * MINUTE, 103.0)
+    model.on_water_meter(T0 + 18 * MINUTE, 1000.0, "L")
+    model.on_water_meter(T0 + 19 * MINUTE, 1050.0, "L")
     restored = TankModel.from_dict(
         options, sources, json.loads(json.dumps(model.to_dict()))
     )
-    model.tick(T0 + 12 * MINUTE)
-    restored.tick(T0 + 12 * MINUTE)
+    model.tick(T0 + 28 * MINUTE)
+    restored.tick(T0 + 28 * MINUTE)
     assert restored.t_avg == pytest.approx(54.0 - 50 * 0.2 * 40 / 281)
     assert restored.to_dict() == model.to_dict()
 
@@ -988,12 +1005,13 @@ def test_counter_timeout_run_sums_end_at_the_last_increase() -> None:
     model.on_energy(T0, 100.0)
     model.on_energy(T0 + MINUTE, 101.0)
     model.on_energy(T0 + 9 * MINUTE, 102.0)
+    model.on_energy(T0 + 17 * MINUTE, 103.0)
     events = model.tick(T0 + 40 * MINUTE)
     (charge,) = [e for e in events if e.kind == EventKind.CHARGE]
     change = charge.change
-    assert change["run_end"] == (T0 + 9 * MINUTE).isoformat()
-    assert change["run"]["hours"] == pytest.approx(8 / 60)
-    assert model.interval_sums.hours == pytest.approx(31 / 60)
+    assert change["run_end"] == (T0 + 17 * MINUTE).isoformat()
+    assert change["run"]["hours"] == pytest.approx(16 / 60)
+    assert model.interval_sums.hours == pytest.approx(23 / 60)
 
 
 def test_counter_increase_soon_after_a_run_end_is_reported() -> None:
@@ -1033,11 +1051,11 @@ def test_unavailable_time_per_source() -> None:
     model.on_energy(T0 + 61 * MINUTE, 100.0)
     model.on_energy(T0 + 62 * MINUTE, 101.0)
     model.on_tank_sensor(T0 + 62 * MINUTE, 45.0)
-    events = model.on_heating(T0 + 63 * MINUTE, False)
+    events = model.on_heating(T0 + 80 * MINUTE, False)
     charge = events[-1].change
-    assert charge["unavailable_seconds"]["humidity:bath"] == pytest.approx(43 * 60)
+    assert charge["unavailable_seconds"]["humidity:bath"] == pytest.approx(60 * 60)
     # The next interval starts with the sources that are still unavailable.
-    later = model.unavailable_seconds(T0 + 73 * MINUTE)
+    later = model.unavailable_seconds(T0 + 90 * MINUTE)
     assert later == {"humidity:bath": pytest.approx(10 * 60)}
 
 
@@ -1351,3 +1369,150 @@ def test_a_shower_end_is_an_event() -> None:
     now = draw_shower(model, T0 + 21 * MINUTE, 120, 5, 1.0)
     events = model.on_humidity(now + 5 * MINUTE, "bath", 50.0)
     assert not [e for e in events if e.kind == EventKind.SHOWER_FLOW]
+
+
+def _short_run_model(**overrides: float) -> TankModel:
+    """A 285 L tank at T_avg 40 C and T_ch 55 C, with a binary sensor and an energy counter."""
+    return make_model(
+        Sources(heating_binary=True, energy_counter=True),
+        t_avg=40.0,
+        t_ch=55.0,
+        **{"volume": 285.0, "startup_energy": 0.5, **overrides},
+    )
+
+
+def test_run_cut_off_by_a_cooling_demand() -> None:
+    """A 6 minute run of 1.5 kWh with 0.5 kWh start-up energy: T_avg 43.0 C, T_ch 55.0 C."""
+    model = _short_run_model()
+    model.on_energy(T0, 100.0)
+    model.on_heating(T0, True)
+    model.on_energy(T0 + 3 * MINUTE, 101.5)
+    events = model.on_heating(T0 + 6 * MINUTE, False)
+    assert not model.heating
+    assert model.t_avg == pytest.approx(40.0 + 1000 / (1.163 * 285))
+    assert model.t_avg == pytest.approx(43.0, abs=0.02)
+    assert model.t_ch == 55.0
+    assert [e.kind for e in events] == [EventKind.SHORT_RUN]
+    change = events[0].change
+    assert change["run_energy_kwh"] == pytest.approx(1.5)
+    assert change["startup_used_kwh"] == pytest.approx(0.5)
+    assert change["run_end"] == (T0 + 6 * MINUTE).isoformat()
+    # The interval goes on: the sums and the last reset stay.
+    assert model.last_reset is None
+    assert model.interval_sums.hours == pytest.approx(6 / 60)
+
+
+def test_run_of_15_minutes() -> None:
+    """A run of exactly 15 minutes charges the tank: T_avg and T_ch become 52.0 C."""
+    model = _short_run_model()
+    model.on_tank_sensor(T0, 52.0)
+    model.on_heating(T0, True)
+    events = model.on_heating(T0 + 15 * MINUTE, False)
+    assert [e.kind for e in events] == [EventKind.CHARGE]
+    assert (model.t_avg, model.t_ch) == (52.0, 52.0)
+
+
+def test_a_counter_timeout_run_is_measured_to_its_last_increase() -> None:
+    """The run ends at its last increase: 13 minutes is short, 16 minutes charges."""
+    short = make_model(t_avg=40.0, t_ch=40.0)
+    short.on_tank_sensor(T0, 55.0)
+    for minutes, reading in ((0, 100.0), (1, 101.0), (8, 102.0), (14, 103.0)):
+        short.on_energy(T0 + minutes * MINUTE, reading)
+    events = short.tick(T0 + 25 * MINUTE)
+    kinds = [e.kind for e in events]
+    assert EventKind.SHORT_RUN in kinds
+    assert EventKind.CHARGE not in kinds
+    run = events[kinds.index(EventKind.SHORT_RUN)]
+    assert run.change["run_end"] == (T0 + 14 * MINUTE).isoformat()
+
+    full = make_model(t_avg=40.0, t_ch=40.0)
+    full.on_tank_sensor(T0, 55.0)
+    for minutes, reading in ((0, 100.0), (1, 101.0), (8, 102.0), (17, 103.0)):
+        full.on_energy(T0 + minutes * MINUTE, reading)
+    events = full.tick(T0 + 28 * MINUTE)
+    assert [e.kind for e in events] == [EventKind.CHARGE]
+    assert (full.t_avg, full.t_ch) == (55.0, 55.0)
+
+
+def test_a_short_runs_counter_lag_raises_t_avg() -> None:
+    """The counter step after a short run raises T_avg after the start-up energy left."""
+    model = _short_run_model()
+    model.on_energy(T0, 100.0)
+    model.on_heating(T0, True)
+    model.on_energy(T0 + 2 * MINUTE, 100.2)
+    model.on_heating(T0 + 5 * MINUTE, False)
+    after_run = model.t_avg
+    assert after_run == 40.0  # the 0.2 kWh went into the start-up energy
+    model.on_energy(T0 + 8 * MINUTE, 101.2)
+    # 0.3 kWh of start-up energy was left, so 0.7 kWh heats the tank.
+    assert model.t_avg - after_run == pytest.approx(700 / (1.163 * 285))
+
+
+def test_the_next_charge_counts_the_short_runs_of_its_interval() -> None:
+    """The charge change holds the short runs since the last charge, and the count resets."""
+    model = _short_run_model()
+    model.on_tank_sensor(T0, 55.0)
+    for start in (0, 30):
+        model.on_heating(T0 + start * MINUTE, True)
+        model.on_heating(T0 + (start + 5) * MINUTE, False)
+    model.on_heating(T0 + 60 * MINUTE, True)
+    charge = model.on_heating(T0 + 90 * MINUTE, False)[-1]
+    assert charge.kind == EventKind.CHARGE
+    assert charge.change["short_runs"] == 2
+    model.on_heating(T0 + 120 * MINUTE, True)
+    charge = model.on_heating(T0 + 150 * MINUTE, False)[-1]
+    assert charge.change["short_runs"] == 0
+
+
+def test_a_state_saved_before_short_runs_loads() -> None:
+    """A stored state without the short run keys loads with a count of 0."""
+    model = _short_run_model()
+    model.on_heating(T0, True)
+    model.on_heating(T0 + 5 * MINUTE, False)
+    state = json.loads(json.dumps(model.to_dict()))
+    assert state["short_runs"] == 1
+    restored = TankModel.from_dict(model.options, model.sources, state)
+    assert restored.to_dict() == model.to_dict()
+    del state["short_runs"], state["last_run_short"]
+    old = TankModel.from_dict(model.options, model.sources, state)
+    assert old.to_dict()["short_runs"] == 0
+    assert old.to_dict()["last_run_short"] is False
+
+
+def _previous_release_model(monkeypatch: pytest.MonkeyPatch) -> type[TankModel]:
+    """Load the previous release's `model.py` (commit e74907f, kept as a fixture) as a module."""
+    name = "custom_components.hot_water_tank_estimator.previous_release_model"
+    source = (
+        Path(__file__).parent / "fixtures" / "previous_release_model.txt"
+    ).read_text(encoding="utf-8")
+    module = ModuleType(name)
+    module.__package__ = "custom_components.hot_water_tank_estimator"
+    monkeypatch.setitem(sys.modules, name, module)
+    exec(compile(source, name, "exec"), module.__dict__)  # noqa: S102
+    return module.TankModel
+
+
+def test_a_state_saved_now_loads_in_the_previous_release(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rollback: the previous release's own `TankModel.from_dict` restores a state saved now."""
+    previous = _previous_release_model(monkeypatch)
+    model = _short_run_model()
+    model.on_tank_sensor(T0, 50.0)
+    model.on_energy(T0, 100.0)
+    model.on_heating(T0, True)
+    model.on_energy(T0 + 2 * MINUTE, 100.4)
+    model.on_water_meter(T0 + 3 * MINUTE, 1000.0, "L")
+    model.on_water_meter(T0 + 4 * MINUTE, 1020.0, "L")
+    model.on_heating(T0 + 5 * MINUTE, False)  # a short run: the new keys are set
+    model.on_heating(T0 + 30 * MINUTE, True)
+    model.on_water_meter(
+        T0 + 31 * MINUTE, 1030.0, "L"
+    )  # mid run, with a draw in the log
+    state = json.loads(json.dumps(model.to_dict()))
+    assert state["short_runs"] == 1
+    old = previous.from_dict(model.options, model.sources, state)
+    assert old.t_avg == pytest.approx(model.t_avg)
+    assert old.t_ch == pytest.approx(model.t_ch)
+    assert old.heating
+    assert old.interval_sums.as_dict() == model.interval_sums.as_dict()

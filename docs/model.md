@@ -84,10 +84,11 @@ Power sensor: `dE = P * dt` with `P` in W and `dt` in hours (a left Riemann sum:
 next one), applied with the same rule. A gap where the power was unavailable counts as no energy. If both a counter and
 a power sensor are configured, the counter is the energy and the power only helps to detect the run.
 
-**Start-up energy.** The first `S` kWh of each run are not applied. The counter reports energy that the circuit and the
-heat exchanger keep while they warm up, and the amount depends on the plumbing. It only changes the estimate during a
-run, because the charge at the end resets it, but it matters when a run is cut short, for example by a price block
-that starts mid-run. The default is 0, because the value is per tank. Calibration learns it.
+**Start-up energy.** The first `S` kWh of each run are not applied. The counter reports energy that the circuit and
+the heat exchanger keep while they warm up, and the amount depends on the plumbing. A charge at the end of a run
+resets the estimate, so it matters during a run and after a short run, which does not charge and keeps the heat left
+after the start-up energy (for example a run cut off by a demand for heating the house). The default is 0, because the
+value is per tank. Calibration learns it.
 
 **Heating detection**, from the first configured source:
 
@@ -124,7 +125,22 @@ t_avg = t_ch = t_charge
   agreed with the flow and return mean within 1.3 K on the development installation, but the heater's own
   temperatures do not depend on where the sensor sits.
 - When neither is available, the modelled values stay.
-- The charge makes errors in the heat input (counter overhead, losses during the run) irrelevant at every run end.
+- **Short runs.** A run shorter than 15 minutes (`t_end - run_start`, with `t_end` the run end used for the charge, so
+  the last counter increase for a counter timeout) does not mix the tank, so there is no layer at a known temperature
+  to set. It adds its heat as any run does, after the start-up energy, and counter increases in the 10 minutes after
+  it add theirs too, because no charge absorbed them. `t_avg`, `t_ch`, the last reset, the interval sums and the
+  previous charged temperature stay, so the next closure still knows its start. The model emits a `short_run` event
+  (run start, end, energy and start-up energy used) and counts the short runs since the last charge, which the next
+  charge carries as `short_runs`. The first-drop state of the calibrator is cleared by any run, a short one too, and
+  only a charge arms it again, so a short run between a charge and the first sensor drop loses that width estimate:
+  the short run's heat changes the layers the estimate assumes. With a heating-active binary sensor and no heat input,
+  `t_avg` and `t_ch` still rise to the tank sensor during a short run, as during any run, because it is the only heat
+  signal. A counter increase in the lag after a short run raises `t_avg` also after a manual state set in that lag,
+  because the heat came after the state the user set. With counter-only detection the run length runs from the first
+  to the last increase, so it is short by up to one counter step. A partial charge was rejected: nothing tells at
+  which temperature the mixed part sits. The evidence: the 31 runs of 2026-10-01 to 2026-11-05 on the development
+  installation lasted at least 43.5 minutes, so no run of the backtests changes.
+- The charge makes errors in the heat input (counter overhead, losses during the run) irrelevant at every charge.
 
 ## Standing loss
 
@@ -467,11 +483,14 @@ t_ch_prev - t_true_start = k * loss + share * other + mixed          (the interv
   over the interval and the run. The fit solves this.
 - **Counter lag.** When a binary sensor or the heat power decides the run, the energy counter can report the last
   step after the run ended. Counter increases up to 10 minutes after the end count towards `E_run`. The model has
-  charged by then, so only the closure uses them.
+  charged by then, so only the closure uses them (after a short run they raise `t_avg`, see above).
 - A run ended by the counter timeout is found 10 minutes late. Its sums are those at the last counter increase.
 
 A closure is excluded from the fit and from the error statistics when:
-- the run lasted less than 15 minutes, because a short run does not mix the tank;
+- the interval holds a short run (the charge's `short_runs` is above 0, reason `short_run_in_interval`), because the
+  closure equation has one start-up energy per interval and a short run used it as well. The next interval counts
+  again. A run that is short itself makes no closure now. Closures stored by earlier releases with the reason
+  `short_run` still load;
 - a source was unavailable for more than 10 % of the interval. The model counts the unavailable seconds of every
   source it was given: water meter, energy counter, power, heating sensor, flow and return, tank sensor, cold water
   sensor and each humidity sensor. The ambient sensor does not count: the model always has an ambient value (the

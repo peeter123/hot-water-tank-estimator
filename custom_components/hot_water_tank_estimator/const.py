@@ -55,6 +55,8 @@ DETECTOR_HOLD_SECONDS = (
 )
 # Counter increases this long after a run ended still count towards that run's energy.
 COUNTER_LAG_SECONDS = 600.0
+# A heating run shorter than this does not mix the tank: it adds its heat but does not charge.
+MIN_RUN_MINUTES = 15.0
 
 # Config entry keys. Everything the user sets is stored in the entry options. The tuning values
 # use the field names of `ModelOptions`, in the units shown in the options form: the sensor height

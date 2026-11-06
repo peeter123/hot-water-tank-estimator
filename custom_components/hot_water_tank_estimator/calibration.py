@@ -64,7 +64,6 @@ SOURCE_LOCKED = "locked"
 
 FORGETTING_FACTOR = 0.95  # weight of an interval relative to the next one
 MIN_INTERVALS = 5  # intervals needed before the closure fit is applied
-MIN_RUN_MINUTES = 15.0  # shorter runs do not mix the tank
 # The ambient sensor never excludes a closure: the model always has an ambient value.
 AMBIENT_SOURCE = "ambient_sensor"
 MAX_UNAVAILABLE_FRACTION = 0.1  # of an interval, for any one source
@@ -89,7 +88,9 @@ EXCLUDED = "excluded"  # see `Closure.reason`
 REASON_NO_CHARGE = "no_charge_temperature"
 REASON_AFTER_NO_CHARGE = "after_no_charge_temperature"
 REASON_AFTER_RESET = "after_manual_reset"
+# Own run shorter than the minimum: no longer set, kept so stored closures still read.
 REASON_SHORT_RUN = "short_run"
+REASON_SHORT_RUN_IN_INTERVAL = "short_run_in_interval"
 REASON_UNAVAILABLE = "source_unavailable"
 
 
@@ -715,6 +716,10 @@ class Calibrator:
                 ):
                     pending.energy_kwh += lag
                 return True
+            case EventKind.SHORT_RUN:
+                # No charge, but the run still sets the quiet-window settle time.
+                self._last_run_end = datetime.fromisoformat(change["run_end"])
+                return True
             case EventKind.DRAW:
                 return True
             case EventKind.SHOWER_FLOW:
@@ -767,9 +772,8 @@ class Calibrator:
         run_start = None if start is None else datetime.fromisoformat(start)
         hours = interval["hours"] + run["hours"]
         status, reason = pending.status, pending.reason
-        if status != EXCLUDED and run_start is not None:
-            if (pending.run_end - run_start).total_seconds() < MIN_RUN_MINUTES * 60:
-                status, reason = EXCLUDED, REASON_SHORT_RUN
+        if status != EXCLUDED and change.get("short_runs", 0) > 0:
+            status, reason = EXCLUDED, REASON_SHORT_RUN_IN_INTERVAL
         if status != EXCLUDED and hours > 0:
             source, seconds = max(
                 (

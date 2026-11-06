@@ -61,7 +61,7 @@ async def test_the_entities_follow_a_heating_run(hass: HomeAssistant, freezer) -
     await rig.set(HEATING, "on", after=600)
     await rig.set(FLOW, "58.0", after=1)
     await rig.set(RETURN, "40.0", after=1)
-    for step in range(1, 11):
+    for step in range(1, 17):
         await rig.set(ENERGY, f"{10 + 0.5 * step:.1f}", after=60)
         rig.check()
     assert float(rig.read("sensor", "tank_average")) > low

@@ -23,8 +23,9 @@ sensor's reading.
 
 ### Requirement: Sensor above the charged temperature raises it
 While heating is not active, if the tank sensor reads more than `T_ch + tolerance`, T_ch SHALL be raised to the
-sensor reading, and T_avg SHALL rise by the same step, less the heat outside a heating run since the last charge or
-manual reset that an earlier raise has not used yet. This covers heat the model does not see, such as a backup heater
+sensor reading, and T_avg SHALL rise by the same step, less the metered heat that raised T_avg without a charge
+(heat outside a heating run and of short runs) since the last charge or manual reset, as far as an earlier raise has
+not used it. This covers heat the model does not see, such as a backup heater
 without a meter, without counting metered heat twice. Raising T_avg with it keeps `T_ch - T_avg`, so the outputs do
 not fall when heat arrives.
 

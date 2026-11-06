@@ -53,6 +53,7 @@ from .const import (
     DEFAULT_USABLE_FRACTION,
     DETECTOR_HOLD_SECONDS,
     HEATING_TIMEOUT_SECONDS,
+    MIN_RUN_MINUTES,
     SHOWER_MIN_MINUTES,
     WATER_HEAT_CAPACITY_WH,
 )
@@ -75,6 +76,7 @@ class EventKind(StrEnum):
     CALIBRATION = "calibration"
     HOT_WATER_RAN_OUT = "hot_water_ran_out"
     SHOWER_FLOW = "shower_flow"
+    SHORT_RUN = "short_run"
 
 
 @dataclass(frozen=True)
@@ -426,6 +428,10 @@ class TankModel:
         self._increase_sums: IntervalSums | None = None
         # When the last run ended: counter increases soon after it still belong to that run.
         self._last_run_end: datetime | None = None
+        # Runs shorter than the minimum since the last charge: they added heat without a charge.
+        self._short_runs = 0
+        # Whether the run that just ended was short: its counter lag then raises T_avg.
+        self._last_run_short = False
         # Seconds each source was unavailable in this calibration interval, and since when the
         # sources that are unavailable now have been.
         self._unavailable: dict[str, float] = {}
@@ -494,6 +500,9 @@ class TankModel:
         self._draw_log.clear()
         events += self._evaluate_heating(now)
         if self._heating and self.sources.energy_counter:
+            events += self._apply_heat(now, delta)
+        elif self._counter_lag(now) and self._last_run_short:
+            # A short run charged nothing, so its counter lag raises T_avg like any run heat.
             events += self._apply_heat(now, delta)
         elif self._counter_lag(now):
             # The counter reports the last step of a run after the run ended. The model has
@@ -1262,6 +1271,7 @@ class TankModel:
         self._run_start_avg = self.t_avg
         self._run_snapshot = replace(self._sums)
         self._draw_log.clear()
+        self._last_run_short = False
         if self._power is not None:
             # Power before the run start is not part of the run.
             self._power_time = now
@@ -1294,6 +1304,9 @@ class TankModel:
         """End the run: T_avg = T_ch = the charged temperature."""
         events = self._integrate_power(now)
         before = self._temps()
+        start = self._run_start
+        if start is not None and (t_end - start).total_seconds() < MIN_RUN_MINUTES * 60:
+            return events + self._end_short_run(now, t_end, before)
         charge, source = self._charge_temperature(t_end)
         run_sums = self._run_sums(t_end, now)
         change: dict[str, Any] = {
@@ -1309,6 +1322,7 @@ class TankModel:
             "interval": self._run_snapshot.as_dict(),
             "run": run_sums.as_dict(),
             "unavailable_seconds": self.unavailable_seconds(now),
+            "short_runs": self._short_runs,
         }
         late = [entry for entry in self._draw_log if entry[0] > t_end]
         self._draw_log.clear()
@@ -1330,6 +1344,26 @@ class TankModel:
         self._last_charge_temp = self.t_ch
         events.append(self._record(now, EventKind.CHARGE, change, before))
         return events + self._replay_late_draws(now, t_end, late)
+
+    def _end_short_run(
+        self, now: datetime, t_end: datetime, before: tuple[float, float]
+    ) -> list[ModelEvent]:
+        """End a run shorter than the minimum: its heat stays in T_avg, and nothing charges."""
+        change = {
+            "run_start": _iso(self._run_start),
+            "run_end": t_end.isoformat(),
+            "run_energy_kwh": self._run_energy,
+            "startup_used_kwh": self._startup_used,
+        }
+        # The run's energy and start-up energy used stay until the next run starts: the counter
+        # lag after this run goes through the same start-up energy.
+        self._heating = False
+        self._run_start = None
+        self._draw_log.clear()
+        self._last_run_end = t_end
+        self._last_run_short = True
+        self._short_runs += 1
+        return [self._record(now, EventKind.SHORT_RUN, change, before)]
 
     def _run_sums(self, t_end: datetime, now: datetime) -> IntervalSums:
         """Return the balance sums of the run: from its start to `t_end`.
@@ -1387,6 +1421,7 @@ class TankModel:
     def _reset_interval(self, now: datetime) -> None:
         """Start a new calibration interval at `now`."""
         self._sums = IntervalSums()
+        self._short_runs = 0
         self._last_charge_temp = None
         self._run_snapshot = IntervalSums()
         self._increase_sums = None
@@ -1433,6 +1468,8 @@ class TankModel:
             if self._increase_sums is None
             else self._increase_sums.as_dict(),
             "last_run_end": _iso(self._last_run_end),
+            "short_runs": self._short_runs,
+            "last_run_short": self._last_run_short,
             "unavailable": self._unavailable,
             "down_since": {s: t.isoformat() for s, t in self._down_since.items()},
             "classifier": self._classifier.to_dict(),
@@ -1519,6 +1556,8 @@ class TankModel:
             if data.get("increase_sums") is not None:
                 model._increase_sums = IntervalSums.from_dict(data["increase_sums"])
             model._last_run_end = _from_iso(data.get("last_run_end"))
+            model._short_runs = int(data.get("short_runs", 0))
+            model._last_run_short = bool(data.get("last_run_short", False))
             model._unavailable = {
                 s: float(v) for s, v in data.get("unavailable", {}).items()
             }

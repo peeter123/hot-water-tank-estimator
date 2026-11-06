@@ -401,16 +401,69 @@ def test_closures_from_the_model() -> None:
     assert rig.cal.sample_count == 1
 
 
-def test_short_runs_are_excluded() -> None:
-    """A run shorter than 15 minutes does not mix the tank."""
+def test_run_cut_off_before_a_full_run() -> None:
+    """A run of 6 minutes makes no charge: the closure of the next run (50 minutes) is excluded."""
     rig = Rig()
     end = rig.run(T0 + HOUR, 60, 5.0, 55.0)
-    rig.run(end + 2 * HOUR, 14, 1.0, 55.0)
+    short_end = rig.run(end + 2 * HOUR, 6, 1.0, 55.0)
+    rig.cal.flush()
+    assert len(rig.cal.closures) == 1
+    samples = rig.cal.sample_count
+    rig.run(short_end + HOUR, 50, 4.0, 55.0)
     rig.cal.flush()
     closure = rig.cal.closures[-1]
     assert closure.status == EXCLUDED
-    assert closure.reason == "short_run"
-    assert rig.cal.sample_count == 0
+    assert closure.reason == "short_run_in_interval"
+    assert closure.t_ch_prev == 55.0
+    assert rig.cal.sample_count == samples
+
+
+def test_next_interval_counts_again() -> None:
+    """The run after the excluded closure, with no short run in its interval, is a sample."""
+    rig = Rig()
+    end = rig.run(T0 + HOUR, 60, 5.0, 55.0)
+    short_end = rig.run(end + 2 * HOUR, 6, 1.0, 55.0)
+    end = rig.run(short_end + HOUR, 50, 4.0, 55.0)
+    rig.cal.flush()
+    assert rig.cal.closures[-1].status == EXCLUDED
+    samples = rig.cal.sample_count
+    rig.run(end + 2 * HOUR, 60, 5.0, 55.0)
+    rig.cal.flush()
+    assert rig.cal.closures[-1].status == CLOSURE
+    assert rig.cal.sample_count == samples + 1
+
+
+def test_a_quiet_window_does_not_open_within_an_hour_after_a_short_run() -> None:
+    """A short run is a run end for the settle time: the window opens 1 hour after it."""
+    rig = quiet_rig()
+    end = rig.run(T0 + HOUR, 6, 0.1, 57.0)
+    rig.call(end + 30 * MINUTE, "on_tank_sensor", 57.0)
+    for hour in range(1, 6):
+        rig.call(end + hour * HOUR, "on_tank_sensor", 57.0 - 0.15 * hour)
+    # A window from the sensor reading 30 minutes after the run would be 5 hours long. From
+    # the settled hour it is 4.5 hours: too short for an estimate.
+    rig.draw(end + 5 * HOUR + 30 * MINUTE, 5.0)
+    assert rig.cal.quiet_estimates == []
+    rig.call(end + 6 * HOUR, "on_tank_sensor", 56.0)
+    for hour in range(7, 13):
+        rig.call(end + hour * HOUR, "on_tank_sensor", 56.0 - 0.15 * (hour - 6))
+    rig.draw(end + 12 * HOUR, 5.0)
+    assert len(rig.cal.quiet_estimates) == 1
+
+
+def test_a_stored_closure_with_the_short_run_reason_still_loads() -> None:
+    """Closures stored by an earlier release have the reason `short_run`."""
+    rig = Rig()
+    end = rig.run(T0 + HOUR, 60, 5.0, 55.0)
+    rig.run(end + 2 * HOUR, 60, 5.0, 55.0)
+    rig.cal.flush()
+    data = json.loads(json.dumps(rig.cal.to_dict()))
+    data["closures"][-1]["status"] = EXCLUDED
+    data["closures"][-1]["reason"] = "short_run"
+    restored = Calibrator(rig.cal.base)
+    restored.restore(data)
+    assert restored.closures[-1].reason == "short_run"
+    assert restored.closures[-1].status == EXCLUDED
 
 
 def test_a_source_unavailable_for_over_ten_percent_is_excluded() -> None:
@@ -1090,9 +1143,9 @@ def test_charge_since_the_draw() -> None:
     rig = Rig(t_avg=57.0, loss_coefficient=0.0, cold_mean=14.0)
     rig.cal.set_locks({"usable_fraction"})
     finish_draw(rig, T0 + 6 * MINUTE, 0.78)
-    end = rig.run(T0 + 8 * MINUTE, 10, 5.0, 55.0)
+    end = rig.run(T0 + 7 * MINUTE, 16, 5.0, 55.0)
     assert rig.model.t_avg == 55.0
-    result = press(rig, end + 2 * MINUTE)
+    result = press(rig, end + MINUTE)
     assert result.accepted
     assert result.drop == 0.0
     assert rig.model.options.usable_fraction == 0.85
@@ -1208,7 +1261,7 @@ def test_undo_after_a_charge() -> None:
     finish_draw(rig, T0 + 6 * MINUTE, 0.60)
     assert press(rig, T0 + 9 * MINUTE).accepted
     assert rig.model.options.usable_fraction == pytest.approx(0.60, abs=1e-3)
-    end = rig.run(T0 + 30 * MINUTE, 10, 5.0, 55.0)
+    end = rig.run(T0 + 30 * MINUTE, 16, 5.0, 55.0)
     assert rig.model.t_avg == 55.0
     done = undo(rig, end + 3 * HOUR)
     assert done is not None
@@ -1234,7 +1287,7 @@ def test_nothing_to_undo() -> None:
     # Time run out: 24 hours after the charge that followed the press.
     finish_draw(rig, T0 + 2 * HOUR, 0.6)
     assert press(rig, T0 + 2 * HOUR + 3 * MINUTE).accepted
-    end = rig.run(T0 + 3 * HOUR, 10, 5.0, 55.0)
+    end = rig.run(T0 + 3 * HOUR, 16, 5.0, 55.0)
     assert rig.cal.undo_available(rig.model, end + 23 * HOUR)
     assert rig.cal.undo_available(rig.model, end + 24 * HOUR)
     assert not rig.cal.undo_available(rig.model, end + 24 * HOUR + MINUTE)
@@ -1257,7 +1310,7 @@ def test_nothing_left_to_undo_after_a_charge() -> None:
     assert rig.model.options.usable_fraction == 0.85
     # Before the charge, undo still raises T_avg by D.
     assert rig.cal.undo_available(rig.model, T0 + 10 * MINUTE)
-    end = rig.run(T0 + 30 * MINUTE, 10, 5.0, 55.0)
+    end = rig.run(T0 + 30 * MINUTE, 16, 5.0, 55.0)
     assert not rig.cal.undo_available(rig.model, end + HOUR)
     rig.call(end + HOUR, "tick")
     assert rig.cal.undo_record is None
@@ -1269,11 +1322,11 @@ def test_the_undo_time_counts_from_the_first_reset_after_the_press() -> None:
     rig = undo_rig()
     finish_draw(rig, T0 + 6 * MINUTE, 0.6)
     assert press(rig, T0 + 9 * MINUTE).accepted
-    first = rig.run(T0 + 30 * MINUTE, 10, 5.0, 55.0)
+    first = rig.run(T0 + 30 * MINUTE, 16, 5.0, 55.0)
     record = rig.cal.undo_record
     assert record is not None
     assert record.reset_seen == first
-    second = rig.run(first + 20 * HOUR, 10, 5.0, 55.0)
+    second = rig.run(first + 20 * HOUR, 16, 5.0, 55.0)
     assert rig.cal.undo_record is record
     assert record.reset_seen == first
     assert second > first + 20 * HOUR

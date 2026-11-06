@@ -45,7 +45,7 @@ Applies to every group:
 
 ## 2. Short runs
 
-- [ ] 2.1 Move `MIN_RUN_MINUTES` (15) to `const.py`. In `model.py`, end a run shorter than it without a charge
+- [x] 2.1 Move `MIN_RUN_MINUTES` (15) to `const.py`. In `model.py`, end a run shorter than it without a charge
   (design D1):
   - keep T_avg, T_ch, the last reset, the interval sums and the previous charged temperature;
   - apply the counter lag after a short run to T_avg, after any start-up energy left;
@@ -58,14 +58,14 @@ Applies to every group:
   - a test that a short run's counter lag raises T_avg;
   - the store tests of D10 for the new key;
   - `python scripts/lint.py`.
-- [ ] 2.2 In `calibration.py`, exclude a closure whose charge change has short runs as `short_run_in_interval`
+- [x] 2.2 In `calibration.py`, exclude a closure whose charge change has short runs as `short_run_in_interval`
   (design D2). Remove the check on a closure's own run length, keeping the `short_run` reason readable in stored
   closures. Treat the `short_run` event as a run end for the quiet-window settle time. Verify:
   - tests for the calibration scenarios "Run cut off before a full run" and "Next interval counts again";
   - a test that a quiet window does not open within 1 hour after a short run;
   - a test that a stored closure with the reason `short_run` still loads;
   - `python scripts/lint.py`.
-- [ ] 2.3 Update `docs/model.md` ("Charging at the end of a run", "The charge closure") with the short-run rule, the
+- [x] 2.3 Update `docs/model.md` ("Charging at the end of a run", "The charge closure") with the short-run rule, the
   exclusion and the evidence of design D1. Update the README where it says that every run charges the tank ("How the
   estimate updates", "The model in short"), and the diagnostics text for the new event and reason. Verify: `python
   scripts/lint.py` (including `tests/test_readme.py`).
@@ -84,9 +84,10 @@ Applies to every group:
   - a test that a counter-only entry still starts a run on an increase;
   - the store tests of D10 for the new key;
   - `python scripts/lint.py`.
-- [ ] 3.2 Credit the heat outside runs in the raise rule (design D4), with `heat_uncredited` reset at a charge and
-  at `set_tank_state`, and saved with a default of 0. Verify: tests for the tank-model scenarios "Unmetered heat" and
-  "Sensor sees heat outside a run", a test that a charge clears the credit, and `python scripts/lint.py`.
+- [ ] 3.2 Credit the heat outside runs and the heat of short runs in the raise rule (design D4), with
+  `heat_uncredited` reset at a charge and at `set_tank_state`, and saved with a default of 0. Verify: tests for the
+  tank-model scenarios "Unmetered heat" and "Sensor sees heat outside a run", a test that a short run's heat is
+  credited the same way, a test that a charge clears the credit, and `python scripts/lint.py`.
 - [ ] 3.3 In `calibration.py`, store `heat` in each closure (0 for a stored closure without it) and add it to the
   closure fit as a known input (design D3). Verify:
   - a test for the calibration scenario "Interval with heat outside a run";

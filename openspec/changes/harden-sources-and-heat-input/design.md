@@ -63,6 +63,16 @@ increase for a counter timeout, else the moment the detector turned off.
 - **Event.** A new event kind `short_run`, with the run start, end, energy and start-up energy used. The calibrator
   treats it as a run end for the quiet-window settle time (1 h). The model counts the short runs since the last
   charge (`short_runs` in the next charge's change).
+- **Settled in the group 2 review (2026-11-06):**
+  - The first-drop state of the calibrator is cleared by any run, a short one too. Only a charge arms it again, so a
+    short run between a charge and the first sensor drop loses that width estimate. This is conservative: the short
+    run's heat changes the layers the estimate assumes.
+  - Without a heat input (binary sensor only), T_avg and T_ch still rise to the tank sensor during a short run, as
+    during any run. It is the only heat signal there.
+  - A counter increase in the lag after a short run raises T_avg also after a `set_tank_state` in that lag: the heat
+    came after the state the user set.
+  - With counter-only detection the run length runs from the first to the last increase, so it is short by up to one
+    counter step. The README says so.
 
 **Why 15 minutes.** It is `MIN_RUN_MINUTES`, under which calibration already excludes a run because it does not mix
 the tank. The constant moves to `const.py`, so the model and the calibrator share it. Evidence: the 31 runs of
@@ -118,8 +128,10 @@ counter lag, so the backtests do not change. In June 2026 the counter rose 2.57 
 
 When heat outside a run warms the top of a partly drawn tank, the tank sensor can rise above `T_ch + tolerance`.
 The rule "Sensor above the charged temperature raises it" then raises T_ch to the sensor and T_avg by the same step.
-That step is the same heat the counter has already added. The model keeps `heat_uncredited` (K): the heat outside
-runs since the last charge or reset that a raise has not yet used. A raise by `step = T_s - T_ch` then raises T_avg by
+That step is the same heat the counter has already added. The same holds for the heat of a short run (D1), which
+also raises T_avg without a charge (settled in the group 2 review, 2026-11-06). The model keeps `heat_uncredited` (K):
+the T_avg rise of heat outside runs and of short runs (after their start-up energy) since the last charge or reset
+that a raise has not yet used. A raise by `step = T_s - T_ch` then raises T_avg by
 
 ```text
 rise = step - c,   c = min(step, heat_uncredited),   heat_uncredited -= c
@@ -229,7 +241,8 @@ Added:
 ### D10: Stores in both directions
 
 `STATE_VERSION` stays the same, because the previous release rejects another version. The new model keys are:
-- `short_runs`;
+- `short_runs`, and `last_run_short` (whether the last run was short, so a restart within the counter lag still
+  applies the lag to T_avg);
 - `heat` in the interval sums, the run snapshot and the increase sums;
 - `heat_uncredited`;
 - the humidity reports.
@@ -268,6 +281,9 @@ The outputs go to `private/analysis/` and the summary to `private/installation.m
 - [An unavailable heating detector during a cooling dump: the detector hold keeps the last state, and the next
   detector (power or counter) can then call the heat a run] → Unchanged behaviour of the detector fallback. After 30
   minutes the heating detector's repair issue shows it.
+- [A heating detector that flickers off and on, or a power reading around the threshold, makes a short run: its
+  start-up energy counts twice and the next closure is excluded] → No flicker in the 31 runs of the evidence; the
+  short-run events in the diagnostics show it if it happens.
 - [The credit of D4 is wrong when unmetered and metered heat come at once] → The raise then adds less than the
   unmetered heat. The sensor bounds correct it at the next draw; this is rare.
 

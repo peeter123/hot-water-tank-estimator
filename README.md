@@ -6,13 +6,13 @@ has no flow meter of its own.
 It keeps a two-layer energy balance of the tank, with a hot layer above a cold one:
 - water drawn, measured by a whole-house water meter, takes energy out;
 - heat from the heater's energy counter or power sensor puts energy in;
-- at the end of each heating run the tank is charged: all of it at the mean of the heater's flow and return
-  temperature;
+- at the end of each heating run of 15 minutes or more the tank is charged: all of it at the mean of the heater's
+  flow and return temperature;
 - the tank's own sensor, at the height you configure, shows how far the cold layer has risen;
 - a rise in bathroom humidity tells mixed shower and bath water apart from other draws.
 
 The integration fits its parameters to your tank: first from the recorder's history at setup, then at every heating
-run end. Diagnostic sensors show what it learned and how well it fits.
+run end that charges the tank. Diagnostic sensors show what it learned and how well it fits.
 
 It provides:
 
@@ -203,9 +203,9 @@ The integration fits its parameters to your tank, so the defaults are only a sta
   coefficient and the thermocline width. The share and the start-up energy need at least 5 valid closures, which takes
   at least 6 heating runs in the history.
 - The model of the tank itself starts from the tank sensor's reading, not from the end state of the replay.
-- At the end of every heating run the run's energy shows how far the model was off at the start of the run. This
-  needs an energy counter or a power sensor. The share, the start-up energy and the loss coefficient are refitted
-  from the last runs. Each update moves a value by at most a quarter of its range.
+- At the end of every heating run that charges the tank (15 minutes or more) the run's energy shows how far the model
+  was off at the start of the run. This needs an energy counter or a power sensor. The share, the start-up energy and
+  the loss coefficient are refitted from the last runs. Each update moves a value by at most a quarter of its range.
 - Quiet nights, with no draw and no heating, give the loss coefficient from the fall of the tank sensor, against the
   mean ambient temperature of the night.
 - Adding, removing or replacing the ambient sensor (in the options or in Reconfigure) recalibrates the tank in the
@@ -262,7 +262,9 @@ where it stopped.
 ## The model in short
 
 The tank is a hot layer above a cold one, with a thermocline between them:
-- a heating run charges the whole tank to the charged temperature;
+- a heating run of 15 minutes or more charges the whole tank to the charged temperature. A shorter run, for example
+  one cut off by a demand for heating the house, only adds its heat, and the interval it falls in is not used for
+  learning;
 - water drawn takes energy out, counted from the litres on the water meter and the cold water temperature;
 - a shower starts on a rise in bathroom humidity (or, without a humidity sensor, on a long draw) and ends when no
   water has been drawn for the shower end time, so every litre in between counts as mixed water;
@@ -393,7 +395,15 @@ touched. To remove the integration completely, then remove it in HACS (or delete
 - A water meter that misses low flows loses small trickles, which errs towards showing more water.
 - Learning can drift in unusual weeks (guests, holidays). The error sensors show it, and locks and the recalibrate
   action undo it.
-- A heating run cut short leaves the tank not uniform; the error shows at the next sensor bound.
+- A heating run shorter than 15 minutes (for example one cut off by a demand for heating the house) leaves the tank
+  not uniform. It adds its heat but does not charge, the interval it falls in is not used for learning, and the
+  error shows at the next sensor bound. A run of 15 minutes or more that is cut short is still charged, although the
+  tank is not uniform. A short run before the first sensor drop after a charge also loses that
+  thermocline width estimate. With only a heating-active binary sensor and no energy counter or power sensor, the
+  model still follows the tank sensor upwards during a short run, because that is its only heat signal.
+- With only an energy counter to detect heating, the length of a run is counted from its first to its last counter
+  increase, so it is short by up to one counter step. A counter that reports every 10 minutes needs a real run of
+  about 25 minutes to charge the tank.
 - The usable fraction is learned only from the button, not measured.
 - A fast draw mixes more cold inflow into the tank, so a high-flow shower can run cold a little earlier than the
   litres suggest. The model counts litres, not flow, and does not represent that; the minutes of a high-flow

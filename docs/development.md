@@ -193,6 +193,10 @@ device per entry, so only the rules about devices appearing or disappearing at r
   stay under 500 kB (a test checks it): identical consecutive states are merged, 32-bit float noise is shortened,
   times are rounded to the millisecond, and `--thin` can thin a counter (the `week` fixture uses 20 s on the energy
   counter, keeping the rows around every heating change so each increase stays in its run).
+- `tests/fixtures/previous_release_model.txt` is a copy of the previous release's `model.py` (now at e74907f). A test
+  loads it as a module and restores a store saved now with its own `TankModel.from_dict`, so a rollback is checked
+  by running the old code. Refresh it after a release, before the next change that adds store keys, and adapt it if
+  it stops importing against the current package.
 - Home Assistant tests share `tests/common.py`: made-up source entity IDs, entry options, and a `Rig` that changes
   the sources and feeds the same inputs to a reference `TankModel` to compare the entities with. `TID251` (banned
   `tests` import) is ignored under `tests/` for these relative imports. A test with the recorder asks for
