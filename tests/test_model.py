@@ -1897,3 +1897,67 @@ def test_consecutive_heat_events_outside_a_run_merge() -> None:
     model.on_water_meter(T0 + 62 * MINUTE, 1010.0, "L")
     model.on_flow_return(T0 + 63 * MINUTE, 45.0, 40.0)
     assert len([e for e in model.events if e.kind == EventKind.HEAT]) == 2
+
+
+# ----- humidity reports in the store ----------------------------------------------------------
+
+
+def _reporting_model() -> TankModel:
+    """A model with one humidity sensor that last reported 90 minutes before T0 + 1 h."""
+    model = make_model(Sources(energy_counter=True, humidity_sensors=("bath",)))
+    model.on_humidity(T0 + HOUR, "bath", 55.0, T0 - 30 * MINUTE)
+    return model
+
+
+def test_the_humidity_reports_survive_a_restore() -> None:
+    """The last report and the unavailable flag are saved and restored."""
+    model = _reporting_model()
+    state = json.loads(json.dumps(model.to_dict()))
+    assert state["humidity_reports"] == {
+        "bath": {"last_report": (T0 - 30 * MINUTE).isoformat(), "unavailable": False}
+    }
+    restored = TankModel.from_dict(model.options, model.sources, state)
+    assert restored.to_dict() == model.to_dict()
+    # Silent 2 hours after that report, not 2 hours after the restore.
+    assert not restored.humidity_silent("bath", T0 + 90 * MINUTE - SECOND)
+    assert restored.humidity_silent("bath", T0 + 90 * MINUTE)
+    model.on_humidity(T0 + 2 * HOUR, "bath", None)
+    saved = json.loads(json.dumps(model.to_dict()))
+    assert saved["humidity_reports"]["bath"]["unavailable"] is True
+    again = TankModel.from_dict(model.options, model.sources, saved)
+    assert again.humidity_degraded(T0 + 2 * HOUR)
+
+
+def test_a_state_saved_before_the_humidity_silence_loads() -> None:
+    """A stored state without `humidity_reports` loads: the sensor counts from the restored start."""
+    model = _reporting_model()
+    state = json.loads(json.dumps(model.to_dict()))
+    del state["humidity_reports"]
+    old = TankModel.from_dict(model.options, model.sources, state)
+    assert old.humidity_status(T0 + HOUR)["bath"]["last_report"] is None
+    assert not old.humidity_silent("bath", T0 + HOUR)
+    assert old.humidity_silent("bath", T0 + HOUR + 2 * HOUR)
+
+
+def test_the_reports_of_a_sensor_that_is_no_longer_configured_are_dropped() -> None:
+    """A stored report of a removed sensor is ignored, and a new sensor starts without one."""
+    model = _reporting_model()
+    state = json.loads(json.dumps(model.to_dict()))
+    other = Sources(energy_counter=True, humidity_sensors=("hall",))
+    restored = TankModel.from_dict(model.options, other, state)
+    assert set(restored.to_dict()["humidity_reports"]) == {"hall"}
+    assert restored.to_dict()["humidity_reports"]["hall"]["last_report"] is None
+
+
+def test_a_state_with_humidity_reports_loads_in_the_previous_release(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rollback: the previous release restores a state saved with the humidity reports."""
+    previous = _previous_release_model(monkeypatch)
+    model = _reporting_model()
+    model.on_water_meter(T0 + 2 * HOUR, 1000.0, "L")
+    state = json.loads(json.dumps(model.to_dict()))
+    assert "humidity_reports" in state
+    old = previous.from_dict(model.options, model.sources, state)
+    assert old.t_avg == pytest.approx(model.t_avg)
+    assert old.t_ch == pytest.approx(model.t_ch)

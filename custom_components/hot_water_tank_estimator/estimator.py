@@ -426,7 +426,7 @@ class TankEstimator:
     @callback
     def _handle_tick(self, now: datetime) -> None:
         """Advance the model: loss, run timeout, detection windows and sensor bounds."""
-        self._finish(self.model.tick(now), now)
+        self._finish(self.model.tick(now, self._humidity_reports()), now)
 
     @callback
     def _handle_shower_end(self, now: datetime) -> None:
@@ -435,7 +435,20 @@ class TankEstimator:
             return
         self._shower_timer = None
         self._shower_timer_at = None
-        self._finish(self.model.tick(now), now)
+        self._finish(self.model.tick(now, self._humidity_reports()), now)
+
+    def _humidity_reports(self) -> dict[str, datetime]:
+        """Return the `last_reported` of each humidity sensor that has a state.
+
+        An unchanged report moves only this time, without a state change, so the model learns
+        of it here. Reading the state avoids a listener on every report.
+        """
+        reports: dict[str, datetime] = {}
+        for entity_id in self.config.sources.humidity_sensors:
+            state = self.hass.states.get(entity_id)
+            if state is not None:
+                reports[entity_id] = state.last_reported
+        return reports
 
     @property
     def shower_timer_at(self) -> datetime | None:
@@ -502,7 +515,8 @@ class TankEstimator:
                         self._return = value
                     events += model.on_flow_return(now, self._flow, self._return)
                 case "bathroom_humidity":
-                    events += model.on_humidity(now, entity_id, value)
+                    reported = None if state is None else state.last_reported
+                    events += model.on_humidity(now, entity_id, value, reported)
                 case "cold_water_temperature":
                     events += model.on_cold_water_sensor(now, value)
                 case "ambient_temperature":

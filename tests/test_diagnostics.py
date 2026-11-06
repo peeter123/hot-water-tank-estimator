@@ -210,3 +210,37 @@ async def test_excluded_closures_are_listed_with_their_reason(
     data = await async_get_config_entry_diagnostics(hass, rig.entry)
     closures = data["calibration"]["closures"]
     assert [(c["status"], c["reason"]) for c in closures] == [("excluded", "short_run")]
+
+
+async def test_silent_humidity_sensor_in_the_diagnostics(
+    hass: HomeAssistant, freezer
+) -> None:
+    """Integration-setup scenario "Silent humidity sensor in the diagnostics" (without the repair issue)."""
+    rig = await Rig.start(hass, freezer)  # the sensor reported at 10:00
+    data = await async_get_config_entry_diagnostics(hass, rig.entry)
+    assert data["state"]["humidity"] == {
+        "sensors": {
+            HUMIDITY: {
+                "last_report": "2026-10-15T10:00:00+00:00",
+                "unavailable": False,
+                "silent": False,
+            }
+        },
+        "fallback": False,
+    }
+    await rig.tick(minutes=180)  # 3 hours without a report, silence time 2 hours
+    data = await async_get_config_entry_diagnostics(hass, rig.entry)
+    json.dumps(data)
+    assert data["state"]["humidity"] == {
+        "sensors": {
+            HUMIDITY: {
+                "last_report": "2026-10-15T10:00:00+00:00",
+                "unavailable": False,
+                "silent": True,
+            }
+        },
+        "fallback": True,
+    }
+    assert data["state"]["model"]["humidity_reports"][HUMIDITY]["last_report"] == (
+        "2026-10-15T10:00:00+00:00"
+    )

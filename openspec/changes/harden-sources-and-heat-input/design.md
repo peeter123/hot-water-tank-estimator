@@ -192,6 +192,10 @@ as events when the sources report again, and they close the window. The estimate
   does not restart a silence.
 - **Silent** at `now`: the silence time is above 0, the sensor is not unavailable, and `now - last_report >= silence
   time`. A sensor with no report yet counts from the model's start.
+- **Settled in the group 5 review (2026-11-06).** After a Home Assistant restart each state is new, so its
+  `last_reported` is the restart time and a silence counts again from the restart (as an outage does for the repair
+  issues, D8); only a reload keeps it. An unchanged report reaches the model at the next tick, so for up to 5 minutes
+  a sensor that has reported can still count as silent. Both are accepted; `docs/model.md` says so.
 - **Replays** see only recorded changes, so every gap between two recorded states is a silence when it is long
   enough.
 - **The degraded state** holds when a humidity sensor is configured and every humidity sensor is unavailable or

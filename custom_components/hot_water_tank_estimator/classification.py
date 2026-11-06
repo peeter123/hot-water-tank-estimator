@@ -165,6 +165,9 @@ class DrawClassifier:
         self._shower: _Shower | None = None
         self._shower_report: ShowerReport | None = None
         self._warned_units: set[str | None] = set()
+        # Whether no humidity sensor reports, as of the last call (the model passes it with
+        # every call; it is derived from the sensors' reports, so it is not saved).
+        self._degraded = False
 
     @property
     def detected(self) -> bool:
@@ -201,15 +204,16 @@ class DrawClassifier:
         """Return when the draw session in progress becomes a shower, None when it cannot.
 
         With no shower in progress and a session open, it is the session start plus the next
-        shower time while the bathroom is humid, or plus the long-draw duration without a
-        humidity sensor and with the rule on. It is the earliest moment: the shower starts at
-        the first meter increase at or after it. Read-only; it changes nothing.
+        shower time while the bathroom is humid or no humidity sensor reports (degraded), or
+        plus the long-draw duration without a humidity sensor and with the rule on. It is the
+        earliest moment: the shower starts at the first meter increase at or after it.
+        Read-only; it changes nothing.
         """
         start = self._session_start
         if self._shower is not None or start is None:
             return None
         options = self.options
-        if self.humid:
+        if self.humid or self._degraded:
             return start + timedelta(minutes=options.next_shower_minutes)
         if options.long_draw_minutes > 0 and not options.humidity_configured:
             return start + timedelta(minutes=options.long_draw_minutes)
@@ -305,7 +309,12 @@ class DrawClassifier:
         self.options = options
 
     def on_meter(
-        self, now: datetime, value: float | None, unit: str | None
+        self,
+        now: datetime,
+        value: float | None,
+        unit: str | None,
+        *,
+        degraded: bool = False,
     ) -> Classification | None:
         """Process a water meter reading.
 
@@ -313,10 +322,14 @@ class DrawClassifier:
             now: Time of the reading.
             value: The meter reading in `unit`, None when unavailable or non-numeric.
             unit: The meter unit: m3, L, gal or ft3.
+            degraded: Whether humidity sensors are configured and none reports (all are
+                unavailable or silent): a draw session of the next shower time then starts a
+                shower, as in the humid bathroom.
 
         Returns:
             The classified draw, or None when the reading drew no water.
         """
+        self._degraded = degraded
         self._advance(now)
         if not _finite(value):
             # The last valid reading stays the starting point, so a meter that was offline
@@ -358,13 +371,21 @@ class DrawClassifier:
             self._prune_others(now)
         return Classification(litres=delta, mixed=mixed, reclassified=reclassified)
 
-    def on_humidity(self, now: datetime, sensor_id: str, value: float | None) -> float:
+    def on_humidity(
+        self,
+        now: datetime,
+        sensor_id: str,
+        value: float | None,
+        *,
+        degraded: bool = False,
+    ) -> float:
         """Process a humidity reading.
 
         Args:
             now: Time of the reading.
             sensor_id: Which sensor read it. Every sensor has its own window.
             value: Relative humidity in percent, None when unavailable.
+            degraded: As for `on_meter`, after this reading: a valid reading ends it.
 
         Returns:
             Litres to reclassify from other draws to mixed draws, 0 when detection did not
@@ -374,17 +395,19 @@ class DrawClassifier:
         if _finite(value):
             humidity = self._humidity.setdefault(sensor_id, _Humidity())
             humidity.readings.append((now, float(value)))
-        return self.update(now)
+        return self.update(now, degraded=degraded)
 
-    def update(self, now: datetime) -> float:
+    def update(self, now: datetime, *, degraded: bool = False) -> float:
         """Advance time: end an old session and a due shower, slide the humidity windows.
 
         Args:
             now: The current time.
+            degraded: As for `on_meter`.
 
         Returns:
             Litres to reclassify, as for `on_humidity`.
         """
+        self._degraded = degraded
         self._advance(now)
         for humidity in self._humidity.values():
             self._evaluate_humidity(now, humidity)
@@ -428,7 +451,8 @@ class DrawClassifier:
         """Start a shower when a trigger holds and none is in progress.
 
         The triggers are the edge to humid, a draw session of the next shower time while the
-        bathroom is humid, and, without a humidity sensor, a session of the long-draw duration.
+        bathroom is humid or no humidity sensor reports (degraded), and, without a humidity
+        sensor, a session of the long-draw duration.
 
         Args:
             now: The current time.
@@ -446,7 +470,7 @@ class DrawClassifier:
         if not start and session and self._session_start is not None:
             lasted = now - self._session_start
             options = self.options
-            if humid:
+            if humid or self._degraded:
                 start = lasted >= timedelta(minutes=options.next_shower_minutes)
             elif options.long_draw_minutes > 0 and not options.humidity_configured:
                 start = lasted >= timedelta(minutes=options.long_draw_minutes)

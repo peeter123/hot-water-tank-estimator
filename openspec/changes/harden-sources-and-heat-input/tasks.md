@@ -133,11 +133,11 @@ Applies to every group:
 
 ## 5. Humidity silence and the detection backup
 
-- [ ] 5.1 Add the option "Humidity silence time" (`humidity_silence`, hours, default 2, 0-24, step 0.5) to
+- [x] 5.1 Add the option "Humidity silence time" (`humidity_silence`, hours, default 2, 0-24, step 0.5) to
   `const.py`, `ModelOptions` and the draws step of the options flow, with strings and translations (design D6).
   Verify: tests for the integration-setup scenarios "Fresh entry, draws and heat" and "Existing entry after the
   update", and `python scripts/lint.py --hassfest`.
-- [ ] 5.2 In `model.py`, track each humidity sensor's last report and whether its last state was unavailable, the
+- [x] 5.2 In `model.py`, track each humidity sensor's last report and whether its last state was unavailable, the
   silent state and the degraded state (design D6). Save the reports with a default of none. In `estimator.py`, pass
   each humidity state's `last_reported` with every humidity state fed (at start too) and on every tick. Verify:
   - tests for the draw-classification scenarios "Sensor goes quiet", "Unchanged reports" and "Silence check off";
@@ -145,16 +145,16 @@ Applies to every group:
     `last_reported` is older than its feed time;
   - the store tests of D10 for the new key;
   - `python scripts/lint.py`.
-- [ ] 5.3 In `classification.py`, let the degraded state start a shower on a session of the next shower time, and
+- [x] 5.3 In `classification.py`, let the degraded state start a shower on a session of the next shower time, and
   count down to it in `session_shower_time` (design D7). Verify:
   - tests for the draw-classification scenarios "Shower during a silence", "Short draw during a silence", "Sensor
     unavailable", "One of two sensors still reports" and "Sensor reports again";
   - a test for the integration-setup scenario "Draw while the humidity sensor is silent";
   - `python scripts/lint.py`.
-- [ ] 5.4 Add to the diagnostics each humidity sensor's last report and silent state, and the degraded flag (design
+- [x] 5.4 Add to the diagnostics each humidity sensor's last report and silent state, and the degraded flag (design
   D9). Verify: the part of the integration-setup scenario "Silent humidity sensor in the diagnostics" without the
   repair issue (group 6 adds that), and `python scripts/lint.py`.
-- [ ] 5.5 Run the backtest on the October export and the export of 1.1, and compare with the baseline of 1.2
+- [x] 5.5 Run the backtest on the October export and the export of 1.1, and compare with the baseline of 1.2
   (design D11). Record the comparison in `private/installation.md`:
   - the shower of 2026-10-10 (start, end, litres mixed, flow sample);
   - every other shower whose classification changed, with the reason;
@@ -162,9 +162,12 @@ Applies to every group:
 
   Put the evidence without entity IDs into `docs/model.md`. Verify: the comparison is in `private/installation.md`
   with the date, and `python scripts/lint.py`.
-- [ ] 5.6 **User review.** Show the user the comparison of 5.5 and ask whether the silence time default of 2 h
+- [x] 5.6 **User review.** Show the user the comparison of 5.5 and ask whether the silence time default of 2 h
   holds. Record the decision with its date in this task, and update the docs and the default if it changes.
-- [ ] 5.7 Update `docs/model.md` ("Draw classification") with the silence, the backup and the evidence of design D6
+  - Decision 2026-11-06: the user kept 2 h, having seen the comparison (only the shower of 2026-10-10 changes, 71 L
+    now mixed; the closure after it from 7.14 to 3.86 K given; the October mean from 4.20 to 4.06 K given and from
+    1.59 to 1.51 K fitted; November unchanged). No default or doc change follows.
+- [x] 5.7 Update `docs/model.md` ("Draw classification") with the silence, the backup and the evidence of design D6
   and D7. Update the README: the options table, "How the estimate updates", the troubleshooting entry on missed
   showers, and the limitations (a 5-minute draw counts as a shower while no humidity sensor reports). Verify: `python
   scripts/lint.py` (including `tests/test_readme.py`).

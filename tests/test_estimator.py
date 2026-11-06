@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from .common import (
+    ATTRIBUTES,
     ENERGY,
     FLOW,
     HEATING,
@@ -304,3 +305,78 @@ async def test_one_timer_follows_the_deadline_and_a_stop_leaves_none(
     await hass.async_block_till_done()
     assert runtime.model.next_shower_end == pending
     assert len(runtime.model.events) == events
+
+
+# ----- humidity silence (integration-setup: state survives a restart, shower countdown) -------
+
+
+def _silent(rig: Rig, minutes_after_start: float) -> bool:
+    """Whether the rig's humidity sensor counts as silent at a time after the rig's start (10:00)."""
+    start = dt_util.parse_datetime("2026-10-15T10:00:00+00:00")
+    assert start is not None
+    model = rig.entry.runtime_data.model
+    return model.humidity_silent(
+        HUMIDITY, start + timedelta(minutes=minutes_after_start)
+    )
+
+
+async def test_reload_during_a_humidity_silence(hass: HomeAssistant, freezer) -> None:
+    """Integration-setup scenario "Reload during a humidity silence": silent 30 minutes after the reload."""
+    rig = await Rig.start(hass, freezer)  # the sensor reported at 10:00
+    await rig.tick(minutes=90)  # 11:30
+    assert await hass.config_entries.async_reload(rig.entry.entry_id)
+    await hass.async_block_till_done()
+    assert dt_util.utcnow() == dt_util.parse_datetime("2026-10-15T11:30:00+00:00")
+    assert not _silent(rig, 119)
+    assert _silent(rig, 120)  # 12:00, 30 minutes after the reload, not 13:30
+
+
+async def test_a_new_entry_reads_the_last_report_of_a_humidity_state(
+    hass: HomeAssistant, freezer
+) -> None:
+    """A state older than the start counts from its `last_reported`: the first feed does not restart a silence."""
+    freezer.move_to("2026-10-15T10:00:00+00:00")
+    set_sources(hass)  # the humidity state is reported at 10:00
+    freezer.move_to("2026-10-15T11:30:00+00:00")
+    entry = await setup_entry(hass)
+    model = entry.runtime_data.model
+    start = dt_util.utcnow()
+    assert not model.humidity_silent(HUMIDITY, start + timedelta(minutes=29))
+    assert model.humidity_silent(HUMIDITY, start + timedelta(minutes=30))
+
+
+async def test_an_unchanged_report_keeps_the_sensor_from_going_silent(
+    hass: HomeAssistant, freezer
+) -> None:
+    """A report that repeats the value moves only `last_reported`: the tick passes it on."""
+    rig = await Rig.start(hass, freezer)  # reported at 10:00
+    await rig.tick(minutes=115)  # 11:55
+    # Same state, same attributes: Home Assistant fires `state_reported` and moves last_reported.
+    hass.states.async_set(HUMIDITY, "55.0", ATTRIBUTES[HUMIDITY])
+    await hass.async_block_till_done()
+    state = hass.states.get(HUMIDITY)
+    assert state is not None
+    assert state.last_reported > state.last_changed
+    await rig.tick(minutes=65)  # 13:00, 3 hours after the last change
+    model = rig.entry.runtime_data.model
+    assert not model.humidity_silent(HUMIDITY, dt_util.utcnow())
+    assert model.humidity_silent(HUMIDITY, dt_util.utcnow() + timedelta(minutes=56))
+
+
+async def test_draw_while_the_humidity_sensor_is_silent(
+    hass: HomeAssistant, freezer
+) -> None:
+    """Integration-setup scenario "Draw while the humidity sensor is silent": 17:54:32 gives 17:59:32."""
+    rig = await Rig.start(hass, freezer)  # the sensor reported at 10:00
+    freezer.move_to("2026-10-15T17:54:32+00:00")
+    await rig.set(METER, "100.001")
+    countdown = value(hass, rig.entry, "sensor", "draw_counts_as_shower")
+    assert dt_util.parse_datetime(countdown) == dt_util.parse_datetime(
+        "2026-10-15T17:59:32+00:00"
+    )
+    assert rig.read("binary_sensor", "shower_detected") == "off"
+    for step in range(2, 12):  # a reading every 30 seconds keeps the session open
+        await rig.set(METER, f"{100 + 0.001 * step:.3f}", after=30)
+        expected = "on" if step == 11 else "off"
+        assert rig.read("binary_sensor", "shower_detected") == expected
+    assert dt_util.utcnow() == dt_util.parse_datetime("2026-10-15T17:59:32+00:00")

@@ -16,13 +16,14 @@ async def async_get_config_entry_diagnostics(
     estimator = entry.runtime_data
     calibrator = estimator.calibrator
     model = estimator.model
+    now = dt_util.utcnow()
     return {
         "options": dict(entry.options),
         "state": {
             "t_avg": model.t_avg,
             "t_ch": model.t_ch,
             "t_cold": model.t_cold,
-            "t_ambient": model.ambient_temperature(dt_util.utcnow()),
+            "t_ambient": model.ambient_temperature(now),
             "cold_fraction": model.cold_fraction,
             "outputs": {
                 "tank_litres": model.outputs.tank_litres,
@@ -32,6 +33,10 @@ async def async_get_config_entry_diagnostics(
             },
             "heating": model.heating,
             "shower_detected": model.shower_detected,
+            "humidity": {
+                "sensors": model.humidity_status(now),
+                "fallback": model.humidity_degraded(now),
+            },
             "model": model.to_dict(),
         },
         "sources": estimator.source_availability(),

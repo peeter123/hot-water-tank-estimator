@@ -166,7 +166,12 @@ async def test_every_tuning_value_can_be_changed(hass: HomeAssistant) -> None:
         hass,
         entry.entry_id,
         tank={**TANK_FIELDS, "mix_temperature": 40.0, "thermocline_width": 30},
-        draws={"session_gap": 30.0, "long_draw_minutes": 4.0, "outside_heat": True},
+        draws={
+            "session_gap": 30.0,
+            "long_draw_minutes": 4.0,
+            "outside_heat": True,
+            "humidity_silence": 1.5,
+        },
         learning={CONF_HISTORY_DAYS: 14},
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -177,6 +182,7 @@ async def test_every_tuning_value_can_be_changed(hass: HomeAssistant) -> None:
     assert options.session_gap == 30.0
     assert options.long_draw_minutes == 4.0
     assert options.outside_heat is True
+    assert options.humidity_silence == 1.5
     assert entry.runtime_data.config.history_days == 14
 
 
@@ -353,6 +359,22 @@ async def test_the_ambient_fallback_is_a_tuning_value(hass: HomeAssistant) -> No
                 entry.entry_id,
                 tank={CONF_SENSOR_HEIGHT: 50, **shape, "ambient_fallback": bad},
             )
+
+
+async def test_the_humidity_silence_time_is_limited_to_0_to_24_hours(
+    hass: HomeAssistant,
+) -> None:
+    """0 (off) and 24 h are accepted, a negative time or more than 24 h is not."""
+    set_sources(hass)
+    entry = await setup_entry(hass)
+    for good in (0.0, 24.0):
+        result = await walk(hass, entry.entry_id, draws={"humidity_silence": good})
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+        await hass.async_block_till_done()
+        assert entry.runtime_data.model.options.humidity_silence == good
+    for bad in (-0.5, 24.5):
+        with pytest.raises(InvalidData):
+            await walk(hass, entry.entry_id, draws={"humidity_silence": bad})
 
 
 async def test_options_validation(hass: HomeAssistant) -> None:

@@ -1099,3 +1099,230 @@ def test_the_session_shower_time_without_a_humid_bathroom() -> None:
     off.on_meter(T0, 1000.0, "L")
     off.on_meter(T0 + 8 * SECOND, 1001.0, "L")
     assert off.session_shower_time is None
+
+
+# ----- humidity silence and the detection backup -------------------------------------------
+
+SILENCE_START = datetime(2026, 10, 10, 15, 44, 24, tzinfo=UTC)
+
+
+def _silence_model(
+    sensors: tuple[str, ...] = ("bath",), **overrides: float
+) -> TankModel:
+    """A 285 L tank started at 15:44:24 whose humidity sensors all reported 58 % just then."""
+    model = TankModel(
+        ModelOptions(volume=285.0, **overrides),
+        Sources(energy_counter=True, humidity_sensors=sensors),
+        SILENCE_START,
+        57.0,
+    )
+    for sensor in sensors:
+        model.on_humidity(SILENCE_START, sensor, 58.0)
+    return model
+
+
+def _session(
+    model: TankModel, start: datetime, step: timedelta, count: int, litres: float
+) -> datetime | None:
+    """Draw `litres` in `count` equal increases from `start`, `step` apart.
+
+    Returns:
+        The time of the increase at which a shower was first detected, None if it never was.
+    """
+    meter = 1000.0
+    model.on_water_meter(start - 10 * SECOND, meter, "L")
+    started = None
+    for index in range(count):
+        meter += litres / count
+        now = start + index * step
+        model.on_water_meter(now, meter, "L")
+        if started is None and model.shower_detected:
+            started = now
+    return started
+
+
+def test_sensor_goes_quiet() -> None:
+    """Silence time 2 h, last report 15:44:24: silent from 17:44:24, not at its next report."""
+    model = _silence_model()
+    assert not model.humidity_silent("bath", SILENCE_START + 2 * HOUR_ - SECOND)
+    assert model.humidity_silent("bath", SILENCE_START + 2 * HOUR_)
+    assert model.humidity_degraded(SILENCE_START + 2 * HOUR_)
+    model.on_humidity(SILENCE_START + 2 * HOUR_ + 10 * MINUTE, "bath", 58.0)
+    assert not model.humidity_silent("bath", SILENCE_START + 2 * HOUR_ + 10 * MINUTE)
+    assert not model.humidity_degraded(SILENCE_START + 2 * HOUR_ + 10 * MINUTE)
+
+
+def test_unchanged_reports() -> None:
+    """A sensor that reports 58.5 % every 10 minutes for 3 hours without a change is never silent."""
+    model = _silence_model()
+    model.on_humidity(SILENCE_START, "bath", 58.5)
+    for step in range(1, 19):
+        now = SILENCE_START + step * 10 * MINUTE
+        # No state change: only the state's last_reported moves, which the tick passes on.
+        model.tick(now, {"bath": now})
+        assert not model.humidity_silent("bath", now)
+        assert not model.humidity_degraded(now)
+    # The same sensor without those reports is silent from 2 hours after its last one.
+    quiet = _silence_model()
+    quiet.tick(SILENCE_START + 3 * HOUR_)
+    assert quiet.humidity_silent("bath", SILENCE_START + 3 * HOUR_)
+
+
+def test_silence_check_off() -> None:
+    """Silence time 0 and 5 hours without a report: not silent, not degraded."""
+    model = _silence_model(humidity_silence=0.0)
+    now = SILENCE_START + 5 * HOUR_
+    model.tick(now)
+    assert not model.humidity_silent("bath", now)
+    assert not model.humidity_degraded(now)
+
+
+def test_a_sensor_without_a_report_counts_from_the_start() -> None:
+    """A sensor that never reported is silent 2 hours after the start of the model."""
+    model = TankModel(
+        ModelOptions(volume=285.0),
+        Sources(energy_counter=True, humidity_sensors=("bath",)),
+        SILENCE_START,
+        57.0,
+    )
+    assert not model.humidity_silent("bath", SILENCE_START + 2 * HOUR_ - SECOND)
+    assert model.humidity_silent("bath", SILENCE_START + 2 * HOUR_)
+    status = model.humidity_status(SILENCE_START + 3 * HOUR_)
+    assert status == {
+        "bath": {"last_report": None, "unavailable": False, "silent": True}
+    }
+
+
+def test_a_state_read_at_a_restart_counts_from_its_last_report() -> None:
+    """A reading reported 90 minutes before it is silent 30 minutes later, not 2 hours."""
+    model = _silence_model()
+    restart = SILENCE_START + 4 * HOUR_
+    model.on_humidity(restart, "bath", 58.0, restart - 90 * MINUTE)
+    assert not model.humidity_silent("bath", restart + 29 * MINUTE)
+    assert model.humidity_silent("bath", restart + 30 * MINUTE)
+    # An older report never moves the last one back.
+    model.on_humidity(restart + 31 * MINUTE, "bath", 58.0, restart - 100 * MINUTE)
+    assert model.humidity_silent("bath", restart + 31 * MINUTE)
+
+
+def test_a_sensor_that_is_not_configured_is_ignored() -> None:
+    """A reading of an unknown sensor adds no report and does not change the degraded state."""
+    model = _silence_model()
+    model.on_humidity(SILENCE_START + MINUTE, "other", 58.0)
+    model.on_humidity(SILENCE_START + 2 * MINUTE, "other", None)
+    assert set(model.humidity_status(SILENCE_START)) == {"bath"}
+    assert set(model.to_dict()["humidity_reports"]) == {"bath"}
+    assert not model.humidity_degraded(SILENCE_START + 2 * MINUTE)
+
+
+def test_an_unavailable_sensor_is_not_silent_but_counts_as_out() -> None:
+    """Unavailable is its own state: not silent, but the fallback holds while it is the only sensor."""
+    model = _silence_model()
+    now = SILENCE_START + 10 * MINUTE
+    model.on_humidity(now, "bath", None)
+    assert not model.humidity_silent("bath", now + 5 * HOUR_)
+    assert model.humidity_degraded(now)
+    model.on_humidity(now + MINUTE, "bath", 58.0)
+    assert not model.humidity_degraded(now + MINUTE)
+
+
+def test_shower_during_a_silence() -> None:
+    """Silent since 17:44:24, a session 17:54:32-18:04:42 with 71 L: a shower from 17:59:32, 71 L mixed."""
+    model = _silence_model()
+    start = datetime(2026, 10, 10, 17, 54, 32, tzinfo=UTC)
+    started = _session(model, start, 10 * SECOND, 62, 71.0)
+    assert started == datetime(2026, 10, 10, 17, 59, 32, tzinfo=UTC)
+    sums = model.interval_sums
+    assert sums.mixed == pytest.approx(71 * (38 - model.t_cold) / 285)
+    # The other-draw energy is subtracted at the current balance T_ch, which standing loss lowered
+    # during the session, so a remainder of about 0.0008 K is left.
+    assert sums.other == pytest.approx(0, abs=1e-3)
+    end = datetime(2026, 10, 10, 18, 4, 42, tzinfo=UTC)
+    model.tick(end + 5 * MINUTE)
+    assert not model.shower_detected
+
+
+def test_short_draw_during_a_silence() -> None:
+    """A session of 4.4 minutes and 22 L while silent stays other draws."""
+    model = _silence_model()
+    start = datetime(2026, 10, 10, 17, 54, 32, tzinfo=UTC)
+    assert _session(model, start, 12 * SECOND, 23, 22.0) is None
+    assert model.humidity_degraded(start)
+    assert model.interval_sums.mixed == 0.0
+    assert model.interval_sums.other > 0.0
+
+
+def test_sensor_unavailable() -> None:
+    """The only humidity sensor is unavailable and a session runs for 5 minutes: a shower starts."""
+    model = _silence_model()
+    start = SILENCE_START + MINUTE
+    model.on_humidity(start - 30 * SECOND, "bath", None)
+    started = _session(model, start, 10 * SECOND, 40, 20.0)
+    assert started == start + 5 * MINUTE
+
+
+def test_one_of_two_sensors_still_reports() -> None:
+    """One sensor unavailable, the other reports without a rise: an 8-minute session starts nothing."""
+    model = _silence_model(("bath", "hall"))
+    start = SILENCE_START + 3 * HOUR_
+    model.on_humidity(start - 5 * MINUTE, "hall", None)
+    model.on_humidity(start - 4 * MINUTE, "bath", 58.0)
+    assert not model.humidity_degraded(start)
+    assert _session(model, start, 10 * SECOND, 49, 30.0) is None
+    assert model.interval_sums.mixed == 0.0
+    assert model.interval_sums.other > 0.0
+
+
+def test_sensor_reports_again() -> None:
+    """A shower the fallback started continues when the sensor reports, to the shower end time."""
+    model = _silence_model()
+    start = datetime(2026, 10, 10, 17, 54, 32, tzinfo=UTC)
+    meter = 1000.0
+    model.on_water_meter(start - 10 * SECOND, meter, "L")
+    for index in range(40):  # 6 minutes and 30 seconds of water
+        meter += 1.0
+        model.on_water_meter(start + index * 10 * SECOND, meter, "L")
+    last = start + 390 * SECOND
+    assert model.shower_detected
+    model.on_humidity(last, "bath", 58.0)
+    assert not model.humidity_degraded(last)
+    assert model.shower_detected
+    meter += 1.0
+    model.on_water_meter(last + 10 * SECOND, meter, "L")
+    assert model.shower_detected
+    assert model.next_shower_end == last + 10 * SECOND + 5 * MINUTE
+    model.tick(last + 10 * SECOND + 5 * MINUTE)
+    assert not model.shower_detected
+
+
+def test_the_countdown_follows_the_degraded_state() -> None:
+    """While silent the countdown is the session start plus the next shower time; a report clears it."""
+    model = _silence_model()
+    start = datetime(2026, 10, 10, 17, 54, 32, tzinfo=UTC)
+    model.on_water_meter(start - 10 * SECOND, 1000.0, "L")
+    model.on_water_meter(start, 1001.0, "L")
+    assert model.next_shower_start == start + 5 * MINUTE
+    # A sensor that reports before the session starts is not silent.
+    live = _silence_model()
+    live.on_humidity(start - MINUTE, "bath", 58.0)
+    live.on_water_meter(start - 10 * SECOND, 1000.0, "L")
+    live.on_water_meter(start, 1001.0, "L")
+    assert live.next_shower_start is None
+    # A silence time of 0 turns the backup off with it.
+    off = _silence_model(humidity_silence=0.0)
+    off.on_water_meter(start - 10 * SECOND, 1000.0, "L")
+    off.on_water_meter(start, 1001.0, "L")
+    assert off.next_shower_start is None
+
+
+def test_the_classifier_follows_the_flag_it_is_given() -> None:
+    """`degraded` is not saved: a restored classifier has it off until the next call passes it."""
+    classifier = DrawClassifier(ClassifierOptions(humidity_configured=True))
+    classifier.on_meter(T0, 1000.0, "L", degraded=True)
+    classifier.on_meter(T0 + 10 * SECOND, 1001.0, "L", degraded=True)
+    assert classifier.session_shower_time == T0 + 10 * SECOND + 5 * MINUTE
+    restored = DrawClassifier(classifier.options)
+    restored.restore(json.loads(json.dumps(classifier.to_dict())))
+    assert restored.session_shower_time is None
+    restored.update(T0 + 20 * SECOND, degraded=True)
+    assert restored.session_shower_time == T0 + 10 * SECOND + 5 * MINUTE

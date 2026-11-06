@@ -360,10 +360,10 @@ mixed draw while a shower or bath is in progress, and an other draw otherwise.
      |  idle  |                                           |  SHOWER   |  every litre is mixed
      +--------+  <-------------------+                    +-----------+
        ^   |                         |                       |     ^
-       |   | no humidity sensor:     | not humid             |     | still humid and a session
-       |   | a session of the        |                       |     | has lasted the next
-       |   | long-draw duration      |       no water for    |     | shower time (M)
-       |   +-------------------------|-----> the shower end  |     |
+       |   | no humidity sensor:     | not humid             |     | still humid or no humidity
+       |   | a session of the        |                       |     | sensor reports, and a
+       |   | long-draw duration      |       no water for    |     | session has lasted the
+       |   +-------------------------|-----> the shower end  |     | next shower time (M)
        |        (to SHOWER)          |       time (N)        v     |
        |                        +------------------------------------+
        +------------------------|  ended, humid: other draws, and   |
@@ -371,10 +371,11 @@ mixed draw while a shower or bath is in progress, and an other draw otherwise.
                                 +------------------------------------+
   ```
 
-  - **Start.** A shower starts on one of three triggers: the bathroom becomes humid (the edge, so a bathroom that is
+  - **Start.** A shower starts on one of four triggers: the bathroom becomes humid (the edge, so a bathroom that is
     still humid after a shower cannot restart one from the humidity); a draw session that has lasted the next
-    shower time (default 5 minutes) while the bathroom is humid and no shower is in progress; or, with no humidity
-    sensor configured, a session of the long-draw duration. At the start, the litres of the current session drawn
+    shower time (default 5 minutes) while the bathroom is humid and no shower is in progress; the same session
+    while no humidity sensor reports (see "Humidity silence and the backup"); or, with no humidity sensor
+    configured, a session of the long-draw duration. At the start, the litres of the current session drawn
     within the reclassify window become mixed draws.
   - **End.** A shower ends at `t_ref + N`, where `t_ref` is the later of its last meter increase and its start,
     and N the shower end time (default 5 minutes). The classification ends then, not at the next reading: every call
@@ -424,8 +425,37 @@ mixed draw while a shower or bath is in progress, and an other draw otherwise.
     from 1.57 to 2.05 K.
   - **Long draws with a humidity sensor.** In October the draws of at least 3 minutes that the humidity did not catch
     ran up to 8.1 minutes, apart from two: a 14.2-minute draw at 4.2 L/min with the humidity flat (a garden hose) and
-    a 10.2-minute draw during an hour without humidity readings. A long-draw backup would only have been right for
-    the second, which belongs to the sensor outage, not to detection.
+    a 10.2-minute draw during a silence of the humidity sensor. The long-draw duration stays off with a sensor, because
+    it would be right for the second only; the silence is handled by the backup below.
+  - **Humidity silence and the backup.** A humidity sensor that sends no report for the humidity silence time
+    (default 2 hours, 0-24, 0 is off) counts as silent. A report is any reading, also one that repeats the last
+    value: the runtime reads the time of each sensor's last report (`last_reported`) with every state it feeds, at
+    start too, and on every 5-minute tick, so an unchanged report counts without a listener and a reload does not
+    restart a silence. A sensor that has not reported yet counts from the model's start. A silent sensor counts as
+    unavailable for shower detection until it reports again. While a humidity sensor is configured and every one is
+    unavailable or silent (the degraded state), no humidity edge can occur, and a draw session that has lasted the
+    next shower time starts a shower, with the reclassify window as in the humid bathroom, and the shower ends by the
+    shower end time. The fallback ends at the next valid reading of any humidity sensor; a shower in progress runs
+    to its end. A silent sensor with one still reporting does not start the fallback. The classifier gets the state
+    from the model on each call and does not save it: it follows from the sensors' reports, which the model saves.
+    Replays of recorded history see only recorded changes, so every gap between two recorded states counts as a
+    silence when it is long enough, which overstates the backup at worst for a sensor that reports unchanged values.
+    A Home Assistant restart counts a silence again from the restart, because the states are new; only a reload keeps
+    it. An unchanged report reaches the model at the next tick, so a sensor can count as silent for up to 5 minutes
+    after it has reported.
+  - **Why the next shower time, and why 2 hours.** The long-draw duration is off by default and ignored with a
+    humidity sensor, whereas the next shower time already separates showers from washbasin draws (2.0-4.5 minutes in
+    the humid tail above). Gaps between recorded states of the humidity sensor of the development installation, October:
+    6 of 0.5-1 h, 4 of 1-1.5 h, 2 of 1.5-2 h, 1 of 2-3 h and 1 of 3.7 h; the first six days of November one of 0.5-1 h.
+    So two silences of at least 2 hours in 2026-10-01 to 2026-11-06. The sensor was never unavailable: it goes silent
+    instead. The silence of 3.7 hours held a shower of 10.2 minutes and 71 L, which was counted as other draws and left
+    the next charge closure 7.14 K off; the other silence (3.0 hours) held no draw of 5 minutes (the longest was 4.4
+    minutes and 22 L). At 2 hours a silence counts from 2 hours after the last report; at 1.5 hours two more silences
+    would count, with no shower in them. Backtest with the backup (October 2026-10-01 to 2026-10-31, 285 L): the
+    shower is added (71 L mixed, 10.2 minutes, flow sample 6.9 L/min) and no other shower changes; the closure after it
+    falls from 7.14 K to 3.86 K with the options as given and from 2.20 K to -1.08 K fitted, the mean absolute error
+    from 4.20 to 4.06 K as given and from 1.59 to 1.51 K fitted, and the worst fitted error from 5.03 to 4.95 K. The
+    first days of November, with no silence, are unchanged.
 - **Reclassify window.** Humidity rose 0.9-6.3 minutes after a shower started on the development installation, and
   the other triggers fire only after their duration. When a shower starts, the litres of the current session that
   were drawn within the last 10 minutes (the window) and counted as other draws become mixed draws, and the model is

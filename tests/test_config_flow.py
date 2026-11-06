@@ -178,6 +178,7 @@ async def test_fresh_entry_draw_and_heat_defaults(hass: HomeAssistant) -> None:
     assert options.shower_flow == 7.5
     assert options.humidity_rise == 6
     assert options.humidity_window == 60
+    assert options.humidity_silence == 2
     assert options.shower_end_minutes == 5
     assert options.next_shower_minutes == 5
     assert options.long_draw_minutes == 0
@@ -355,7 +356,7 @@ async def test_the_same_tank_sensor_twice_is_aborted(hass: HomeAssistant) -> Non
 
 
 async def test_existing_entry_after_the_update(hass: HomeAssistant) -> None:
-    """An entry saved before the shower end and next shower times uses 5 min each and keeps its other values."""
+    """An entry saved before the shower end and next shower times and the humidity silence time uses their defaults and keeps its other values."""
     options = {**FULL_OPTIONS, "session_gap": 30.0, "long_draw_minutes": 4.0}
     assert "shower_end_minutes" not in options
     assert "next_shower_minutes" not in options
@@ -365,6 +366,7 @@ async def test_existing_entry_after_the_update(hass: HomeAssistant) -> None:
     assert model_options.shower_end_minutes == 5
     assert model_options.next_shower_minutes == 5
     assert model_options.outside_heat is False
+    assert model_options.humidity_silence == 2
     assert model_options.session_gap == 30.0
     assert model_options.long_draw_minutes == 4.0
     assert model_options.humidity_rise == 6

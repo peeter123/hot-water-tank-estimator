@@ -62,6 +62,7 @@ from .const import (
     DEFAULT_COLD_MEAN,
     DEFAULT_HISTORY_DAYS,
     DEFAULT_HUMIDITY_RISE,
+    DEFAULT_HUMIDITY_SILENCE,
     DEFAULT_HUMIDITY_WINDOW,
     DEFAULT_LONG_DRAW_MINUTES,
     DEFAULT_LOSS_COEFFICIENT,
@@ -161,6 +162,7 @@ DRAW_TUNING = (
     ),
     Tuning("humidity_rise", DEFAULT_HUMIDITY_RISE, 1, 40, 0.5, PERCENTAGE),
     Tuning("humidity_window", DEFAULT_HUMIDITY_WINDOW, 5, 720, 5, UnitOfTime.MINUTES),
+    Tuning("humidity_silence", DEFAULT_HUMIDITY_SILENCE, 0, 24, 0.5, UnitOfTime.HOURS),
     Tuning(
         "shower_end_minutes", DEFAULT_SHOWER_END_MINUTES, 2, 30, 0.5, UnitOfTime.MINUTES
     ),

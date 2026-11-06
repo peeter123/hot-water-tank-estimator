@@ -16,6 +16,7 @@ the replay tests and the backtest.
 """
 
 from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -32,6 +33,7 @@ from .const import (
     DEFAULT_COLD_COLDEST_DAY,
     DEFAULT_COLD_MEAN,
     DEFAULT_HUMIDITY_RISE,
+    DEFAULT_HUMIDITY_SILENCE,
     DEFAULT_HUMIDITY_WINDOW,
     DEFAULT_LONG_DRAW_MINUTES,
     DEFAULT_LOSS_COEFFICIENT,
@@ -192,6 +194,8 @@ class ModelOptions:
     shower_flow_range: tuple[float, float] | None = None
     humidity_rise: float = DEFAULT_HUMIDITY_RISE  # percentage points
     humidity_window: float = DEFAULT_HUMIDITY_WINDOW  # minutes
+    # Hours without a report after which a humidity sensor counts as silent; 0 is off.
+    humidity_silence: float = DEFAULT_HUMIDITY_SILENCE
     long_draw_minutes: float = DEFAULT_LONG_DRAW_MINUTES  # 0 is off
     reclassify_window: float = DEFAULT_RECLASSIFY_WINDOW  # minutes
     session_gap: float = DEFAULT_SESSION_GAP  # seconds
@@ -222,6 +226,20 @@ class ModelOptions:
             next_shower_minutes=self.next_shower_minutes,
             humidity_configured=humidity_configured,
         )
+
+
+@dataclass
+class HumidityReport:
+    """What the model knows of one humidity sensor's reports.
+
+    Attributes:
+        last_report: When the sensor last reported a valid reading, None before its first.
+            An unchanged report counts, so this can be later than the last change.
+        unavailable: Whether its last state was unavailable (or not a number).
+    """
+
+    last_report: datetime | None = None
+    unavailable: bool = False
 
 
 @dataclass(frozen=True)
@@ -391,6 +409,11 @@ class TankModel:
         self._bal_ch = self.t_ch
         self._now = now
         self._classifier = DrawClassifier(self._classifier_options(options))
+        # The start counts as the last report of a humidity sensor that has not reported yet.
+        self._started = now
+        self._humidity_reports: dict[str, HumidityReport] = {
+            sensor_id: HumidityReport() for sensor_id in sources.humidity_sensors
+        }
         # The last draw session that ended, and the state after the latest draw increase,
         # which becomes that record when the classifier reports the session's end.
         self._draw_end: DrawEnd | None = None
@@ -469,7 +492,9 @@ class TankModel:
         """
         now, events = self._begin(now)
         self._mark("water_meter", _finite(value), now)
-        result = self._classifier.on_meter(now, value, unit)
+        result = self._classifier.on_meter(
+            now, value, unit, degraded=self.humidity_degraded(now)
+        )
         self._collect_draw_end(now)
         events += self._collect_shower_end(now)
         if result is None:
@@ -481,12 +506,31 @@ class TankModel:
         return events
 
     def on_humidity(
-        self, now: datetime, sensor_id: str, value: float | None
+        self,
+        now: datetime,
+        sensor_id: str,
+        value: float | None,
+        reported: datetime | None = None,
     ) -> list[ModelEvent]:
-        """Process a bathroom humidity reading in percent."""
+        """Process a bathroom humidity reading in percent.
+
+        Args:
+            now: Time of the reading.
+            sensor_id: Which sensor read it.
+            value: Relative humidity in percent, None when unavailable.
+            reported: When the sensor sent this reading, if that was before `now` (the state's
+                `last_reported`, for a state read at a restart or an unchanged report). A valid
+                reading is a report at this time, else at `now`.
+
+        Returns:
+            The events the reading caused.
+        """
         now, events = self._begin(now)
         self._mark(f"humidity:{sensor_id}", _finite(value), now)
-        reclassify = self._classifier.on_humidity(now, sensor_id, value)
+        self._note_humidity(now, sensor_id, _finite(value), reported)
+        reclassify = self._classifier.on_humidity(
+            now, sensor_id, value, degraded=self.humidity_degraded(now)
+        )
         self._collect_draw_end(now)
         events += self._collect_shower_end(now)
         events += self._apply_reclassify(now, reclassify)
@@ -612,13 +656,24 @@ class TankModel:
         self._ambient_restored = None
         return events
 
-    def tick(self, now: datetime) -> list[ModelEvent]:
+    def tick(
+        self, now: datetime, humidity_reports: Mapping[str, datetime] | None = None
+    ) -> list[ModelEvent]:
         """Advance time: standing loss, run timeout, shower detection windows, sensor bounds.
 
         The runtime calls it at least every 5 minutes.
+
+        Args:
+            now: The current time.
+            humidity_reports: Each humidity sensor's latest `last_reported`, so a report that
+                repeats the last value (no state change) counts as a report.
         """
         now, events = self._begin(now)
-        reclassify = self._classifier.update(now)
+        for sensor_id, reported in (humidity_reports or {}).items():
+            report = self._humidity_reports.get(sensor_id)
+            if report is not None and not report.unavailable:
+                self._note_humidity(now, sensor_id, True, reported)
+        reclassify = self._classifier.update(now, degraded=self.humidity_degraded(now))
         self._collect_draw_end(now)
         events += self._collect_shower_end(now)
         events += self._apply_reclassify(now, reclassify)
@@ -834,8 +889,9 @@ class TankModel:
         """Return when the draw session in progress becomes a shower, None when it cannot.
 
         With no shower in progress it is the session start plus the next shower time while the
-        bathroom is humid, or plus the long-draw duration without a humidity sensor. It is the
-        earliest moment: the shower starts at the first meter increase at or after it.
+        bathroom is humid or no humidity sensor reports, or plus the long-draw duration without
+        a humidity sensor. It is the earliest moment: the shower starts at the first meter
+        increase at or after it.
         """
         return self._classifier.session_shower_time
 
@@ -851,6 +907,41 @@ class TankModel:
         if self.next_shower_start is not None:
             wakes.append(self._classifier.session_expiry)
         return min((wake for wake in wakes if wake is not None), default=None)
+
+    def humidity_silent(self, sensor_id: str, now: datetime) -> bool:
+        """Return whether a humidity sensor is silent at `now`.
+
+        It is silent when the silence time is above 0, its last state was not unavailable and
+        it has not reported for the silence time. Before its first report it counts from the
+        model's start.
+        """
+        silence = self.options.humidity_silence
+        report = self._humidity_reports.get(sensor_id)
+        if silence <= 0 or report is None or report.unavailable:
+            return False
+        last = self._started if report.last_report is None else report.last_report
+        return now - last >= timedelta(hours=silence)
+
+    def humidity_degraded(self, now: datetime) -> bool:
+        """Return whether a humidity sensor is configured and every one is unavailable or silent.
+
+        Shower detection then falls back to the draw length (see draw-classification).
+        """
+        return bool(self._humidity_reports) and all(
+            report.unavailable or self.humidity_silent(sensor_id, now)
+            for sensor_id, report in self._humidity_reports.items()
+        )
+
+    def humidity_status(self, now: datetime) -> dict[str, dict[str, Any]]:
+        """Return each humidity sensor's last report, unavailable flag and silent state."""
+        return {
+            sensor_id: {
+                "last_report": _iso(report.last_report),
+                "unavailable": report.unavailable,
+                "silent": self.humidity_silent(sensor_id, now),
+            }
+            for sensor_id, report in self._humidity_reports.items()
+        }
 
     @property
     def detection_available(self) -> bool:
@@ -969,6 +1060,24 @@ class TankModel:
                 del self._down_since[source]
         elif since is None:
             self._down_since[source] = now
+
+    def _note_humidity(
+        self,
+        now: datetime,
+        sensor_id: str,
+        valid: bool,
+        reported: datetime | None,
+    ) -> None:
+        """Record a humidity sensor's state: unavailable, or a report at `reported` (else `now`)."""
+        report = self._humidity_reports.get(sensor_id)
+        if report is None:
+            return  # not a configured humidity sensor
+        report.unavailable = not valid
+        if not valid:
+            return
+        time = now if reported is None else min(now, reported)
+        if report.last_report is None or time > report.last_report:
+            report.last_report = time
 
     def _counter_lag(self, now: datetime) -> bool:
         """Return whether a counter increase now belongs to the run that just ended."""
@@ -1566,6 +1675,13 @@ class TankModel:
             "heat_uncredited": self._heat_uncredited,
             "unavailable": self._unavailable,
             "down_since": {s: t.isoformat() for s, t in self._down_since.items()},
+            "humidity_reports": {
+                sensor_id: {
+                    "last_report": _iso(report.last_report),
+                    "unavailable": report.unavailable,
+                }
+                for sensor_id, report in self._humidity_reports.items()
+            },
             "classifier": self._classifier.to_dict(),
             "draw_end": None if self._draw_end is None else self._draw_end.as_dict(),
             "last_draw": None if self._last_draw is None else self._last_draw.as_dict(),
@@ -1660,6 +1776,14 @@ class TankModel:
                 s: datetime.fromisoformat(t)
                 for s, t in data.get("down_since", {}).items()
             }
+            # Added with the humidity silence: older saved states lack it, and a sensor that is
+            # no longer configured has no say.
+            for sensor_id, item in data.get("humidity_reports", {}).items():
+                if sensor_id in model._humidity_reports:
+                    model._humidity_reports[sensor_id] = HumidityReport(
+                        last_report=_from_iso(item.get("last_report")),
+                        unavailable=bool(item.get("unavailable", False)),
+                    )
             model._classifier.restore(data["classifier"])
             # Added with "Hot water ran out": older saved states lack it.
             if (draw_end := data.get("draw_end")) is not None:
@@ -1676,6 +1800,7 @@ class TankModel:
 __all__ = [
     "DrawEnd",
     "EventKind",
+    "HumidityReport",
     "IntervalSums",
     "ModelEvent",
     "ModelOptions",
