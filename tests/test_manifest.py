@@ -15,7 +15,7 @@ def test_manifest_fields() -> None:
     manifest = json.loads((INTEGRATION / "manifest.json").read_text("utf-8"))
     assert manifest["domain"] == DOMAIN == "hot_water_tank_estimator"
     assert manifest["name"] == "Hot Water Tank Estimator"
-    assert manifest["version"] == "0.1.0"
+    assert manifest["version"] == "0.2.0"
     assert manifest["documentation"] == REPOSITORY_URL
     assert manifest["issue_tracker"] == f"{REPOSITORY_URL}/issues"
     assert manifest["codeowners"]
